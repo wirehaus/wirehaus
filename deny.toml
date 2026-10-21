@@ -16,6 +16,7 @@ allow = [
     "ISC",
 ]
 confidence-threshold = 0.9
+unused-allowed-license = "allow"
 
 [licenses.private]
 ignore = true
@@ -23,6 +24,7 @@ ignore = true
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
