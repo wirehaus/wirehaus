@@ -10,8 +10,6 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-postcard.workspace = true
-serde.workspace = true
 thiserror.workspace = true
 
 [lints]
