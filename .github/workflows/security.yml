@@ -30,6 +30,7 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   codeql:
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
