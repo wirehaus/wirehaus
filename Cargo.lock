@@ -725,6 +725,7 @@ dependencies = [
  "thiserror",
  "tungstenite",
  "wirehaus-capture",
+ "wirehaus-crypto",
  "wirehaus-encode",
  "wirehaus-input",
  "wirehaus-protocol",
