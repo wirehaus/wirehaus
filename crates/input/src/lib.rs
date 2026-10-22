@@ -1,4 +1,6 @@
 mod error;
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+mod pressed;
 #[cfg(target_os = "linux")]
 mod x11;
 
@@ -10,4 +12,8 @@ use wirehaus_protocol::InputEvent;
 
 pub trait InputSink {
     fn send(&mut self, event: InputEvent) -> Result<(), InputError>;
+
+    fn release_all(&mut self) -> Result<(), InputError> {
+        Ok(())
+    }
 }

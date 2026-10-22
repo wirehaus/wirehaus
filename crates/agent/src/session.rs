@@ -41,8 +41,22 @@ struct Services<'a> {
 }
 
 pub fn run(
-    mut link: Link,
+    link: Link,
     mut backend: Backend,
+    stream: Stream,
+    pacer: Pacer,
+    stop: &AtomicBool,
+    hub: &Arc<Hub>,
+    policy: &Policy,
+) -> Result<(), ServerError> {
+    let result = serve(link, &mut backend, stream, pacer, stop, hub, policy);
+    let _ = backend.input.release_all();
+    result
+}
+
+fn serve(
+    mut link: Link,
+    backend: &mut Backend,
     mut stream: Stream,
     mut pacer: Pacer,
     stop: &AtomicBool,

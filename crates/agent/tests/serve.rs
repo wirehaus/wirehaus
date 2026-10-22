@@ -22,12 +22,14 @@ use wirehaus_crypto::pairing::PairingCode;
 use wirehaus_crypto::session::{Limits, Session};
 use wirehaus_crypto::totp::TotpSecret;
 use wirehaus_protocol::{
-    AuthFailure, Channel, ClipboardFailure, ClipboardMessage, Codec, ControlMessage,
+    AuthFailure, Button, Channel, ClipboardFailure, ClipboardMessage, Codec, ControlMessage,
     DesktopMessage, EndReason, FailureReason, FilesMessage, Frame, HEADER_LEN, InputEvent,
     MAX_PAYLOAD_LEN, RefusalReason, TerminalMessage, ViewerMessage,
 };
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt, CreateGCAux, Rectangle};
+use x11rb::protocol::xproto::{
+    ChangeWindowAttributesAux, ConnectionExt, CreateGCAux, KeyButMask, Rectangle,
+};
 use x11rb::wrapper::ConnectionExt as _;
 
 const START_TIME: u64 = 1_700_000_000;
@@ -481,6 +483,18 @@ fn pointer_at(display: &str) -> (i16, i16) {
     (reply.root_x, reply.root_y)
 }
 
+const SHIFT_KEYCODE: usize = 50;
+
+fn held_input(display: &str) -> (bool, bool) {
+    let (connection, number) = x11rb::connect(Some(display)).unwrap();
+    let root = connection.setup().roots[number].root;
+    let pointer = connection.query_pointer(root).unwrap().reply().unwrap();
+    let keys = connection.query_keymap().unwrap().reply().unwrap();
+    let shift = keys.keys[SHIFT_KEYCODE / 8] & (1 << (SHIFT_KEYCODE % 8)) != 0;
+    let button = u16::from(pointer.mask) & u16::from(KeyButMask::BUTTON1) != 0;
+    (shift, button)
+}
+
 fn next_tile_or_resize(client: &mut Client) -> DesktopMessage {
     loop {
         match client.read_desktop() {
@@ -541,6 +555,35 @@ fn pairs_a_new_device_streams_the_screen_and_applies_input() {
         next_tile_or_resize(&mut client),
         DesktopMessage::Tile { .. }
     ));
+}
+
+#[test]
+fn a_dropped_viewer_leaves_no_key_or_button_held_down() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.send_viewer(ViewerMessage::Input(InputEvent::Key {
+        code: 42,
+        pressed: true,
+    }));
+    client.send_viewer(ViewerMessage::Input(InputEvent::Button {
+        button: Button::Left,
+        pressed: true,
+    }));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while held_input(&xvfb.display) != (true, true) {
+        assert!(Instant::now() < deadline, "the input never arrived");
+        sleep(Duration::from_millis(20));
+    }
+    drop(client);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while held_input(&xvfb.display) != (false, false) {
+        assert!(
+            Instant::now() < deadline,
+            "the agent left input held down after the viewer vanished"
+        );
+        sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]

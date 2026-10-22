@@ -9,6 +9,7 @@ use x11rb::rust_connection::RustConnection;
 
 use crate::InputSink;
 use crate::error::InputError;
+use crate::pressed::Pressed;
 
 const EVDEV_KEYCODE_OFFSET: u16 = 8;
 const MAX_KEYCODE: u16 = 255;
@@ -24,6 +25,7 @@ pub struct X11Input {
     root: u32,
     width: u16,
     height: u16,
+    pressed: Pressed,
 }
 
 impl X11Input {
@@ -46,6 +48,7 @@ impl X11Input {
             root,
             width,
             height,
+            pressed: Pressed::default(),
         })
     }
 
@@ -86,6 +89,7 @@ impl InputSink for X11Input {
                     BUTTON_RELEASE_EVENT
                 };
                 self.fake(kind, button_number(button), 0, 0)?;
+                self.pressed.button(button, pressed);
             }
             InputEvent::Wheel {
                 horizontal,
@@ -101,7 +105,19 @@ impl InputSink for X11Input {
                     KEY_RELEASE_EVENT
                 };
                 self.fake(kind, keycode(code)?, 0, 0)?;
+                self.pressed.key(code, pressed);
             }
+        }
+        self.connection.flush().map_err(request_error)
+    }
+
+    fn release_all(&mut self) -> Result<(), InputError> {
+        let (keys, buttons) = self.pressed.take();
+        for code in keys {
+            self.fake(KEY_RELEASE_EVENT, keycode(code)?, 0, 0)?;
+        }
+        for button in buttons {
+            self.fake(BUTTON_RELEASE_EVENT, button_number(button), 0, 0)?;
         }
         self.connection.flush().map_err(request_error)
     }
