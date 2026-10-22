@@ -9,13 +9,26 @@ publish.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[lib]
+name = "wirehaus_agent"
+path = "src/lib.rs"
+
 [[bin]]
 name = "wirehaus-agent"
 path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+httparse = "1"
+thiserror.workspace = true
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+wirehaus-capture = { path = "../capture" }
+wirehaus-encode = { path = "../encode" }
+wirehaus-input = { path = "../input" }
 wirehaus-protocol = { path = "../protocol" }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+x11rb.workspace = true
 
 [lints]
 workspace = true
