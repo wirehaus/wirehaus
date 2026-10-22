@@ -1,4 +1,5 @@
 use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use wirehaus_crypto::CryptoError;
@@ -11,6 +12,7 @@ use wirehaus_crypto::totp::TotpSecret;
 
 pub const MAX_DEVICES: usize = 32;
 pub const MAX_STATE_BYTES: usize = 64 * 1024;
+pub const MAX_FILE_ROOTS: usize = 16;
 
 const HEADER: &str = "wirehaus-state 1";
 
@@ -24,6 +26,10 @@ pub enum StateError {
     DuplicateDevice,
     #[error("the limit of {MAX_DEVICES} devices has been reached")]
     TooManyDevices,
+    #[error("the limit of {MAX_FILE_ROOTS} shared folders has been reached")]
+    TooManyRoots,
+    #[error("that folder is not shared")]
+    NoSuchRoot,
     #[error("no device matches")]
     NoSuchDevice,
     #[error("more than one device matches")]
@@ -53,6 +59,7 @@ pub struct State {
     totp_last_step: Option<u64>,
     locked: bool,
     terminal_allowed: bool,
+    file_roots: Vec<PathBuf>,
     pairing: Option<PairingGrant>,
     local: FailureTracker,
     devices: Vec<Device>,
@@ -66,6 +73,7 @@ impl State {
             totp_last_step: None,
             locked: false,
             terminal_allowed: false,
+            file_roots: Vec::new(),
             pairing: None,
             local: FailureTracker::default(),
             devices: Vec::new(),
@@ -98,6 +106,32 @@ impl State {
 
     pub fn set_terminal_allowed(&mut self, allowed: bool) {
         self.terminal_allowed = allowed;
+    }
+
+    #[must_use]
+    pub fn file_roots(&self) -> &[PathBuf] {
+        &self.file_roots
+    }
+
+    pub fn add_file_root(&mut self, path: &Path) -> Result<bool, StateError> {
+        valid_root(path)?;
+        if self.file_roots.iter().any(|root| root == path) {
+            return Ok(false);
+        }
+        if self.file_roots.len() >= MAX_FILE_ROOTS {
+            return Err(StateError::TooManyRoots);
+        }
+        self.file_roots.push(path.to_path_buf());
+        Ok(true)
+    }
+
+    pub fn remove_file_root(&mut self, path: &Path) -> Result<(), StateError> {
+        let before = self.file_roots.len();
+        self.file_roots.retain(|root| root != path);
+        if self.file_roots.len() == before {
+            return Err(StateError::NoSuchRoot);
+        }
+        Ok(())
     }
 
     pub fn open_pairing(&mut self, now: u64) -> Result<PairingCode, StateError> {
@@ -256,6 +290,9 @@ impl State {
         let _ = writeln!(out, "totp_last_step {step}");
         let _ = writeln!(out, "locked {}", u8::from(self.locked));
         let _ = writeln!(out, "terminal {}", u8::from(self.terminal_allowed));
+        for root in &self.file_roots {
+            let _ = writeln!(out, "root {}", root.display());
+        }
         if let Some(grant) = &self.pairing {
             let _ = writeln!(
                 out,
@@ -311,6 +348,7 @@ struct Parser {
     last_step_seen: bool,
     locked: Option<bool>,
     terminal: Option<bool>,
+    file_roots: Vec<PathBuf>,
     pairing: Option<PairingGrant>,
     local: Option<FailureTracker>,
     devices: Vec<Device>,
@@ -340,6 +378,18 @@ impl Parser {
             }
             "locked" => once(&mut self.locked, parse_flag(rest)?, key),
             "terminal" => once(&mut self.terminal, parse_flag(rest)?, key),
+            "root" => {
+                if self.file_roots.len() >= MAX_FILE_ROOTS {
+                    return Err(StateError::TooManyRoots);
+                }
+                let path = PathBuf::from(rest);
+                valid_root(&path)?;
+                if self.file_roots.contains(&path) {
+                    return Err(invalid("duplicate entry root"));
+                }
+                self.file_roots.push(path);
+                Ok(())
+            }
             "pairing" => once(&mut self.pairing, parse_pairing(rest)?, key),
             "local" => once(&mut self.local, parse_local(rest)?, key),
             "device" => {
@@ -373,11 +423,24 @@ impl Parser {
             },
             locked: self.locked.ok_or_else(|| missing("locked"))?,
             terminal_allowed: self.terminal.unwrap_or(false),
+            file_roots: self.file_roots,
             pairing: self.pairing,
             local: self.local.unwrap_or_default(),
             devices: self.devices,
         })
     }
+}
+
+fn valid_root(path: &Path) -> Result<(), StateError> {
+    let text = path.to_string_lossy();
+    if !path.is_absolute()
+        || path.parent().is_none()
+        || text.contains(['\n', '\r', '\0'])
+        || text.len() > wirehaus_protocol::MAX_PATH_LEN
+    {
+        return Err(invalid("bad shared folder"));
+    }
+    Ok(())
 }
 
 fn once<T>(slot: &mut Option<T>, value: T, name: &str) -> Result<(), StateError> {

@@ -15,7 +15,7 @@ use crate::http::{
 };
 use crate::pacer::Pacer;
 use crate::platform;
-use crate::session;
+use crate::session::{self, Policy};
 use crate::static_files;
 use crate::store::{Clock, Store, system_clock};
 use crate::stream::Stream;
@@ -271,15 +271,24 @@ impl Server {
             Stream::new(self.config.jpeg_quality),
             Pacer::new(self.config.jpeg_quality),
             stop,
-            &|| {
-                self.store
-                    .read(|state, _| state.is_locked() || state.device(&identity.device).is_none())
-                    .unwrap_or(true)
-            },
-            &|| {
-                self.store
-                    .read(|state, _| state.terminal_allowed())
-                    .unwrap_or(false)
+            &Policy {
+                revoked: &|| {
+                    self.store
+                        .read(|state, _| {
+                            state.is_locked() || state.device(&identity.device).is_none()
+                        })
+                        .unwrap_or(true)
+                },
+                terminal_allowed: &|| {
+                    self.store
+                        .read(|state, _| state.terminal_allowed())
+                        .unwrap_or(false)
+                },
+                file_roots: &|| {
+                    self.store
+                        .read(|state, _| state.file_roots().to_vec())
+                        .unwrap_or_default()
+                },
             },
         );
         self.store.log("session_end", name);

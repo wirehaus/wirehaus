@@ -9,7 +9,7 @@ use wirehaus_agent::commands;
 use wirehaus_agent::{Server, ServerConfig, Store, default_dir, system_clock};
 use wirehaus_protocol::PROTOCOL_VERSION;
 
-use crate::cli::{Cli, Command, DeviceAction, TerminalAction};
+use crate::cli::{Cli, Command, DeviceAction, FilesAction, TerminalAction};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -49,6 +49,13 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Terminal {
             action: TerminalAction::Deny,
         } => commands::terminal(&open()?, false, None, &mut out)?,
+        Command::Files { action } => match action {
+            FilesAction::Add { folder, code } => {
+                commands::files_add(&open()?, &folder, &code, &mut out)?;
+            }
+            FilesAction::Remove { folder } => commands::files_remove(&open()?, &folder, &mut out)?,
+            FilesAction::List => commands::files_list(&open()?, &mut out)?,
+        },
         Command::Lock { code } => commands::lock(&open()?, true, &code, &mut out)?,
         Command::Unlock { code } => commands::lock(&open()?, false, &code, &mut out)?,
         Command::Serve {

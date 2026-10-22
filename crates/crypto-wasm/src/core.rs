@@ -3,10 +3,10 @@ use wirehaus_crypto::handshake::{ViewerHandshake, ViewerOutcome};
 use wirehaus_crypto::keys::{KEY_BYTES, PublicKey, StaticKey};
 use wirehaus_crypto::pairing::PairingCode;
 use wirehaus_crypto::session::{Limits, Session};
-use wirehaus_protocol::{HEADER_LEN, MAX_PAYLOAD_LEN};
+use wirehaus_protocol::{HEADER_LEN, MAX_PAYLOAD_LEN, MAX_VIEWER_MESSAGE};
 
 pub const VIEWER_LIMITS: Limits = Limits {
-    send: 4096,
+    send: MAX_VIEWER_MESSAGE,
     receive: HEADER_LEN + MAX_PAYLOAD_LEN,
 };
 
@@ -109,7 +109,7 @@ mod tests {
         let (handshake, first) = reconnect(&device, agent.public().as_bytes()).unwrap();
         let limits = Limits {
             send: 1 << 20,
-            receive: 4096,
+            receive: MAX_VIEWER_MESSAGE,
         };
         let accepted = Accepted::begin(&first, &agent, None, limits).unwrap();
         let Replied::Established {
@@ -136,7 +136,7 @@ mod tests {
         let (handshake, first) = pairing(&device, &code.to_text(), "Aula 3").unwrap();
         let limits = Limits {
             send: 1 << 20,
-            receive: 4096,
+            receive: MAX_VIEWER_MESSAGE,
         };
         let accepted = Accepted::begin(&first, &agent, Some(&code.psk()), limits).unwrap();
         let Replied::AwaitingFinal { message, pending } = accepted.reply().unwrap() else {

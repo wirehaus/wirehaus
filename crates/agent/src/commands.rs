@@ -16,6 +16,10 @@ pub enum CommandError {
     Store(#[from] StoreError),
     #[error(transparent)]
     State(#[from] StateError),
+    #[error("no se puede abrir la carpeta: {0}")]
+    Folder(std::io::Error),
+    #[error("{0} no es una carpeta")]
+    NotAFolder(std::path::PathBuf),
     #[error("el codigo es incorrecto")]
     WrongCode,
     #[error("demasiados intentos: espera {0} segundos")]
@@ -143,6 +147,50 @@ pub fn lock(
             "Acceso desbloqueado."
         }
     )?;
+    Ok(())
+}
+
+pub fn files_add(
+    store: &Store,
+    folder: &Path,
+    code: &str,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    verify(store, code)?;
+    let real = folder.canonicalize().map_err(CommandError::Folder)?;
+    if !real.is_dir() {
+        return Err(CommandError::NotAFolder(real));
+    }
+    let added = store.update(|state, _| state.add_file_root(&real))??;
+    if added {
+        store.log("files_root_added", &real.display().to_string());
+    }
+    writeln!(out, "Carpeta compartida: {}", real.display())?;
+    Ok(())
+}
+
+pub fn files_remove(
+    store: &Store,
+    folder: &Path,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    let target = folder
+        .canonicalize()
+        .unwrap_or_else(|_| folder.to_path_buf());
+    store.update(|state, _| state.remove_file_root(&target))??;
+    store.log("files_root_removed", &target.display().to_string());
+    writeln!(out, "Carpeta retirada: {}", target.display())?;
+    Ok(())
+}
+
+pub fn files_list(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
+    let roots = store.read(|state, _| state.file_roots().to_vec())?;
+    if roots.is_empty() {
+        writeln!(out, "No hay carpetas compartidas.")?;
+    }
+    for root in roots {
+        writeln!(out, "{}", root.display())?;
+    }
     Ok(())
 }
 

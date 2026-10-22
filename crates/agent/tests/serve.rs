@@ -21,8 +21,8 @@ use wirehaus_crypto::pairing::PairingCode;
 use wirehaus_crypto::session::{Limits, Session};
 use wirehaus_crypto::totp::TotpSecret;
 use wirehaus_protocol::{
-    AuthFailure, Channel, Codec, ControlMessage, DesktopMessage, Frame, HEADER_LEN, InputEvent,
-    MAX_PAYLOAD_LEN, RefusalReason, TerminalMessage, ViewerMessage,
+    AuthFailure, Channel, Codec, ControlMessage, DesktopMessage, FailureReason, FilesMessage,
+    Frame, HEADER_LEN, InputEvent, MAX_PAYLOAD_LEN, RefusalReason, TerminalMessage, ViewerMessage,
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt, CreateGCAux, Rectangle};
@@ -30,7 +30,7 @@ use x11rb::wrapper::ConnectionExt as _;
 
 const START_TIME: u64 = 1_700_000_000;
 const VIEWER_LIMITS: Limits = Limits {
-    send: 4096,
+    send: wirehaus_protocol::MAX_VIEWER_MESSAGE,
     receive: HEADER_LEN + MAX_PAYLOAD_LEN,
 };
 
@@ -1243,6 +1243,246 @@ fn a_malformed_terminal_message_ends_the_session() {
     let server = Running::start(&xvfb.display);
     let (mut client, _device) = pair_and_login(&server, "Aula 3");
     client.send(&Frame::new(Channel::Terminal, 1, vec![99, 1, 2]).unwrap());
+    assert!(client.wait_closed(Duration::from_secs(5)));
+}
+
+struct SharedFolder {
+    base: PathBuf,
+}
+
+impl SharedFolder {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let base = std::env::temp_dir().join(format!(
+            "wirehaus-serve-files-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(base.join("shared/docs")).unwrap();
+        fs::create_dir_all(base.join("private")).unwrap();
+        fs::write(base.join("shared/docs/note.txt"), b"remote note").unwrap();
+        fs::write(base.join("private/secret.txt"), b"secret").unwrap();
+        Self { base }
+    }
+
+    fn shared(&self) -> PathBuf {
+        self.base.join("shared").canonicalize().unwrap()
+    }
+}
+
+impl Drop for SharedFolder {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.base);
+    }
+}
+
+fn send_files(client: &mut Client, stream: u32, message: &FilesMessage) {
+    client.send(&Frame::new(Channel::Files, stream, message.encode()).unwrap());
+}
+
+fn next_files(client: &mut Client) -> (u32, FilesMessage) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        match client.read_frame() {
+            Received::Got(frame) if frame.channel == Channel::Files => {
+                return (frame.stream, FilesMessage::decode(&frame.payload).unwrap());
+            }
+            Received::Got(frame) => {
+                if let Ok(DesktopMessage::FrameEnd { sequence }) =
+                    DesktopMessage::decode(&frame.payload)
+                {
+                    client.send_viewer(ViewerMessage::FrameAck { sequence });
+                }
+            }
+            Received::Timeout => {}
+            Received::Closed => panic!("the connection closed"),
+        }
+    }
+    panic!("no files message arrived");
+}
+
+fn share(server: &Running, folder: &SharedFolder) {
+    let root = folder.shared();
+    server
+        .store
+        .update(|state, _| state.add_file_root(&root))
+        .unwrap()
+        .unwrap();
+}
+
+fn download(client: &mut Client, stream: u32, path: &str) -> Result<Vec<u8>, FailureReason> {
+    let request = FilesMessage::Download {
+        root: 0,
+        path: path.to_owned(),
+    };
+    send_files(client, stream, &request);
+    let mut data = Vec::new();
+    loop {
+        match next_files(client) {
+            (id, FilesMessage::Ready { .. }) if id == stream => {}
+            (id, FilesMessage::Data(chunk)) if id == stream => {
+                data.extend_from_slice(&chunk);
+                let bytes = data.len() as u64;
+                send_files(client, stream, &FilesMessage::Ack { bytes });
+            }
+            (id, FilesMessage::Done) if id == stream => return Ok(data),
+            (id, FilesMessage::Failed(reason)) if id == stream => return Err(reason),
+            _ => {}
+        }
+    }
+}
+
+fn upload(client: &mut Client, stream: u32, path: &str, content: &[u8]) -> FilesMessage {
+    let request = FilesMessage::Upload {
+        root: 0,
+        path: path.to_owned(),
+        size: content.len() as u64,
+    };
+    send_files(client, stream, &request);
+    let reply = next_files(client);
+    if !matches!(reply, (id, FilesMessage::Ready { .. }) if id == stream) {
+        return reply.1;
+    }
+    for chunk in content.chunks(wirehaus_protocol::MAX_CHUNK) {
+        send_files(client, stream, &FilesMessage::Data(chunk.to_vec()));
+    }
+    send_files(client, stream, &FilesMessage::Done);
+    loop {
+        match next_files(client) {
+            (id, FilesMessage::Ack { .. }) if id == stream => {}
+            (id, other) if id == stream => return other,
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn files_are_refused_until_a_folder_is_shared_and_then_move_both_ways() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let folder = SharedFolder::new();
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+
+    send_files(
+        &mut client,
+        1,
+        &FilesMessage::List {
+            root: 0,
+            path: String::new(),
+        },
+    );
+    assert_eq!(
+        next_files(&mut client),
+        (1, FilesMessage::Failed(FailureReason::NotAllowed))
+    );
+
+    share(&server, &folder);
+    send_files(&mut client, 2, &FilesMessage::ListRoots);
+    let (_, roots) = next_files(&mut client);
+    assert_eq!(roots, FilesMessage::Roots(vec!["shared".to_owned()]));
+    send_files(
+        &mut client,
+        3,
+        &FilesMessage::List {
+            root: 0,
+            path: "docs".to_owned(),
+        },
+    );
+    let (_, listing) = next_files(&mut client);
+    let FilesMessage::Listing { entries, .. } = listing else {
+        panic!("{listing:?}")
+    };
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "note.txt");
+
+    assert_eq!(
+        download(&mut client, 4, "docs/note.txt").unwrap(),
+        b"remote note"
+    );
+    let content: Vec<u8> = (0..600_000_u32).map(|n| (n % 253) as u8).collect();
+    assert_eq!(
+        upload(&mut client, 5, "docs/up.bin", &content),
+        FilesMessage::Done
+    );
+    assert_eq!(
+        fs::read(folder.shared().join("docs/up.bin")).unwrap(),
+        content
+    );
+    assert_eq!(download(&mut client, 6, "docs/up.bin").unwrap(), content);
+}
+
+#[test]
+fn files_outside_the_shared_folder_cannot_be_reached() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let folder = SharedFolder::new();
+    share(&server, &folder);
+    std::os::unix::fs::symlink(folder.base.join("private"), folder.shared().join("escape"))
+        .unwrap();
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    for path in [
+        "../private/secret.txt",
+        "escape/secret.txt",
+        "/etc/passwd",
+        "docs/../../private/secret.txt",
+    ] {
+        assert_eq!(
+            download(&mut client, 1, path),
+            Err(FailureReason::InvalidPath),
+            "{path}"
+        );
+    }
+    assert_eq!(
+        upload(&mut client, 2, "escape/planted.txt", b"x"),
+        FilesMessage::Failed(FailureReason::InvalidPath)
+    );
+    assert!(!folder.base.join("private/planted.txt").exists());
+}
+
+#[test]
+fn unsharing_the_folder_stops_a_transfer_in_progress() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let folder = SharedFolder::new();
+    share(&server, &folder);
+    fs::write(folder.shared().join("big.bin"), vec![1_u8; 8 << 20]).unwrap();
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    send_files(
+        &mut client,
+        1,
+        &FilesMessage::Download {
+            root: 0,
+            path: "big.bin".to_owned(),
+        },
+    );
+    assert!(matches!(
+        next_files(&mut client).1,
+        FilesMessage::Ready { .. }
+    ));
+    let root = folder.shared();
+    server
+        .store
+        .update(|state, _| state.remove_file_root(&root))
+        .unwrap()
+        .unwrap();
+    loop {
+        match next_files(&mut client).1 {
+            FilesMessage::Data(_) => {}
+            FilesMessage::Failed(FailureReason::NotAllowed) => break,
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_malformed_files_message_ends_the_session() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.send(&Frame::new(Channel::Files, 1, vec![99, 1, 2]).unwrap());
     assert!(client.wait_closed(Duration::from_secs(5)));
 }
 

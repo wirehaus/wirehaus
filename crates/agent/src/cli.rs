@@ -25,6 +25,10 @@ pub enum Command {
         #[command(subcommand)]
         action: TerminalAction,
     },
+    Files {
+        #[command(subcommand)]
+        action: FilesAction,
+    },
     Lock {
         #[arg(long)]
         code: String,
@@ -43,6 +47,19 @@ pub enum Command {
         #[arg(long, default_value_t = 70, value_parser = clap::value_parser!(u8).range(1..=100))]
         quality: u8,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum FilesAction {
+    Add {
+        folder: PathBuf,
+        #[arg(long)]
+        code: String,
+    },
+    Remove {
+        folder: PathBuf,
+    },
+    List,
 }
 
 #[derive(Debug, Subcommand)]

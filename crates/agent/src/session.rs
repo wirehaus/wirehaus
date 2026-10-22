@@ -1,10 +1,14 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use wirehaus_input::{InputError, InputSink};
-use wirehaus_protocol::{Channel, DesktopMessage, Frame, TerminalMessage, ViewerMessage};
+use wirehaus_protocol::{
+    Channel, DesktopMessage, FilesMessage, Frame, TerminalMessage, ViewerMessage,
+};
 
 use crate::error::ServerError;
+use crate::files::Files;
 use crate::link::{Incoming, Link};
 use crate::pacer::Pacer;
 use crate::platform::Backend;
@@ -16,23 +20,35 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MESSAGES_PER_TICK: usize = 256;
 const REVOCATION_CHECK_TICKS: u32 = 30;
 
+pub struct Policy<'a> {
+    pub revoked: &'a dyn Fn() -> bool,
+    pub terminal_allowed: &'a dyn Fn() -> bool,
+    pub file_roots: &'a dyn Fn() -> Vec<PathBuf>,
+}
+
+struct Services<'a> {
+    terminals: &'a mut Terminals,
+    files: &'a mut Files,
+    policy: &'a Policy<'a>,
+}
+
 pub fn run(
     mut link: Link,
     mut backend: Backend,
     mut stream: Stream,
     mut pacer: Pacer,
     stop: &AtomicBool,
-    revoked: &dyn Fn() -> bool,
-    terminal_allowed: &dyn Fn() -> bool,
+    policy: &Policy,
 ) -> Result<(), ServerError> {
     let mut terminals = Terminals::new(default_shell());
+    let mut files = Files::new();
     link.set_write_timeout(WRITE_TIMEOUT)?;
     let mut ticks: u32 = 0;
     let mut viewer_decodes_video = false;
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
         ticks = ticks.wrapping_add(1);
-        if ticks.is_multiple_of(REVOCATION_CHECK_TICKS) && revoked() {
+        if ticks.is_multiple_of(REVOCATION_CHECK_TICKS) && (policy.revoked)() {
             link.close();
             return Err(ServerError::AccessRevoked);
         }
@@ -51,12 +67,17 @@ pub fn run(
             return Err(ServerError::ViewerStalled);
         }
         pump_terminals(&mut link, &mut terminals)?;
+        pump_files(&mut link, &mut files, policy)?;
         if !receive(
             &mut link,
             backend.input.as_mut(),
             &mut pacer,
             &mut viewer_decodes_video,
-            (&mut terminals, terminal_allowed),
+            &mut Services {
+                terminals: &mut terminals,
+                files: &mut files,
+                policy,
+            },
             deadline,
         )? {
             return Ok(());
@@ -71,10 +92,9 @@ fn receive(
     input: &mut dyn InputSink,
     pacer: &mut Pacer,
     video: &mut bool,
-    terminal: (&mut Terminals, &dyn Fn() -> bool),
+    services: &mut Services,
     deadline: Instant,
 ) -> Result<bool, ServerError> {
-    let (terminals, allowed) = terminal;
     let mut handled = 0;
     while handled < MAX_MESSAGES_PER_TICK {
         let wait = deadline.saturating_duration_since(Instant::now());
@@ -83,7 +103,12 @@ fn receive(
         }
         match link.receive(wait)? {
             Incoming::Frame(frame) if frame.channel == Channel::Terminal => {
-                terminal_frame(&frame, terminals, allowed(), link)?;
+                let allowed = (services.policy.terminal_allowed)();
+                terminal_frame(&frame, services.terminals, allowed, link)?;
+                handled += 1;
+            }
+            Incoming::Frame(frame) if frame.channel == Channel::Files => {
+                files_frame(&frame, services, link)?;
                 handled += 1;
             }
             Incoming::Frame(frame) => {
@@ -98,6 +123,31 @@ fn receive(
 }
 
 const TERMINAL_EVENTS_PER_TICK: usize = 32;
+const FILE_CHUNKS_PER_TRANSFER_PER_TICK: usize = 4;
+
+fn pump_files(link: &mut Link, files: &mut Files, policy: &Policy) -> Result<(), ServerError> {
+    if files.active() == 0 {
+        return Ok(());
+    }
+    let roots = (policy.file_roots)();
+    send_file_replies(link, files.pump(&roots, FILE_CHUNKS_PER_TRANSFER_PER_TICK))
+}
+
+fn files_frame(frame: &Frame, services: &mut Services, link: &mut Link) -> Result<(), ServerError> {
+    let message = FilesMessage::decode(&frame.payload)?;
+    let roots = (services.policy.file_roots)();
+    send_file_replies(link, services.files.handle(frame.stream, message, &roots))
+}
+
+fn send_file_replies(
+    link: &mut Link,
+    replies: Vec<(u32, FilesMessage)>,
+) -> Result<(), ServerError> {
+    for (stream, reply) in replies {
+        link.send_frame(&Frame::new(Channel::Files, stream, reply.encode())?)?;
+    }
+    Ok(())
+}
 
 fn pump_terminals(link: &mut Link, terminals: &mut Terminals) -> Result<(), ServerError> {
     for event in terminals.drain(TERMINAL_EVENTS_PER_TICK) {

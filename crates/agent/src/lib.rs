@@ -1,6 +1,7 @@
 mod auth;
 pub mod commands;
 mod error;
+pub mod files;
 mod http;
 mod link;
 mod mode;
