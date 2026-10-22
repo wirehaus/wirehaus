@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/protocol", "crates/agent"]
+members = ["crates/protocol", "crates/capture", "crates/agent"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +14,7 @@ authors = ["Cristóbal Tormo"]
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }
 thiserror = "2"
+x11rb = "0.14"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
