@@ -1,0 +1,34 @@
+[package]
+name = "wirehaus-crypto-wasm"
+description = "WebAssembly bindings of the Wirehaus handshake for the browser viewer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../LICENSE"
+publish.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+js-sys = "0.3"
+wasm-bindgen = "=0.2.129"
+wirehaus-crypto = { path = "../crypto" }
+wirehaus-protocol = { path = "../protocol" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
