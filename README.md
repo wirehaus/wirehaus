@@ -8,7 +8,7 @@ Dejas el ordenador de casa encendido con el agente de Wirehaus y te conectas des
 
 Desarrollo temprano. Todavía no hay nada que instalar.
 
-El agente ya muestra y controla un escritorio Linux con X11 desde un navegador de la misma máquina. Todavía no hay cifrado de extremo a extremo, segundo factor ni emparejamiento, así que el servidor solo escucha en `127.0.0.1`, rechaza cualquier otra dirección y comprueba `Host` y `Origin` en cada petición. No lo expongas por un túnel ni por la red.
+El agente ya muestra y controla un escritorio Linux con X11 desde un navegador de la misma máquina. El tráfico va cifrado de extremo a extremo con Noise y exige un dispositivo emparejado y un segundo factor. Aun así el servidor solo escucha en `127.0.0.1`, rechaza cualquier otra dirección y comprueba `Host` y `Origin` en cada petición, y todavía no hay una revisión de seguridad terminada: no lo expongas por un túnel ni por la red.
 
 ## Qué busca ser
 
@@ -27,6 +27,8 @@ Windows 10 y 11, macOS y Linux (X11).
 | Ruta | Contenido |
 |---|---|
 | `crates/protocol` | Mensajes y codificación del protocolo |
+| `crates/crypto` | Handshake Noise, emparejamiento, segundo factor y capa de registros cifrados |
+| `crates/crypto-wasm` | Enlaces de WebAssembly del handshake para el visor |
 | `crates/capture` | Captura de pantalla y detección de zonas cambiadas |
 | `crates/encode` | Codificación de las zonas cambiadas |
 | `crates/input` | Inyección de ratón y teclado |
@@ -44,14 +46,19 @@ cargo test --workspace
 
 ## Probar en local
 
-Hace falta una sesión de escritorio con X11, Rust estable y Node.js.
+Hace falta una sesión de escritorio con X11, Rust estable con el objetivo `wasm32-unknown-unknown`, `wasm-bindgen-cli` 0.2.129 y Node.js.
 
 ```
+cargo install wasm-bindgen-cli --version 0.2.129 --locked
+rustup target add wasm32-unknown-unknown
 cd viewer && npm ci && npm run build && cd ..
+cargo run -p wirehaus-agent -- init
 cargo run -p wirehaus-agent -- serve --viewer-dir viewer/dist
 ```
 
-Abre `http://127.0.0.1:7878` en el navegador. Con `--display` eliges otra pantalla de X11 y con `--listen` otro puerto de la máquina local.
+`init` crea la identidad del agente y muestra una vez el secreto del segundo factor para tu aplicación de autenticación. Abre `http://127.0.0.1:7878` en el navegador. La primera vez genera un código con `cargo run -p wirehaus-agent -- pairing` y escríbelo en la página junto al código de seis dígitos de tu aplicación; el navegador queda emparejado y las siguientes veces solo pide el segundo factor.
+
+El agente guarda su estado en `~/.config/wirehaus` (o en `--state-dir`), solo legible por su dueño. `devices` lista los dispositivos emparejados; `devices revoke`, `devices reactivate`, `lock` y `unlock` exigen un código del segundo factor con `--code`. Con `--display` eliges otra pantalla de X11 y con `--listen` otro puerto de la máquina local.
 
 ## Licencia
 

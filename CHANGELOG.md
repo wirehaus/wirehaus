@@ -23,6 +23,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Estado del agente en disco con permisos privados, escritura atómica y bloqueo entre procesos, y registro de accesos.
 - Órdenes `init`, `pairing`, `devices`, `lock` y `unlock` del agente; revocar, reactivar, bloquear y desbloquear exigen un código del segundo factor.
 - El servidor exige autenticarse antes de abrir ningún canal, solo admite un visor autenticado a la vez y corta una sesión en cuanto se revoca el dispositivo o se bloquea el agente.
+- El visor web hace el handshake Noise compilado a WebAssembly, pide el código de emparejamiento la primera vez, guarda su identidad y la clave fijada del agente en IndexedDB y pide el segundo factor en cada conexión.
 - Visor web en TypeScript con lienzo, ratón, rueda y teclado.
 
 ### Cambiado
