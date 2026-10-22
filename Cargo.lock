@@ -1110,6 +1110,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tungstenite",
  "wirehaus-capture",
+ "wirehaus-clipboard",
  "wirehaus-crypto",
  "wirehaus-encode",
  "wirehaus-input",

@@ -44,6 +44,46 @@ pub enum AuthError {
     Denied(Denied),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClipboardMode {
+    #[default]
+    Off,
+    ToRemote,
+    FromRemote,
+    Both,
+}
+
+impl ClipboardMode {
+    #[must_use]
+    pub fn allows_write(self) -> bool {
+        matches!(self, ClipboardMode::ToRemote | ClipboardMode::Both)
+    }
+
+    #[must_use]
+    pub fn allows_read(self) -> bool {
+        matches!(self, ClipboardMode::FromRemote | ClipboardMode::Both)
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            ClipboardMode::Off => "off",
+            ClipboardMode::ToRemote => "to-remote",
+            ClipboardMode::FromRemote => "from-remote",
+            ClipboardMode::Both => "both",
+        }
+    }
+
+    fn parse(text: &str) -> Result<Self, StateError> {
+        match text {
+            "off" => Ok(ClipboardMode::Off),
+            "to-remote" => Ok(ClipboardMode::ToRemote),
+            "from-remote" => Ok(ClipboardMode::FromRemote),
+            "both" => Ok(ClipboardMode::Both),
+            _ => Err(invalid("bad clipboard mode")),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Device {
     pub key: PublicKey,
@@ -59,6 +99,7 @@ pub struct State {
     totp_last_step: Option<u64>,
     locked: bool,
     terminal_allowed: bool,
+    clipboard: ClipboardMode,
     file_roots: Vec<PathBuf>,
     pairing: Option<PairingGrant>,
     local: FailureTracker,
@@ -73,6 +114,7 @@ impl State {
             totp_last_step: None,
             locked: false,
             terminal_allowed: false,
+            clipboard: ClipboardMode::Off,
             file_roots: Vec::new(),
             pairing: None,
             local: FailureTracker::default(),
@@ -106,6 +148,15 @@ impl State {
 
     pub fn set_terminal_allowed(&mut self, allowed: bool) {
         self.terminal_allowed = allowed;
+    }
+
+    #[must_use]
+    pub fn clipboard_mode(&self) -> ClipboardMode {
+        self.clipboard
+    }
+
+    pub fn set_clipboard_mode(&mut self, mode: ClipboardMode) {
+        self.clipboard = mode;
     }
 
     #[must_use]
@@ -290,6 +341,7 @@ impl State {
         let _ = writeln!(out, "totp_last_step {step}");
         let _ = writeln!(out, "locked {}", u8::from(self.locked));
         let _ = writeln!(out, "terminal {}", u8::from(self.terminal_allowed));
+        let _ = writeln!(out, "clipboard {}", self.clipboard.name());
         for root in &self.file_roots {
             let _ = writeln!(out, "root {}", root.display());
         }
@@ -348,6 +400,7 @@ struct Parser {
     last_step_seen: bool,
     locked: Option<bool>,
     terminal: Option<bool>,
+    clipboard: Option<ClipboardMode>,
     file_roots: Vec<PathBuf>,
     pairing: Option<PairingGrant>,
     local: Option<FailureTracker>,
@@ -378,6 +431,7 @@ impl Parser {
             }
             "locked" => once(&mut self.locked, parse_flag(rest)?, key),
             "terminal" => once(&mut self.terminal, parse_flag(rest)?, key),
+            "clipboard" => once(&mut self.clipboard, ClipboardMode::parse(rest)?, key),
             "root" => {
                 if self.file_roots.len() >= MAX_FILE_ROOTS {
                     return Err(StateError::TooManyRoots);
@@ -423,6 +477,7 @@ impl Parser {
             },
             locked: self.locked.ok_or_else(|| missing("locked"))?,
             terminal_allowed: self.terminal.unwrap_or(false),
+            clipboard: self.clipboard.unwrap_or_default(),
             file_roots: self.file_roots,
             pairing: self.pairing,
             local: self.local.unwrap_or_default(),
@@ -573,6 +628,37 @@ mod tests {
         assert_eq!(restored.device(&second).unwrap().name, "Portátil de clase");
         assert_eq!(restored.pairing_psk(5001), state.pairing_psk(5001));
         assert!(restored.check_device(&device, 5000).is_err());
+    }
+
+    #[test]
+    fn the_clipboard_permission_is_off_by_default_and_persists_per_direction() {
+        let mut state = State::create().unwrap();
+        assert_eq!(state.clipboard_mode(), ClipboardMode::Off);
+        assert!(!state.clipboard_mode().allows_read());
+        assert!(!state.clipboard_mode().allows_write());
+        for (mode, read, write) in [
+            (ClipboardMode::ToRemote, false, true),
+            (ClipboardMode::FromRemote, true, false),
+            (ClipboardMode::Both, true, true),
+            (ClipboardMode::Off, false, false),
+        ] {
+            state.set_clipboard_mode(mode);
+            let restored = State::parse(&state.serialize()).unwrap().clipboard_mode();
+            assert_eq!(restored, mode);
+            assert_eq!(restored.allows_read(), read);
+            assert_eq!(restored.allows_write(), write);
+        }
+        let older = state.serialize().replace("clipboard off\n", "");
+        assert_eq!(
+            State::parse(&older).unwrap().clipboard_mode(),
+            ClipboardMode::Off
+        );
+        let broken = state
+            .serialize()
+            .replace("clipboard off", "clipboard maybe");
+        assert!(State::parse(&broken).is_err());
+        let twice = format!("{}clipboard both\n", state.serialize());
+        assert!(State::parse(&twice).is_err());
     }
 
     #[test]

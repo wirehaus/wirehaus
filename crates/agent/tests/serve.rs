@@ -13,16 +13,18 @@ use std::time::{Duration, Instant};
 
 use tungstenite::client::IntoClientRequest;
 use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
-use wirehaus_agent::state::State;
+use wirehaus_agent::state::{ClipboardMode, State};
 use wirehaus_agent::{Clock, Server, ServerConfig, ServerError, Store};
+use wirehaus_clipboard::{Clipboard, X11Clipboard};
 use wirehaus_crypto::handshake::ViewerHandshake;
 use wirehaus_crypto::keys::{PublicKey, StaticKey};
 use wirehaus_crypto::pairing::PairingCode;
 use wirehaus_crypto::session::{Limits, Session};
 use wirehaus_crypto::totp::TotpSecret;
 use wirehaus_protocol::{
-    AuthFailure, Channel, Codec, ControlMessage, DesktopMessage, FailureReason, FilesMessage,
-    Frame, HEADER_LEN, InputEvent, MAX_PAYLOAD_LEN, RefusalReason, TerminalMessage, ViewerMessage,
+    AuthFailure, Channel, ClipboardFailure, ClipboardMessage, Codec, ControlMessage,
+    DesktopMessage, FailureReason, FilesMessage, Frame, HEADER_LEN, InputEvent, MAX_PAYLOAD_LEN,
+    RefusalReason, TerminalMessage, ViewerMessage,
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt, CreateGCAux, Rectangle};
@@ -1505,6 +1507,161 @@ fn a_malformed_files_message_ends_the_session() {
     let (mut client, _device) = pair_and_login(&server, "Aula 3");
     client.send(&Frame::new(Channel::Files, 1, vec![99, 1, 2]).unwrap());
     assert!(client.wait_closed(Duration::from_secs(5)));
+}
+
+fn send_clipboard(client: &mut Client, stream: u32, message: &ClipboardMessage) {
+    client.send(&Frame::new(Channel::Clipboard, stream, message.encode()).unwrap());
+}
+
+fn next_clipboard(client: &mut Client) -> (u32, ClipboardMessage) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        match client.read_frame() {
+            Received::Got(frame) if frame.channel == Channel::Clipboard => {
+                return (
+                    frame.stream,
+                    ClipboardMessage::decode(&frame.payload).unwrap(),
+                );
+            }
+            Received::Got(frame) => {
+                if let Ok(DesktopMessage::FrameEnd { sequence }) =
+                    DesktopMessage::decode(&frame.payload)
+                {
+                    client.send_viewer(ViewerMessage::FrameAck { sequence });
+                }
+            }
+            Received::Timeout => {}
+            Received::Closed => panic!("the connection closed"),
+        }
+    }
+    panic!("no clipboard message arrived");
+}
+
+fn set_clipboard_mode(server: &Running, mode: ClipboardMode) {
+    server
+        .store
+        .update(|state, _| state.set_clipboard_mode(mode))
+        .unwrap();
+}
+
+#[test]
+fn the_clipboard_is_refused_until_the_owner_allows_each_direction() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    let denied = (1, ClipboardMessage::Failed(ClipboardFailure::NotAllowed));
+
+    send_clipboard(&mut client, 1, &ClipboardMessage::Write("x".to_owned()));
+    assert_eq!(next_clipboard(&mut client), denied);
+    send_clipboard(&mut client, 1, &ClipboardMessage::Read);
+    assert_eq!(next_clipboard(&mut client), denied);
+
+    set_clipboard_mode(&server, ClipboardMode::ToRemote);
+    send_clipboard(&mut client, 1, &ClipboardMessage::Read);
+    assert_eq!(next_clipboard(&mut client), denied);
+    send_clipboard(
+        &mut client,
+        1,
+        &ClipboardMessage::Write("permitido".to_owned()),
+    );
+    assert_eq!(next_clipboard(&mut client), (1, ClipboardMessage::Written));
+
+    set_clipboard_mode(&server, ClipboardMode::FromRemote);
+    send_clipboard(&mut client, 2, &ClipboardMessage::Write("no".to_owned()));
+    assert_eq!(
+        next_clipboard(&mut client),
+        (2, ClipboardMessage::Failed(ClipboardFailure::NotAllowed))
+    );
+    send_clipboard(&mut client, 2, &ClipboardMessage::Read);
+    assert_eq!(
+        next_clipboard(&mut client),
+        (2, ClipboardMessage::Content("permitido".to_owned()))
+    );
+}
+
+#[test]
+fn text_moves_between_the_viewer_and_a_desktop_application() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    set_clipboard_mode(&server, ClipboardMode::Both);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    let mut application = X11Clipboard::connect(Some(&xvfb.display)).unwrap();
+
+    send_clipboard(&mut client, 1, &ClipboardMessage::Read);
+    assert_eq!(next_clipboard(&mut client), (1, ClipboardMessage::Empty));
+
+    send_clipboard(
+        &mut client,
+        2,
+        &ClipboardMessage::Write("del visor, con ñ".to_owned()),
+    );
+    assert_eq!(next_clipboard(&mut client), (2, ClipboardMessage::Written));
+    assert_eq!(
+        application.read().unwrap().as_deref(),
+        Some("del visor, con ñ")
+    );
+
+    application.write("copiado en casa").unwrap();
+    send_clipboard(&mut client, 3, &ClipboardMessage::Read);
+    assert_eq!(
+        next_clipboard(&mut client),
+        (3, ClipboardMessage::Content("copiado en casa".to_owned()))
+    );
+}
+
+#[test]
+fn text_sent_from_the_viewer_stays_after_the_session_ends() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    set_clipboard_mode(&server, ClipboardMode::ToRemote);
+    let mut application = X11Clipboard::connect(Some(&xvfb.display)).unwrap();
+    {
+        let (mut client, _device) = pair_and_login(&server, "Aula 3");
+        client.set_timeout(Duration::from_millis(300));
+        send_clipboard(
+            &mut client,
+            1,
+            &ClipboardMessage::Write("persistente".to_owned()),
+        );
+        assert_eq!(next_clipboard(&mut client), (1, ClipboardMessage::Written));
+    }
+    sleep(Duration::from_millis(500));
+    assert_eq!(application.read().unwrap().as_deref(), Some("persistente"));
+}
+
+#[test]
+fn clipboard_use_is_logged_without_the_text() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    set_clipboard_mode(&server, ClipboardMode::Both);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    send_clipboard(
+        &mut client,
+        1,
+        &ClipboardMessage::Write("contraseña-secreta".to_owned()),
+    );
+    next_clipboard(&mut client);
+    send_clipboard(&mut client, 2, &ClipboardMessage::Read);
+    next_clipboard(&mut client);
+    let log = fs::read_to_string(server.dir.join("state").join("access.log")).unwrap();
+    assert!(log.contains("clipboard_write 19 bytes"), "{log}");
+    assert!(log.contains("clipboard_read"), "{log}");
+    assert!(!log.contains("contraseña-secreta"));
+}
+
+#[test]
+fn a_malformed_or_backwards_clipboard_message_ends_the_session() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.send(&Frame::new(Channel::Clipboard, 1, vec![99]).unwrap());
+    assert!(client.wait_closed(Duration::from_secs(5)));
+    let (mut again, _device) = pair_and_login(&server, "Aula 4");
+    send_clipboard(&mut again, 1, &ClipboardMessage::Written);
+    assert!(again.wait_closed(Duration::from_secs(5)));
 }
 
 #[test]

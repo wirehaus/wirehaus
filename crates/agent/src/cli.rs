@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(name = "wirehaus-agent", version, about = "Wirehaus agent")]
@@ -25,6 +25,10 @@ pub enum Command {
         #[command(subcommand)]
         action: TerminalAction,
     },
+    Clipboard {
+        #[command(subcommand)]
+        action: ClipboardAction,
+    },
     Files {
         #[command(subcommand)]
         action: FilesAction,
@@ -47,6 +51,24 @@ pub enum Command {
         #[arg(long, default_value_t = 70, value_parser = clap::value_parser!(u8).range(1..=100))]
         quality: u8,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum Direction {
+    Both,
+    ToRemote,
+    FromRemote,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ClipboardAction {
+    Allow {
+        #[arg(long)]
+        code: String,
+        #[arg(long, value_enum, default_value_t = Direction::Both)]
+        direction: Direction,
+    },
+    Deny,
 }
 
 #[derive(Debug, Subcommand)]

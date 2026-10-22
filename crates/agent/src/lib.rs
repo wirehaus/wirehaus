@@ -1,4 +1,5 @@
 mod auth;
+pub mod clipboard;
 pub mod commands;
 mod error;
 pub mod files;

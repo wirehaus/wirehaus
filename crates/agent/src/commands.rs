@@ -5,7 +5,7 @@ use thiserror::Error;
 use wirehaus_crypto::lockout::Denied;
 use wirehaus_crypto::pairing::VALIDITY_SECONDS;
 
-use crate::state::{AuthError, State, StateError};
+use crate::state::{AuthError, ClipboardMode, State, StateError};
 use crate::store::{Clock, Store, StoreError};
 
 const ISSUER: &str = "Wirehaus";
@@ -191,6 +191,39 @@ pub fn files_list(store: &Store, out: &mut impl Write) -> Result<(), CommandErro
     for root in roots {
         writeln!(out, "{}", root.display())?;
     }
+    Ok(())
+}
+
+pub fn clipboard(
+    store: &Store,
+    mode: ClipboardMode,
+    code: Option<&str>,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    if mode != ClipboardMode::Off {
+        verify(store, code.unwrap_or_default())?;
+    }
+    store.update(|state, _| state.set_clipboard_mode(mode))?;
+    store.log(
+        match mode {
+            ClipboardMode::Off => "clipboard_denied",
+            ClipboardMode::ToRemote => "clipboard_to_remote_allowed",
+            ClipboardMode::FromRemote => "clipboard_from_remote_allowed",
+            ClipboardMode::Both => "clipboard_allowed",
+        },
+        "by the local administrator",
+    );
+    writeln!(
+        out,
+        "{}",
+        match mode {
+            ClipboardMode::Off => "Portapapeles remoto desactivado.",
+            ClipboardMode::ToRemote => "Portapapeles: el visor puede enviar texto a este equipo.",
+            ClipboardMode::FromRemote =>
+                "Portapapeles: el visor puede leer el texto de este equipo.",
+            ClipboardMode::Both => "Portapapeles: el visor puede enviar y leer texto.",
+        }
+    )?;
     Ok(())
 }
 
@@ -446,6 +479,32 @@ mod tests {
         let next = code(&store, &time);
         lock(&store, false, &next, &mut Vec::new()).unwrap();
         assert!(!store.read(|state, _| state.is_locked()).unwrap());
+    }
+
+    #[test]
+    fn allowing_the_clipboard_needs_a_code_and_denying_it_does_not() {
+        let (_dir, store, time) = setup();
+        assert!(matches!(
+            clipboard(&store, ClipboardMode::Both, Some("000000"), &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        assert!(matches!(
+            clipboard(&store, ClipboardMode::ToRemote, None, &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        let mode = |store: &Store| store.read(|state, _| state.clipboard_mode()).unwrap();
+        assert_eq!(mode(&store), ClipboardMode::Off);
+        let right = code(&store, &time);
+        clipboard(
+            &store,
+            ClipboardMode::FromRemote,
+            Some(&right),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(mode(&store), ClipboardMode::FromRemote);
+        clipboard(&store, ClipboardMode::Off, None, &mut Vec::new()).unwrap();
+        assert_eq!(mode(&store), ClipboardMode::Off);
     }
 
     #[test]

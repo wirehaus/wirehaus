@@ -1,17 +1,21 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use wirehaus_input::{InputError, InputSink};
 use wirehaus_protocol::{
-    Channel, DesktopMessage, FilesMessage, Frame, TerminalMessage, ViewerMessage,
+    Channel, ClipboardFailure, ClipboardMessage, DesktopMessage, FilesMessage, Frame,
+    TerminalMessage, ViewerMessage,
 };
 
+use crate::clipboard::{Hub, Requests};
 use crate::error::ServerError;
 use crate::files::Files;
 use crate::link::{Incoming, Link};
 use crate::pacer::Pacer;
 use crate::platform::Backend;
+use crate::state::ClipboardMode;
 use crate::stream::{Stream, send_message};
 use crate::terminal::{Event, Terminals, default_shell};
 
@@ -24,11 +28,14 @@ pub struct Policy<'a> {
     pub revoked: &'a dyn Fn() -> bool,
     pub terminal_allowed: &'a dyn Fn() -> bool,
     pub file_roots: &'a dyn Fn() -> Vec<PathBuf>,
+    pub clipboard_mode: &'a dyn Fn() -> ClipboardMode,
+    pub audit: &'a dyn Fn(&str, &str),
 }
 
 struct Services<'a> {
     terminals: &'a mut Terminals,
     files: &'a mut Files,
+    clipboard: &'a mut Requests,
     policy: &'a Policy<'a>,
 }
 
@@ -38,10 +45,12 @@ pub fn run(
     mut stream: Stream,
     mut pacer: Pacer,
     stop: &AtomicBool,
+    hub: &Arc<Hub>,
     policy: &Policy,
 ) -> Result<(), ServerError> {
     let mut terminals = Terminals::new(default_shell());
     let mut files = Files::new();
+    let mut clipboard = Requests::new(hub.clone());
     link.set_write_timeout(WRITE_TIMEOUT)?;
     let mut ticks: u32 = 0;
     let mut viewer_decodes_video = false;
@@ -68,6 +77,7 @@ pub fn run(
         }
         pump_terminals(&mut link, &mut terminals)?;
         pump_files(&mut link, &mut files, policy)?;
+        pump_clipboard(&mut link, &mut clipboard)?;
         if !receive(
             &mut link,
             backend.input.as_mut(),
@@ -76,6 +86,7 @@ pub fn run(
             &mut Services {
                 terminals: &mut terminals,
                 files: &mut files,
+                clipboard: &mut clipboard,
                 policy,
             },
             deadline,
@@ -107,6 +118,10 @@ fn receive(
                 terminal_frame(&frame, services.terminals, allowed, link)?;
                 handled += 1;
             }
+            Incoming::Frame(frame) if frame.channel == Channel::Clipboard => {
+                clipboard_frame(&frame, services, link)?;
+                handled += 1;
+            }
             Incoming::Frame(frame) if frame.channel == Channel::Files => {
                 files_frame(&frame, services, link)?;
                 handled += 1;
@@ -131,6 +146,61 @@ fn pump_files(link: &mut Link, files: &mut Files, policy: &Policy) -> Result<(),
     }
     let roots = (policy.file_roots)();
     send_file_replies(link, files.pump(&roots, FILE_CHUNKS_PER_TRANSFER_PER_TICK))
+}
+
+fn pump_clipboard(link: &mut Link, clipboard: &mut Requests) -> Result<(), ServerError> {
+    for (stream, reply) in clipboard.drain() {
+        link.send_frame(&Frame::new(Channel::Clipboard, stream, reply.encode())?)?;
+    }
+    Ok(())
+}
+
+fn clipboard_frame(
+    frame: &Frame,
+    services: &mut Services,
+    link: &mut Link,
+) -> Result<(), ServerError> {
+    let stream = frame.stream;
+    let message = ClipboardMessage::decode(&frame.payload)?;
+    if let Some(reason) = start_clipboard(message, stream, services)? {
+        let refusal = ClipboardMessage::Failed(reason);
+        link.send_frame(&Frame::new(Channel::Clipboard, stream, refusal.encode())?)?;
+    }
+    Ok(())
+}
+
+fn start_clipboard(
+    message: ClipboardMessage,
+    stream: u32,
+    services: &mut Services,
+) -> Result<Option<ClipboardFailure>, ServerError> {
+    let mode = (services.policy.clipboard_mode)();
+    let audit = services.policy.audit;
+    let started = match message {
+        ClipboardMessage::Write(text) if mode.allows_write() => {
+            let length = text.len();
+            let started = services.clipboard.write(stream, text);
+            if started {
+                audit("clipboard_write", &format!("{length} bytes"));
+            }
+            started
+        }
+        ClipboardMessage::Read if mode.allows_read() => {
+            let started = services.clipboard.read(stream);
+            if started {
+                audit("clipboard_read", "requested");
+            }
+            started
+        }
+        ClipboardMessage::Write(_) | ClipboardMessage::Read => {
+            return Ok(Some(ClipboardFailure::NotAllowed));
+        }
+        ClipboardMessage::Content(_)
+        | ClipboardMessage::Empty
+        | ClipboardMessage::Written
+        | ClipboardMessage::Failed(_) => return Err(ServerError::UnexpectedMessage),
+    };
+    Ok((!started).then_some(ClipboardFailure::Unavailable))
 }
 
 fn files_frame(frame: &Frame, services: &mut Services, link: &mut Link) -> Result<(), ServerError> {

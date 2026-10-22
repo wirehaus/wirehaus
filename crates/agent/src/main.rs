@@ -9,7 +9,11 @@ use wirehaus_agent::commands;
 use wirehaus_agent::{Server, ServerConfig, Store, default_dir, system_clock};
 use wirehaus_protocol::PROTOCOL_VERSION;
 
-use crate::cli::{Cli, Command, DeviceAction, FilesAction, TerminalAction};
+use wirehaus_agent::state::ClipboardMode;
+
+use crate::cli::{
+    Cli, ClipboardAction, Command, DeviceAction, Direction, FilesAction, TerminalAction,
+};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -49,6 +53,19 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Terminal {
             action: TerminalAction::Deny,
         } => commands::terminal(&open()?, false, None, &mut out)?,
+        Command::Clipboard { action } => match action {
+            ClipboardAction::Allow { code, direction } => {
+                let mode = match direction {
+                    Direction::Both => ClipboardMode::Both,
+                    Direction::ToRemote => ClipboardMode::ToRemote,
+                    Direction::FromRemote => ClipboardMode::FromRemote,
+                };
+                commands::clipboard(&open()?, mode, Some(&code), &mut out)?;
+            }
+            ClipboardAction::Deny => {
+                commands::clipboard(&open()?, ClipboardMode::Off, None, &mut out)?;
+            }
+        },
         Command::Files { action } => match action {
             FilesAction::Add { folder, code } => {
                 commands::files_add(&open()?, &folder, &code, &mut out)?;

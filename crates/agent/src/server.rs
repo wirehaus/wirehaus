@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use tungstenite::protocol::WebSocketConfig;
 
 use crate::auth::{self, INBOUND_LIMIT, Outcome};
+use crate::clipboard::Hub;
 use crate::error::ServerError;
 use crate::http::{
     HeadError, MAX_HEAD_LEN, RequestHead, host_allowed, origin_allowed, parse_head, response,
@@ -61,6 +62,7 @@ pub struct Server {
     listener: TcpListener,
     config: ServerConfig,
     store: Arc<Store>,
+    clipboard: Arc<Hub>,
     connections: AtomicUsize,
     unauthenticated: AtomicUsize,
 }
@@ -103,10 +105,14 @@ impl Server {
         listener.set_nonblocking(true)?;
         let clock = config.clock.clone().unwrap_or_else(system_clock);
         let store = Arc::new(Store::open(&config.state_dir, clock)?);
+        let clipboard = Arc::new(Hub::new(platform::clipboard_factory(
+            config.display.clone(),
+        )));
         Ok(Self {
             listener,
             config,
             store,
+            clipboard,
             connections: AtomicUsize::new(0),
             unauthenticated: AtomicUsize::new(0),
         })
@@ -271,6 +277,7 @@ impl Server {
             Stream::new(self.config.jpeg_quality),
             Pacer::new(self.config.jpeg_quality),
             stop,
+            &self.clipboard,
             &Policy {
                 revoked: &|| {
                     self.store
@@ -284,6 +291,12 @@ impl Server {
                         .read(|state, _| state.terminal_allowed())
                         .unwrap_or(false)
                 },
+                clipboard_mode: &|| {
+                    self.store
+                        .read(|state, _| state.clipboard_mode())
+                        .unwrap_or_default()
+                },
+                audit: &|event, detail| self.store.log(event, detail),
                 file_roots: &|| {
                     self.store
                         .read(|state, _| state.file_roots().to_vec())
