@@ -181,9 +181,6 @@ impl Files {
         }
         let (parent, name) = creatable(root_at(roots, root)?, path)?;
         let target = parent.join(&name);
-        if fs::symlink_metadata(&target).is_ok() {
-            return Err(FailureReason::AlreadyExists);
-        }
         let part = parent.join(part_name(stream));
         let file = create_private_file(&part).map_err(|error| map_io(&error))?;
         self.transfers.insert(
@@ -685,6 +682,7 @@ mod tests {
         for path in [
             "../outside/secret.txt",
             "sub/../../outside/secret.txt",
+            "sub/../a.txt",
             "/etc/passwd",
             outside.to_str().unwrap(),
             "sub//b.txt",
