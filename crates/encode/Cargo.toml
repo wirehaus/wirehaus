@@ -1,0 +1,19 @@
+[package]
+name = "wirehaus-encode"
+description = "Image encoders for the Wirehaus desktop channel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../LICENSE"
+publish.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+jpeg-encoder = { version = "0.7", default-features = false }
+thiserror.workspace = true
+wirehaus-capture = { path = "../capture" }
+wirehaus-protocol = { path = "../protocol" }
+
+[lints]
+workspace = true
