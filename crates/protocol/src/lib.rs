@@ -1,4 +1,5 @@
 mod channel;
+mod clipboard;
 mod control;
 mod desktop;
 mod error;
@@ -9,6 +10,7 @@ mod terminal;
 mod viewer;
 
 pub use channel::Channel;
+pub use clipboard::{ClipboardFailure, ClipboardMessage, MAX_CLIPBOARD_TEXT};
 pub use control::{AuthFailure, CODE_LEN, ControlMessage};
 pub use desktop::{Codec, DesktopMessage};
 pub use error::ProtocolError;

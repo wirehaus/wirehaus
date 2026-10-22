@@ -1,6 +1,6 @@
 use wirehaus_protocol::{
-    AuthFailure, Button, Channel, Codec, ControlMessage, DesktopMessage, Entry, EntryKind,
-    FilesMessage, Frame, InputEvent, TerminalMessage, ViewerMessage,
+    AuthFailure, Button, Channel, ClipboardMessage, Codec, ControlMessage, DesktopMessage, Entry,
+    EntryKind, FilesMessage, Frame, InputEvent, TerminalMessage, ViewerMessage,
 };
 
 struct Rng(u64);
@@ -63,6 +63,8 @@ fn file_samples() -> Vec<Vec<u8>> {
             truncated: false,
         }
         .encode(),
+        ClipboardMessage::Write("copiado".to_owned()).encode(),
+        ClipboardMessage::Failed(wirehaus_protocol::ClipboardFailure::TooLarge).encode(),
         FilesMessage::Roots(vec!["home".to_owned()]).encode(),
         FilesMessage::Data(vec![1, 2, 3]).encode(),
     ]
@@ -173,6 +175,7 @@ fn no_decoder_panics_on_random_or_mutated_input() {
             let _ = ControlMessage::decode(&bytes);
             let _ = TerminalMessage::decode(&bytes);
             let _ = FilesMessage::decode(&bytes);
+            let _ = ClipboardMessage::decode(&bytes);
         }
     }
 }
@@ -203,6 +206,9 @@ fn anything_that_decodes_encodes_back_to_the_same_bytes() {
                 assert_eq!(message.encode(), bytes);
             }
             if let Ok(message) = FilesMessage::decode(&bytes) {
+                assert_eq!(message.encode(), bytes);
+            }
+            if let Ok(message) = ClipboardMessage::decode(&bytes) {
                 assert_eq!(message.encode(), bytes);
             }
             if let Ok(message) = ControlMessage::decode(&bytes) {
