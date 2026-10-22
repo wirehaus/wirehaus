@@ -11,7 +11,7 @@ mod viewer;
 
 pub use channel::Channel;
 pub use clipboard::{ClipboardFailure, ClipboardMessage, MAX_CLIPBOARD_TEXT};
-pub use control::{AuthFailure, CODE_LEN, ControlMessage};
+pub use control::{AuthFailure, CODE_LEN, ControlMessage, EndReason, TICKET_LEN};
 pub use desktop::{Codec, DesktopMessage};
 pub use error::ProtocolError;
 pub use files::{

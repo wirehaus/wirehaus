@@ -1,6 +1,7 @@
 use crate::error::ProtocolError;
 
 pub const CODE_LEN: usize = 6;
+pub const TICKET_LEN: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthFailure {
@@ -32,6 +33,32 @@ impl AuthFailure {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndReason {
+    Idle,
+    Revoked,
+    Locked,
+}
+
+impl EndReason {
+    fn tag(self) -> u8 {
+        match self {
+            EndReason::Idle => 0,
+            EndReason::Revoked => 1,
+            EndReason::Locked => 2,
+        }
+    }
+
+    fn from_tag(tag: u8) -> Result<Self, ProtocolError> {
+        match tag {
+            0 => Ok(EndReason::Idle),
+            1 => Ok(EndReason::Revoked),
+            2 => Ok(EndReason::Locked),
+            other => Err(ProtocolError::InvalidControl(other)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlMessage {
     AuthRequired,
     Totp {
@@ -42,12 +69,24 @@ pub enum ControlMessage {
         reason: AuthFailure,
         retry_after: u32,
     },
+    Resume {
+        ticket: [u8; TICKET_LEN],
+    },
+    Ticket {
+        ticket: [u8; TICKET_LEN],
+    },
+    SessionEnded {
+        reason: EndReason,
+    },
 }
 
 const AUTH_REQUIRED: u8 = 0;
 const TOTP: u8 = 1;
 const AUTH_OK: u8 = 2;
 const AUTH_FAILED: u8 = 3;
+const RESUME: u8 = 4;
+const TICKET: u8 = 5;
+const SESSION_ENDED: u8 = 6;
 
 impl ControlMessage {
     #[must_use]
@@ -68,6 +107,9 @@ impl ControlMessage {
                 out.extend_from_slice(&retry_after.to_be_bytes());
                 out
             }
+            ControlMessage::Resume { ticket } => with_ticket(RESUME, ticket),
+            ControlMessage::Ticket { ticket } => with_ticket(TICKET, ticket),
+            ControlMessage::SessionEnded { reason } => vec![SESSION_ENDED, reason.tag()],
         }
     }
 
@@ -96,9 +138,31 @@ impl ControlMessage {
                     retry_after: u32::from_be_bytes([a, b, c, d]),
                 })
             }
+            RESUME | TICKET => {
+                let ticket: [u8; TICKET_LEN] = body
+                    .try_into()
+                    .map_err(|_| bad_length(tag, TICKET_LEN, body.len()))?;
+                Ok(if tag == RESUME {
+                    ControlMessage::Resume { ticket }
+                } else {
+                    ControlMessage::Ticket { ticket }
+                })
+            }
+            SESSION_ENDED => match body {
+                [reason] => Ok(ControlMessage::SessionEnded {
+                    reason: EndReason::from_tag(*reason)?,
+                }),
+                _ => Err(bad_length(tag, 1, body.len())),
+            },
             other => Err(ProtocolError::UnknownControl(other)),
         }
     }
+}
+
+fn with_ticket(tag: u8, ticket: &[u8; TICKET_LEN]) -> Vec<u8> {
+    let mut out = vec![tag];
+    out.extend_from_slice(ticket);
+    out
 }
 
 fn empty(tag: u8, body: &[u8]) -> Result<(), ProtocolError> {
@@ -121,7 +185,22 @@ fn bad_length(tag: u8, expected: usize, actual: usize) -> ProtocolError {
 mod tests {
     use super::*;
 
-    const SAMPLES: [ControlMessage; 6] = [
+    const SAMPLES: [ControlMessage; 11] = [
+        ControlMessage::Resume {
+            ticket: [7; TICKET_LEN],
+        },
+        ControlMessage::Ticket {
+            ticket: [0xAB; TICKET_LEN],
+        },
+        ControlMessage::SessionEnded {
+            reason: EndReason::Idle,
+        },
+        ControlMessage::SessionEnded {
+            reason: EndReason::Revoked,
+        },
+        ControlMessage::SessionEnded {
+            reason: EndReason::Locked,
+        },
         ControlMessage::AuthRequired,
         ControlMessage::AuthOk,
         ControlMessage::Totp { code: *b"012345" },
@@ -168,6 +247,57 @@ mod tests {
             }
             .encode(),
             [3, 1, 1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn encodes_the_resumption_messages_with_known_layouts() {
+        let mut resume = vec![4];
+        resume.extend_from_slice(&[9; TICKET_LEN]);
+        assert_eq!(
+            ControlMessage::Resume {
+                ticket: [9; TICKET_LEN]
+            }
+            .encode(),
+            resume
+        );
+        resume[0] = 5;
+        assert_eq!(
+            ControlMessage::Ticket {
+                ticket: [9; TICKET_LEN]
+            }
+            .encode(),
+            resume
+        );
+        assert_eq!(
+            ControlMessage::SessionEnded {
+                reason: EndReason::Locked
+            }
+            .encode(),
+            [6, 2]
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_resumption_messages() {
+        for tag in [4_u8, 5] {
+            for length in [0, 1, TICKET_LEN - 1, TICKET_LEN + 1] {
+                let mut bytes = vec![tag];
+                bytes.resize(1 + length, 1);
+                assert!(
+                    matches!(
+                        ControlMessage::decode(&bytes),
+                        Err(ProtocolError::BadControlLength { .. })
+                    ),
+                    "{tag} {length}"
+                );
+            }
+        }
+        assert!(ControlMessage::decode(&[6]).is_err());
+        assert!(ControlMessage::decode(&[6, 0, 0]).is_err());
+        assert_eq!(
+            ControlMessage::decode(&[6, 9]),
+            Err(ProtocolError::InvalidControl(9))
         );
     }
 

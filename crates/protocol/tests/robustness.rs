@@ -143,6 +143,13 @@ fn valid_samples() -> Vec<Vec<u8>> {
     );
     out.push(ViewerMessage::FrameAck { sequence: 77 }.encode());
     out.push(ControlMessage::AuthRequired.encode());
+    out.push(ControlMessage::Resume { ticket: [5; 32] }.encode());
+    out.push(
+        ControlMessage::SessionEnded {
+            reason: wirehaus_protocol::EndReason::Idle,
+        }
+        .encode(),
+    );
     out.push(ControlMessage::Totp { code: *b"012345" }.encode());
     out.push(
         ControlMessage::AuthFailed {
