@@ -9,8 +9,12 @@ publish.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+h264 = ["dep:openh264"]
+
 [dependencies]
 jpeg-encoder = { version = "0.7", default-features = false }
+openh264 = { version = "0.9", optional = true }
 thiserror.workspace = true
 wirehaus-capture = { path = "../capture" }
 wirehaus-protocol = { path = "../protocol" }

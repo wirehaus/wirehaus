@@ -13,4 +13,6 @@ pub enum EncodeError {
     },
     #[error("encoder failed: {0}")]
     Encoder(String),
+    #[error("the video encoder is not usable: {0}")]
+    Video(String),
 }
