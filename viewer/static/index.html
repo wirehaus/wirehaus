@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Wirehaus</title>
+    <link rel="stylesheet" href="/xterm.css" />
     <link rel="stylesheet" href="/style.css" />
     <script type="module" src="/main.js"></script>
   </head>
@@ -14,6 +15,7 @@
       <button id="forget" type="button" hidden></button>
       <button id="reconnect" type="button" hidden></button>
     </header>
+    <nav id="tabs" aria-label="Tabs" hidden></nav>
     <main>
       <section id="pair" class="panel" hidden>
         <form id="pair-form" autocomplete="off">
@@ -51,6 +53,7 @@
         </form>
       </section>
       <canvas id="screen" tabindex="0" hidden></canvas>
+      <div id="terminals" hidden></div>
     </main>
   </body>
 </html>

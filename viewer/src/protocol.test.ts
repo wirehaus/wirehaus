@@ -7,11 +7,17 @@ import {
   decodeControl,
   decodeDesktop,
   decodeFrame,
+  decodeTerminal,
   encodeCapabilities,
   encodeFrame,
   encodeFrameAck,
   encodeInput,
+  encodeTerminalClose,
+  encodeTerminalInput,
+  encodeTerminalOpen,
+  encodeTerminalResize,
   encodeTotp,
+  inputChunks,
 } from './protocol.js';
 
 test('encodes the frame layout the agent expects', () => {
@@ -137,4 +143,43 @@ test('rejects malformed video messages', () => {
 test('encodes the capabilities layout the agent expects', () => {
   assert.deepEqual([...encodeCapabilities(true)], [5, 1]);
   assert.deepEqual([...encodeCapabilities(false)], [5, 0]);
+});
+
+test('encodes the terminal messages with the agent layout', () => {
+  assert.deepEqual([...encodeTerminalOpen(0x0102, 0x0034)], [0, 1, 2, 0, 0x34]);
+  assert.deepEqual([...encodeTerminalResize(80, 24)], [2, 0, 80, 0, 24]);
+  assert.deepEqual([...encodeTerminalClose()], [3]);
+  assert.deepEqual([...encodeTerminalInput(Uint8Array.of(65, 66))], [1, 65, 66]);
+});
+
+test('refuses terminal sizes and chunks the agent would reject', () => {
+  for (const [columns, rows] of [[0, 24], [80, 0], [501, 24], [80, 501]]) {
+    assert.throws(() => encodeTerminalOpen(columns as number, rows as number), ProtocolError);
+  }
+  assert.throws(() => encodeTerminalInput(new Uint8Array(0)), ProtocolError);
+  assert.throws(() => encodeTerminalInput(new Uint8Array(3073)), ProtocolError);
+  assert.doesNotThrow(() => encodeTerminalInput(new Uint8Array(3072)));
+});
+
+test('splits long input into chunks the agent accepts', () => {
+  const chunks = [...inputChunks(new Uint8Array(7000))];
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [3072, 3072, 856]);
+  assert.deepEqual([...inputChunks(new Uint8Array(0))], []);
+});
+
+test('decodes the terminal messages the agent sends', () => {
+  const output = decodeTerminal(Uint8Array.of(4, 104, 105));
+  assert.equal(output.kind, 'output');
+  if (output.kind === 'output') assert.deepEqual([...output.data], [104, 105]);
+  assert.deepEqual(decodeTerminal(Uint8Array.of(5, 0xff, 0xff, 0xff, 0xff)), { kind: 'exited', code: -1 });
+  assert.deepEqual(decodeTerminal(Uint8Array.of(5, 0, 0, 0, 7)), { kind: 'exited', code: 7 });
+  assert.deepEqual(decodeTerminal(Uint8Array.of(6, 1)), { kind: 'refused', reason: 'tooManySessions' });
+});
+
+test('rejects malformed terminal messages', () => {
+  assert.throws(() => decodeTerminal(new Uint8Array(0)), ProtocolError);
+  assert.throws(() => decodeTerminal(Uint8Array.of(4)), ProtocolError);
+  assert.throws(() => decodeTerminal(Uint8Array.of(5, 0, 0, 1)), ProtocolError);
+  assert.throws(() => decodeTerminal(Uint8Array.of(6, 9)), ProtocolError);
+  assert.throws(() => decodeTerminal(Uint8Array.of(9)), ProtocolError);
 });

@@ -39,7 +39,7 @@ fn file_name(request_path: &str) -> Option<&str> {
 fn content_type(name: &str) -> Option<&'static str> {
     match name.rsplit_once('.')?.1 {
         "html" => Some("text/html; charset=utf-8"),
-        "js" => Some("text/javascript; charset=utf-8"),
+        "js" | "mjs" => Some("text/javascript; charset=utf-8"),
         "css" => Some("text/css; charset=utf-8"),
         "wasm" => Some("application/wasm"),
         _ => None,
@@ -83,6 +83,7 @@ mod tests {
     fn only_known_extensions_are_served() {
         assert!(content_type("a.html").is_some());
         assert!(content_type("a.js").is_some());
+        assert_eq!(content_type("a.mjs"), content_type("a.js"));
         assert!(content_type("a.css").is_some());
         assert_eq!(content_type("a.wasm"), Some("application/wasm"));
         assert!(content_type("a.map").is_none());

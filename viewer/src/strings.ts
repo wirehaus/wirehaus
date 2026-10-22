@@ -22,6 +22,14 @@ export type Messages = {
   busy: string;
   refused: string;
   failed: string;
+  tabDesktop: string;
+  newTerminal: string;
+  terminalTitle: (number: number) => string;
+  closeTab: string;
+  terminalExited: (code: number) => string;
+  terminalNotAllowed: string;
+  terminalTooMany: string;
+  terminalSpawnFailed: string;
 };
 
 const catalog: Record<string, Messages> = {
@@ -51,6 +59,15 @@ const catalog: Record<string, Messages> = {
     refused:
       'El agente no ha aceptado la conexión. Puede estar apagado, bloqueado, o no reconocer este equipo. Si lo revocaste o cambió el agente, olvida este equipo y empareja de nuevo.',
     failed: 'La conexión segura ha fallado.',
+    tabDesktop: 'Escritorio',
+    newTerminal: 'Nueva terminal',
+    terminalTitle: (number) => `Terminal ${number}`,
+    closeTab: 'Cerrar',
+    terminalExited: (code) => `[proceso terminado, código ${code}]`,
+    terminalNotAllowed:
+      'La terminal está desactivada en el agente. Actívala en el ordenador de casa con "wirehaus-agent terminal allow --code".',
+    terminalTooMany: 'Hay demasiadas terminales abiertas.',
+    terminalSpawnFailed: 'No se pudo iniciar la terminal.',
   },
   en: {
     loading: 'Loading',
@@ -78,6 +95,15 @@ const catalog: Record<string, Messages> = {
     refused:
       'The agent did not accept the connection. It may be off, locked, or not recognise this device. If you revoked it or the agent changed, forget this device and pair again.',
     failed: 'The secure connection failed.',
+    tabDesktop: 'Desktop',
+    newTerminal: 'New terminal',
+    terminalTitle: (number) => `Terminal ${number}`,
+    closeTab: 'Close',
+    terminalExited: (code) => `[process exited, code ${code}]`,
+    terminalNotAllowed:
+      'The terminal is disabled on the agent. Enable it on the home computer with "wirehaus-agent terminal allow --code".',
+    terminalTooMany: 'Too many terminals are open.',
+    terminalSpawnFailed: 'The terminal could not be started.',
   },
 };
 

@@ -3,6 +3,8 @@ import {
   CODEC_JPEG,
   CONTROL_CHANNEL,
   DESKTOP_CHANNEL,
+  TERMINAL_CHANNEL,
+  type TerminalMessage,
   type AuthFailure,
   type DesktopMessage,
   type InputEvent,
@@ -10,6 +12,7 @@ import {
   decodeControl,
   decodeDesktop,
   decodeFrame,
+  decodeTerminal,
   encodeCapabilities,
   encodeFrame,
   encodeFrameAck,
@@ -19,6 +22,8 @@ import {
 import { Handshake, type Session, generateDeviceKey, loadCrypto } from './secure.js';
 import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './storage.js';
 import { VideoPlayer, videoSupported } from './video.js';
+
+export type TerminalListener = (stream: number, message: TerminalMessage) => void;
 
 export type RefusalReason = Exclude<AuthFailure, 'wrongCode'> | 'unknown' | 'failed';
 
@@ -51,6 +56,7 @@ export class Viewer {
   private readonly pressedKeys = new Set<number>();
   private readonly pressedButtons = new Set<MouseButton>();
   private pendingMove: { x: number; y: number } | null = null;
+  terminalListener: TerminalListener | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -223,11 +229,13 @@ export class Viewer {
     this.phase = 'authenticating';
   }
 
-  private dispatch(socket: WebSocket, frame: { channel: number; payload: Uint8Array }): void {
+  private dispatch(socket: WebSocket, frame: { channel: number; stream: number; payload: Uint8Array }): void {
     if (this.phase === 'authenticating' && frame.channel === CONTROL_CHANNEL) {
       this.control(socket, frame.payload);
     } else if (this.phase === 'streaming' && frame.channel === DESKTOP_CHANNEL) {
       this.apply(decodeDesktop(frame.payload));
+    } else if (this.phase === 'streaming' && frame.channel === TERMINAL_CHANNEL) {
+      this.terminalListener?.(frame.stream, decodeTerminal(frame.payload));
     } else {
       this.fail(socket);
     }
@@ -317,13 +325,17 @@ export class Viewer {
     this.canvas.style.height = `${Math.floor(this.canvas.height * scale)}px`;
   }
 
-  private send(channel: number, payload: Uint8Array): void {
+  sendTerminal(stream: number, payload: Uint8Array): void {
+    this.send(TERMINAL_CHANNEL, payload, stream);
+  }
+
+  private send(channel: number, payload: Uint8Array, stream = 0): void {
     const socket = this.socket;
     const session = this.session;
     if (socket?.readyState !== WebSocket.OPEN || session === null) {
       return;
     }
-    const bytes = encodeFrame(channel, 0, payload);
+    const bytes = encodeFrame(channel, stream, payload);
     for (const record of session.seal(bytes) as Uint8Array[]) {
       socket.send(owned(record));
     }

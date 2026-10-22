@@ -1,7 +1,9 @@
 export const HEADER_LEN = 9;
 export const MAX_PAYLOAD_LEN = 1 << 20;
 export const DESKTOP_CHANNEL = 0;
+export const TERMINAL_CHANNEL = 1;
 export const CONTROL_CHANNEL = 6;
+export const MAX_INPUT_CHUNK = 3072;
 export const CODE_LEN = 6;
 
 const RESIZE = 0;
@@ -234,5 +236,76 @@ export function encodeTotp(code: string): Uint8Array {
 function expectLength(payload: Uint8Array, length: number): void {
   if (payload.length !== length) {
     throw new ProtocolError('bad control message length');
+  }
+}
+
+export type TerminalRefusal = 'notAllowed' | 'tooManySessions' | 'spawnFailed';
+
+export type TerminalMessage =
+  | { kind: 'output'; data: Uint8Array }
+  | { kind: 'exited'; code: number }
+  | { kind: 'refused'; reason: TerminalRefusal };
+
+const REFUSALS: TerminalRefusal[] = ['notAllowed', 'tooManySessions', 'spawnFailed'];
+
+export function decodeTerminal(payload: Uint8Array): TerminalMessage {
+  const tag = payload[0];
+  if (tag === undefined) {
+    throw new ProtocolError('empty terminal message');
+  }
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  switch (tag) {
+    case 4:
+      if (payload.length < 2 || payload.length > 1 + 16 * 1024) {
+        throw new ProtocolError('bad terminal output length');
+      }
+      return { kind: 'output', data: payload.subarray(1) };
+    case 5:
+      expectLength(payload, 5);
+      return { kind: 'exited', code: view.getInt32(1) };
+    case 6: {
+      expectLength(payload, 2);
+      const reason = REFUSALS[view.getUint8(1)];
+      if (reason === undefined) {
+        throw new ProtocolError('unknown refusal');
+      }
+      return { kind: 'refused', reason };
+    }
+    default:
+      throw new ProtocolError(`unknown terminal message ${tag}`);
+  }
+}
+
+function terminalSize(tag: number, columns: number, rows: number): Uint8Array {
+  if (columns < 1 || columns > 500 || rows < 1 || rows > 500) {
+    throw new ProtocolError('terminal size out of range');
+  }
+  const out = new Uint8Array(5);
+  const view = new DataView(out.buffer);
+  view.setUint8(0, tag);
+  view.setUint16(1, columns);
+  view.setUint16(3, rows);
+  return out;
+}
+
+export const encodeTerminalOpen = (columns: number, rows: number): Uint8Array => terminalSize(0, columns, rows);
+
+export const encodeTerminalResize = (columns: number, rows: number): Uint8Array => terminalSize(2, columns, rows);
+
+export const encodeTerminalClose = (): Uint8Array => Uint8Array.of(3);
+
+export function encodeTerminalInput(data: Uint8Array): Uint8Array {
+  if (data.length === 0 || data.length > MAX_INPUT_CHUNK) {
+    throw new ProtocolError('terminal input chunk out of range');
+  }
+  const out = new Uint8Array(1 + data.length);
+  out[0] = 1;
+  out.set(data, 1);
+  return out;
+}
+
+export function* inputChunks(data: Uint8Array): Generator<Uint8Array> {
+  for (let at = 0; at < data.length; at += MAX_INPUT_CHUNK) {
+    yield data.subarray(at, at + MAX_INPUT_CHUNK);
   }
 }
