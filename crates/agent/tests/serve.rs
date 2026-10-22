@@ -41,7 +41,14 @@ struct Xvfb {
     display: String,
 }
 
+static DISPLAY_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 impl Xvfb {
+    fn start_unique() -> Self {
+        let offset = u32::try_from(DISPLAY_COUNTER.fetch_add(1, Ordering::SeqCst)).unwrap();
+        Self::start(200 + (std::process::id() % 300) * 40 + offset)
+    }
+
     fn start(number: u32) -> Self {
         let display = format!(":{number}");
         let child = Command::new("Xvfb")
@@ -455,7 +462,7 @@ fn next_tile_or_resize(client: &mut Client) -> DesktopMessage {
 
 #[test]
 fn pairs_a_new_device_streams_the_screen_and_applies_input() {
-    let xvfb = Xvfb::start(60 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     paint_root(&xvfb.display, 0x0000_ff00);
     let server = Running::start(&xvfb.display);
     let (mut client, _device) = pair_and_login(&server, "Aula 3");
@@ -504,7 +511,7 @@ fn pairs_a_new_device_streams_the_screen_and_applies_input() {
 
 #[test]
 fn a_paired_device_reconnects_with_a_fresh_code() {
-    let xvfb = Xvfb::start(50 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (client, device) = pair_and_login(&server, "Portatil");
     drop(client);
@@ -520,7 +527,7 @@ fn a_paired_device_reconnects_with_a_fresh_code() {
 
 #[test]
 fn a_totp_code_cannot_be_used_twice() {
-    let xvfb = Xvfb::start(40 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (client, device) = pair_and_login(&server, "Aula 3");
     drop(client);
@@ -547,7 +554,7 @@ fn describe(read: &Received<ControlMessage>) -> String {
 
 #[test]
 fn an_unknown_device_gets_no_answer_at_all() {
-    let xvfb = Xvfb::start(30 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let stranger = StaticKey::generate().unwrap();
     let mut socket = server.connect();
@@ -561,7 +568,7 @@ fn an_unknown_device_gets_no_answer_at_all() {
 
 #[test]
 fn a_viewer_that_pinned_the_wrong_agent_key_is_refused() {
-    let xvfb = Xvfb::start(20 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (client, device) = pair_and_login(&server, "Aula 3");
     drop(client);
@@ -571,7 +578,7 @@ fn a_viewer_that_pinned_the_wrong_agent_key_is_refused() {
 
 #[test]
 fn pairing_is_refused_when_no_code_is_open() {
-    let xvfb = Xvfb::start(10 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let device = StaticKey::generate().unwrap();
     let guessed = PairingCode::generate().unwrap();
@@ -582,7 +589,7 @@ fn pairing_is_refused_when_no_code_is_open() {
 
 #[test]
 fn a_wrong_pairing_code_is_refused_and_five_failures_burn_the_real_one() {
-    let xvfb = Xvfb::start(70 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let real = server.open_pairing();
     let device = StaticKey::generate().unwrap();
@@ -599,7 +606,7 @@ fn a_wrong_pairing_code_is_refused_and_five_failures_burn_the_real_one() {
 
 #[test]
 fn the_pairing_code_alone_does_not_add_a_device() {
-    let xvfb = Xvfb::start(80 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let device = StaticKey::generate().unwrap();
     let code = server.open_pairing();
@@ -618,7 +625,7 @@ fn the_pairing_code_alone_does_not_add_a_device() {
 
 #[test]
 fn wrong_second_factor_codes_during_pairing_also_burn_the_code() {
-    let xvfb = Xvfb::start(60 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let real = server.open_pairing();
     let device = StaticKey::generate().unwrap();
@@ -652,7 +659,7 @@ fn wrong_second_factor_codes_during_pairing_also_burn_the_code() {
 
 #[test]
 fn a_pairing_code_works_once() {
-    let xvfb = Xvfb::start(90 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let device = StaticKey::generate().unwrap();
     let code = server.open_pairing();
@@ -667,7 +674,7 @@ fn a_pairing_code_works_once() {
 
 #[test]
 fn three_wrong_codes_lock_the_device_and_the_lock_ends() {
-    let xvfb = Xvfb::start(60 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (client, device) = pair_and_login(&server, "Aula 3");
     drop(client);
@@ -710,7 +717,7 @@ fn three_wrong_codes_lock_the_device_and_the_lock_ends() {
 
 #[test]
 fn a_lock_on_one_device_does_not_stop_another() {
-    let xvfb = Xvfb::start(50 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (first, victim) = pair_and_login(&server, "Robado");
     drop(first);
@@ -733,7 +740,7 @@ fn a_lock_on_one_device_does_not_stop_another() {
 
 #[test]
 fn a_locked_agent_refuses_every_connection() {
-    let xvfb = Xvfb::start(40 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (client, device) = pair_and_login(&server, "Aula 3");
     drop(client);
@@ -752,7 +759,7 @@ fn a_locked_agent_refuses_every_connection() {
 
 #[test]
 fn a_revoked_device_is_cut_off_while_connected_and_cannot_return() {
-    let xvfb = Xvfb::start(30 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (mut client, device) = pair_and_login(&server, "Aula 3");
     assert!(matches!(
@@ -774,7 +781,7 @@ fn a_revoked_device_is_cut_off_while_connected_and_cannot_return() {
 
 #[test]
 fn an_idle_unauthenticated_connection_does_not_take_the_viewer_slot() {
-    let xvfb = Xvfb::start(20 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (first, device_a) = pair_and_login(&server, "A");
     drop(first);
@@ -800,7 +807,7 @@ fn an_idle_unauthenticated_connection_does_not_take_the_viewer_slot() {
 
 #[test]
 fn only_a_few_unauthenticated_connections_are_accepted_at_once() {
-    let xvfb = Xvfb::start(10 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let mut idle = Vec::new();
     for _ in 0..16 {
@@ -814,7 +821,7 @@ fn only_a_few_unauthenticated_connections_are_accepted_at_once() {
 
 #[test]
 fn garbage_after_authentication_ends_the_session_and_the_next_viewer_gets_in() {
-    let xvfb = Xvfb::start(70 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (mut client, device) = pair_and_login(&server, "Aula 3");
     client
@@ -851,7 +858,7 @@ fn garbage_after_authentication_ends_the_session_and_the_next_viewer_gets_in() {
 
 #[test]
 fn a_tampered_record_ends_the_session() {
-    let xvfb = Xvfb::start(80 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (mut client, _device) = pair_and_login(&server, "Aula 3");
     let mut records = client
@@ -912,7 +919,7 @@ fn nothing_arrives_within(client: &mut Client, wait: Duration) -> bool {
 
 #[test]
 fn stops_sending_until_the_viewer_acknowledges_batches() {
-    let xvfb = Xvfb::start(10 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let painter = Painter::connect(&xvfb.display);
     let server = Running::start(&xvfb.display);
     let (mut client, _device) = pair_and_login(&server, "Aula 3");
@@ -958,7 +965,7 @@ fn decoded_center(picture: &openh264::decoder::DecodedYUV<'_>) -> [u8; 3] {
 
 #[test]
 fn a_capable_viewer_gets_h264_under_heavy_activity_and_tiles_again_when_it_calms_down() {
-    let xvfb = Xvfb::start(30 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let painter = Painter::connect(&xvfb.display);
     let server = Running::start(&xvfb.display);
     let (mut client, _device) = pair_and_login(&server, "Aula 3");
@@ -1052,7 +1059,7 @@ fn a_capable_viewer_gets_h264_under_heavy_activity_and_tiles_again_when_it_calms
 
 #[test]
 fn a_viewer_that_does_not_declare_video_support_keeps_getting_tiles_under_heavy_activity() {
-    let xvfb = Xvfb::start(40 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let painter = Painter::connect(&xvfb.display);
     let server = Running::start(&xvfb.display);
     let (mut client, _device) = pair_and_login(&server, "Aula 3");
@@ -1088,7 +1095,7 @@ fn a_viewer_that_does_not_declare_video_support_keeps_getting_tiles_under_heavy_
 
 #[test]
 fn rejects_foreign_origins_and_hosts() {
-    let xvfb = Xvfb::start(50 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
 
     let error = server.connect_raw(Some("http://evil.example")).unwrap_err();
@@ -1107,7 +1114,7 @@ fn rejects_foreign_origins_and_hosts() {
 
 #[test]
 fn serves_only_the_viewer_files() {
-    let xvfb = Xvfb::start(40 + std::process::id() % 9);
+    let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let host = format!("Host: 127.0.0.1:{}\r\n", server.port);
 
