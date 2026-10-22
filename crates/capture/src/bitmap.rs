@@ -56,6 +56,24 @@ impl Bitmap {
         &self.bgra[start..start + stride]
     }
 
+    pub fn paste(&mut self, x: u16, y: u16, source: &Bitmap) -> Result<(), CaptureError> {
+        let fits = u32::from(x) + u32::from(source.width) <= u32::from(self.width)
+            && u32::from(y) + u32::from(source.height) <= u32::from(self.height);
+        if !fits {
+            return Err(CaptureError::InvalidSize {
+                width: source.width,
+                height: source.height,
+            });
+        }
+        let stride = usize::from(self.width) * 4;
+        let row_bytes = usize::from(source.width) * 4;
+        for row in 0..source.height {
+            let start = (usize::from(y) + usize::from(row)) * stride + usize::from(x) * 4;
+            self.bgra[start..start + row_bytes].copy_from_slice(source.row(row));
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn crop(&self, rect: Rect) -> Vec<u8> {
         let mut out = Vec::with_capacity(byte_len(rect.width, rect.height));
@@ -108,6 +126,29 @@ mod tests {
             Bitmap::new(0, 4, vec![]),
             Err(CaptureError::InvalidSize { .. })
         ));
+    }
+
+    #[test]
+    fn pastes_a_region_in_place() {
+        let mut canvas = Bitmap::new(4, 4, vec![0; 64]).unwrap();
+        let patch = Bitmap::new(2, 2, vec![9; 16]).unwrap();
+        canvas.paste(1, 2, &patch).unwrap();
+        assert_eq!(
+            canvas.row(2),
+            [0, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9, 0, 0, 0, 0]
+        );
+        assert_eq!(canvas.row(3), canvas.row(2));
+        assert_eq!(canvas.row(0), [0; 16]);
+        assert_eq!(canvas.row(1), [0; 16]);
+    }
+
+    #[test]
+    fn refuses_to_paste_outside_the_bitmap() {
+        let mut canvas = Bitmap::new(4, 4, vec![0; 64]).unwrap();
+        let patch = Bitmap::new(2, 2, vec![9; 16]).unwrap();
+        assert!(canvas.paste(3, 0, &patch).is_err());
+        assert!(canvas.paste(0, 3, &patch).is_err());
+        assert_eq!(canvas.bgra(), [0; 64]);
     }
 
     #[test]

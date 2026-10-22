@@ -74,6 +74,16 @@ fn valid_samples() -> Vec<Vec<u8>> {
         .encode(),
     );
     out.push(DesktopMessage::FrameEnd { sequence: 5 }.encode());
+    out.push(
+        DesktopMessage::Video {
+            width: 64,
+            height: 32,
+            keyframe: true,
+            data: vec![0, 0, 0, 1, 0x67, 1, 2],
+        }
+        .encode(),
+    );
+    out.push(ViewerMessage::Capabilities { video: true }.encode());
     out.push(InputEvent::PointerMove { x: 3, y: 4 }.encode());
     out.push(
         InputEvent::Button {

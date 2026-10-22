@@ -5,9 +5,11 @@ use crate::input::InputEvent;
 pub enum ViewerMessage {
     Input(InputEvent),
     FrameAck { sequence: u32 },
+    Capabilities { video: bool },
 }
 
 const FRAME_ACK: u8 = 4;
+const CAPABILITIES: u8 = 5;
 
 impl ViewerMessage {
     #[must_use]
@@ -19,6 +21,7 @@ impl ViewerMessage {
                 out.extend_from_slice(&sequence.to_be_bytes());
                 out
             }
+            ViewerMessage::Capabilities { video } => vec![CAPABILITIES, u8::from(*video)],
         }
     }
 
@@ -35,6 +38,16 @@ impl ViewerMessage {
                     sequence: u32::from_be_bytes(sequence),
                 })
             }
+            Some((&CAPABILITIES, body)) => match body {
+                [0] => Ok(ViewerMessage::Capabilities { video: false }),
+                [1] => Ok(ViewerMessage::Capabilities { video: true }),
+                [other] => Err(ProtocolError::InvalidInput(*other)),
+                _ => Err(ProtocolError::BadInputLength {
+                    tag: CAPABILITIES,
+                    expected: 1,
+                    actual: body.len(),
+                }),
+            },
             _ => InputEvent::decode(bytes).map(ViewerMessage::Input),
         }
     }
@@ -94,6 +107,27 @@ mod tests {
         assert!(matches!(
             ViewerMessage::decode(&[4]),
             Err(ProtocolError::BadInputLength { tag: 4, .. })
+        ));
+    }
+
+    #[test]
+    fn encodes_and_validates_the_capabilities_layout() {
+        assert_eq!(ViewerMessage::Capabilities { video: true }.encode(), [5, 1]);
+        assert_eq!(
+            ViewerMessage::Capabilities { video: false }.encode(),
+            [5, 0]
+        );
+        assert_eq!(
+            ViewerMessage::decode(&[5, 2]),
+            Err(ProtocolError::InvalidInput(2))
+        );
+        assert!(matches!(
+            ViewerMessage::decode(&[5]),
+            Err(ProtocolError::BadInputLength { tag: 5, .. })
+        ));
+        assert!(matches!(
+            ViewerMessage::decode(&[5, 1, 1]),
+            Err(ProtocolError::BadInputLength { tag: 5, .. })
         ));
     }
 

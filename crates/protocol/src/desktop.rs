@@ -37,11 +37,19 @@ pub enum DesktopMessage {
     FrameEnd {
         sequence: u32,
     },
+    Video {
+        width: u16,
+        height: u16,
+        keyframe: bool,
+        data: Vec<u8>,
+    },
 }
 
 const RESIZE: u8 = 0;
 const TILE: u8 = 1;
 const FRAME_END: u8 = 2;
+const VIDEO: u8 = 3;
+const VIDEO_HEADER_LEN: usize = 5;
 const TILE_HEADER_LEN: usize = 9;
 
 impl DesktopMessage {
@@ -74,6 +82,20 @@ impl DesktopMessage {
             DesktopMessage::FrameEnd { sequence } => {
                 let mut out = vec![FRAME_END];
                 out.extend_from_slice(&sequence.to_be_bytes());
+                out
+            }
+            DesktopMessage::Video {
+                width,
+                height,
+                keyframe,
+                data,
+            } => {
+                let mut out = Vec::with_capacity(1 + VIDEO_HEADER_LEN + data.len());
+                out.push(VIDEO);
+                out.extend_from_slice(&width.to_be_bytes());
+                out.extend_from_slice(&height.to_be_bytes());
+                out.push(u8::from(*keyframe));
+                out.extend_from_slice(data);
                 out
             }
         }
@@ -114,6 +136,22 @@ impl DesktopMessage {
                     .map_err(|_| bad_length(tag, 4, body.len()))?;
                 Ok(DesktopMessage::FrameEnd {
                     sequence: u32::from_be_bytes(bytes),
+                })
+            }
+            VIDEO => {
+                let (header, data) = body
+                    .split_at_checked(VIDEO_HEADER_LEN)
+                    .ok_or_else(|| bad_length(tag, VIDEO_HEADER_LEN, body.len()))?;
+                let keyframe = match header[4] {
+                    0 => false,
+                    1 => true,
+                    other => return Err(ProtocolError::InvalidControl(other)),
+                };
+                Ok(DesktopMessage::Video {
+                    width: u16::from_be_bytes([header[0], header[1]]),
+                    height: u16::from_be_bytes([header[2], header[3]]),
+                    keyframe,
+                    data: data.to_vec(),
                 })
             }
             other => Err(ProtocolError::UnknownDesktop(other)),
@@ -194,6 +232,33 @@ mod tests {
             DesktopMessage::decode(&[2, 1, 2, 3, 4, 5]),
             Err(ProtocolError::BadDesktopLength { tag: 2, .. })
         ));
+    }
+
+    #[test]
+    fn encodes_the_video_layout() {
+        assert_eq!(
+            DesktopMessage::Video {
+                width: 0x0102,
+                height: 0x0304,
+                keyframe: true,
+                data: vec![9, 8]
+            }
+            .encode(),
+            [3, 1, 2, 3, 4, 1, 9, 8]
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_video_messages() {
+        assert!(matches!(
+            DesktopMessage::decode(&[3, 0, 8, 0, 8]),
+            Err(ProtocolError::BadDesktopLength { tag: 3, .. })
+        ));
+        assert!(matches!(
+            DesktopMessage::decode(&[3, 0, 8, 0, 8, 2]),
+            Err(ProtocolError::InvalidControl(2))
+        ));
+        assert!(DesktopMessage::decode(&[3, 0, 8, 0, 8, 0]).is_ok());
     }
 
     #[test]
