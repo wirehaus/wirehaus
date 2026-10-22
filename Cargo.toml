@@ -8,7 +8,7 @@ edition = "2024"
 rust-version = "1.90"
 license-file = "LICENSE"
 publish = false
-repository = "https://github.com/cristobaltormo/wirehaus"
+repository = "https://github.com/wirehaus/wirehaus"
 authors = ["Cristóbal Tormo"]
 
 [workspace.dependencies]
