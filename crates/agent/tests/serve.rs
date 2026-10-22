@@ -6,7 +6,7 @@ use std::net::{Shutdown, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, sleep};
 use std::time::{Duration, Instant};
 
@@ -27,7 +27,15 @@ impl Xvfb {
     fn start(number: u32) -> Self {
         let display = format!(":{number}");
         let child = Command::new("Xvfb")
-            .args([&display, "-screen", "0", "320x200x24", "-nolisten", "tcp"])
+            .args([
+                &display,
+                "-screen",
+                "0",
+                "320x200x24",
+                "-nolisten",
+                "tcp",
+                "-noreset",
+            ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -56,9 +64,15 @@ struct Running {
     dir: PathBuf,
 }
 
+static RUN_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 impl Running {
     fn start(display: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("wirehaus-serve-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "wirehaus-serve-{}-{}",
+            std::process::id(),
+            RUN_COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("index.html"), b"<title>viewer</title>").unwrap();
         let server = Server::bind(ServerConfig {

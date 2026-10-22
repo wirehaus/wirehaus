@@ -20,7 +20,15 @@ impl Xvfb {
     fn start(number: u32) -> Self {
         let display = format!(":{number}");
         let child = Command::new("Xvfb")
-            .args([&display, "-screen", "0", "320x200x24", "-nolisten", "tcp"])
+            .args([
+                &display,
+                "-screen",
+                "0",
+                "320x200x24",
+                "-nolisten",
+                "tcp",
+                "-noreset",
+            ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
