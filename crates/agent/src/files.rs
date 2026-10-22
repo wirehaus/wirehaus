@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use wirehaus_protocol::{
     Entry, EntryKind, FailureReason, FilesMessage, MAX_CHUNK, MAX_ENTRIES, MAX_NAME_LEN,
@@ -58,9 +58,11 @@ impl Files {
         }
         let outcome = match message {
             FilesMessage::ListRoots => Ok(vec![(stream, FilesMessage::Roots(root_names(&roots)))]),
-            FilesMessage::List { root, path } => list(&roots, root, &path, stream),
+            FilesMessage::List { root, path } => list(&roots, root, &path, stream, &self.parts()),
             FilesMessage::Mkdir { root, path } => mkdir(&roots, root, &path, stream),
-            FilesMessage::Remove { root, path } => remove(&roots, root, &path, stream),
+            FilesMessage::Remove { root, path } => {
+                remove(&roots, root, &path, stream, &self.parts())
+            }
             FilesMessage::Download { root, path } => self.download(&roots, root, &path, stream),
             FilesMessage::Upload { root, path, size } => {
                 self.upload(&roots, root, &path, size, stream)
@@ -141,6 +143,9 @@ impl Files {
     ) -> Result<Vec<Reply>, FailureReason> {
         self.admit(stream)?;
         let real = existing(root_at(roots, root)?, path)?;
+        if self.parts().contains(&real) {
+            return Err(FailureReason::InvalidPath);
+        }
         let file = File::open(&real).map_err(|error| map_io(&error))?;
         let metadata = file.metadata().map_err(|error| map_io(&error))?;
         if !metadata.is_file() {
@@ -179,7 +184,7 @@ impl Files {
         if fs::symlink_metadata(&target).is_ok() {
             return Err(FailureReason::AlreadyExists);
         }
-        let part = parent.join(format!("{PART_PREFIX}{stream}{PART_SUFFIX}"));
+        let part = parent.join(part_name(stream));
         let file = create_private_file(&part).map_err(|error| map_io(&error))?;
         self.transfers.insert(
             stream,
@@ -193,6 +198,16 @@ impl Files {
             },
         );
         Ok(vec![(stream, FilesMessage::Ready { size })])
+    }
+
+    fn parts(&self) -> Vec<PathBuf> {
+        self.transfers
+            .values()
+            .filter_map(|transfer| match transfer {
+                Transfer::Upload { part, .. } => Some(part.clone()),
+                Transfer::Download { .. } => None,
+            })
+            .collect()
     }
 
     fn admit(&self, stream: u32) -> Result<(), FailureReason> {
@@ -326,7 +341,13 @@ fn create_private_file(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
-fn list(roots: &[PathBuf], root: u8, path: &str, stream: u32) -> Result<Vec<Reply>, FailureReason> {
+fn list(
+    roots: &[PathBuf],
+    root: u8,
+    path: &str,
+    stream: u32,
+    busy: &[PathBuf],
+) -> Result<Vec<Reply>, FailureReason> {
     let directory = existing(root_at(roots, root)?, path)?;
     if !directory.is_dir() {
         return Err(FailureReason::NotADirectory);
@@ -335,6 +356,9 @@ fn list(roots: &[PathBuf], root: u8, path: &str, stream: u32) -> Result<Vec<Repl
     let mut truncated = false;
     for item in fs::read_dir(&directory).map_err(|error| map_io(&error))? {
         let Ok(item) = item else { continue };
+        if busy.contains(&item.path()) {
+            continue;
+        }
         let Some(entry) = describe(&item) else {
             continue;
         };
@@ -355,7 +379,7 @@ fn list(roots: &[PathBuf], root: u8, path: &str, stream: u32) -> Result<Vec<Repl
 
 fn describe(item: &fs::DirEntry) -> Option<Entry> {
     let name = item.file_name().into_string().ok()?;
-    if name.len() > MAX_NAME_LEN || is_part_file(&name) {
+    if name.len() > MAX_NAME_LEN {
         return None;
     }
     let file_type = item.file_type().ok()?;
@@ -387,8 +411,11 @@ fn describe(item: &fs::DirEntry) -> Option<Entry> {
     })
 }
 
-fn is_part_file(name: &str) -> bool {
-    name.starts_with(PART_PREFIX) && name.ends_with(PART_SUFFIX)
+fn part_name(stream: u32) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    format!("{PART_PREFIX}{stream}-{nanos:x}{PART_SUFFIX}")
 }
 
 fn mkdir(
@@ -412,10 +439,14 @@ fn remove(
     root: u8,
     path: &str,
     stream: u32,
+    busy: &[PathBuf],
 ) -> Result<Vec<Reply>, FailureReason> {
     let base = root_at(roots, root)?;
     let (parent, name) = creatable_parent(base, path)?;
     let target = parent.join(name);
+    if busy.contains(&target) {
+        return Err(FailureReason::InvalidPath);
+    }
     let metadata = fs::symlink_metadata(&target).map_err(|error| map_io(&error))?;
     if metadata.is_dir() {
         fs::remove_dir(&target).map_err(|error| {
@@ -472,7 +503,6 @@ fn valid_component(part: &str) -> Result<&str, FailureReason> {
         || part.len() > MAX_NAME_LEN
         || part.contains(forbidden)
         || windows_trailing
-        || is_part_file(part)
     {
         return Err(FailureReason::InvalidPath);
     }
@@ -992,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_files_are_hidden_and_cannot_be_addressed() {
+    fn the_partial_file_of_a_running_upload_is_hidden_and_cannot_be_addressed() {
         let sandbox = Sandbox::new("part");
         let mut files = Files::new();
         let roots = sandbox.roots();
@@ -1007,12 +1037,51 @@ mod tests {
         );
         let listing = only(files.handle(1, path_message(list_message, ""), &roots));
         assert_eq!(names(listing), ["sub", "a.txt"]);
-        let reply = only(files.handle(
-            1,
-            path_message(download_message, ".wirehaus-4.part"),
-            &roots,
-        ));
-        assert_eq!(reply, FilesMessage::Failed(FailureReason::InvalidPath));
+        let part = fs::read_dir(sandbox.root())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .find(|name| name.ends_with(PART_SUFFIX))
+            .unwrap();
+        for message in [
+            path_message(download_message, &part),
+            path_message(remove_message, &part),
+        ] {
+            assert_eq!(
+                only(files.handle(2, message, &roots)),
+                FilesMessage::Failed(FailureReason::InvalidPath)
+            );
+        }
+        assert!(sandbox.root().join(&part).exists());
+        files.handle(4, FilesMessage::Cancel, &roots);
+        assert!(!sandbox.root().join(&part).exists());
+    }
+
+    #[test]
+    fn a_partial_file_left_by_a_crash_does_not_block_new_uploads() {
+        let sandbox = Sandbox::new("stale");
+        fs::write(sandbox.root().join(".wirehaus-9.part"), b"left over").unwrap();
+        let mut files = Files::new();
+        let roots = sandbox.roots();
+        assert_eq!(
+            upload(&mut files, &roots, "fresh.txt", b"data"),
+            FilesMessage::Done
+        );
+        assert_eq!(fs::read(sandbox.root().join("fresh.txt")).unwrap(), b"data");
+    }
+
+    #[test]
+    fn a_stale_partial_file_is_listed_and_can_be_removed_by_the_owner() {
+        let sandbox = Sandbox::new("stale-visible");
+        fs::write(sandbox.root().join(".wirehaus-4.part"), b"left over").unwrap();
+        let mut files = Files::new();
+        let roots = sandbox.roots();
+        let listing = only(files.handle(1, path_message(list_message, ""), &roots));
+        assert!(names(listing).contains(&".wirehaus-4.part".to_owned()));
+        assert_eq!(
+            only(files.handle(1, path_message(remove_message, ".wirehaus-4.part"), &roots)),
+            FilesMessage::Done
+        );
+        assert!(!sandbox.root().join(".wirehaus-4.part").exists());
     }
 
     #[test]
