@@ -6,13 +6,22 @@ pub const MAX_RUN_WIDTH: u16 = 2048;
 #[must_use]
 pub fn changed_tiles(previous: &Bitmap, current: &Bitmap) -> Vec<Rect> {
     if previous.width() != current.width() || previous.height() != current.height() {
-        return vec![whole(current)];
+        return all_tiles(current);
     }
+    tiles_where(current, |tile| tile_differs(previous, current, tile))
+}
+
+#[must_use]
+pub fn all_tiles(bitmap: &Bitmap) -> Vec<Rect> {
+    tiles_where(bitmap, |_| true)
+}
+
+fn tiles_where(bitmap: &Bitmap, mut keep: impl FnMut(Rect) -> bool) -> Vec<Rect> {
     let mut tiles = Vec::new();
-    for y in (0..current.height()).step_by(usize::from(TILE_SIZE)) {
-        for x in (0..current.width()).step_by(usize::from(TILE_SIZE)) {
-            let tile = tile_at(current, x, y);
-            if tile_differs(previous, current, tile) {
+    for y in (0..bitmap.height()).step_by(usize::from(TILE_SIZE)) {
+        for x in (0..bitmap.width()).step_by(usize::from(TILE_SIZE)) {
+            let tile = tile_at(bitmap, x, y);
+            if keep(tile) {
                 tiles.push(tile);
             }
         }
@@ -37,15 +46,6 @@ fn continues(run: Rect, tile: Rect) -> bool {
         && run.height == tile.height
         && u32::from(run.x) + u32::from(run.width) == u32::from(tile.x)
         && u32::from(run.width) + u32::from(tile.width) <= u32::from(MAX_RUN_WIDTH)
-}
-
-fn whole(bitmap: &Bitmap) -> Rect {
-    Rect {
-        x: 0,
-        y: 0,
-        width: bitmap.width(),
-        height: bitmap.height(),
-    }
 }
 
 fn tile_at(bitmap: &Bitmap, x: u16, y: u16) -> Rect {
@@ -197,16 +197,9 @@ mod tests {
     }
 
     #[test]
-    fn a_resize_replaces_the_whole_screen() {
+    fn a_resize_marks_every_tile() {
         let tiles = changed_tiles(&blank(100, 100), &blank(120, 100));
-        assert_eq!(
-            tiles,
-            [Rect {
-                x: 0,
-                y: 0,
-                width: 120,
-                height: 100
-            }]
-        );
+        assert_eq!(tiles.len(), 2 * 2);
+        assert_eq!(coalesce(&tiles).len(), 2);
     }
 }
