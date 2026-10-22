@@ -31,7 +31,7 @@ Windows 10 y 11, macOS y Linux (X11).
 | `crates/encode` | Codificación de las zonas cambiadas |
 | `crates/input` | Inyección de ratón y teclado |
 | `crates/agent` | Agente que se ejecuta en el ordenador de casa |
-| `web` | Visor que corre en el navegador |
+| `viewer` | Visor que corre en el navegador |
 
 ## Compilar
 
@@ -47,8 +47,8 @@ cargo test --workspace
 Hace falta una sesión de escritorio con X11, Rust estable y Node.js.
 
 ```
-cd web && npm ci && npm run build && cd ..
-cargo run -p wirehaus-agent -- serve --viewer-dir web/dist
+cd viewer && npm ci && npm run build && cd ..
+cargo run -p wirehaus-agent -- serve --viewer-dir viewer/dist
 ```
 
 Abre `http://127.0.0.1:7878` en el navegador. Con `--display` eliges otra pantalla de X11 y con `--listen` otro puerto de la máquina local.

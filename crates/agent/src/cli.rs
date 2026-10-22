@@ -18,7 +18,7 @@ pub enum Command {
         listen: SocketAddr,
         #[arg(long)]
         display: Option<String>,
-        #[arg(long, default_value = "web/dist")]
+        #[arg(long, default_value = "viewer/dist")]
         viewer_dir: PathBuf,
         #[arg(long, default_value_t = 70, value_parser = clap::value_parser!(u8).range(1..=100))]
         quality: u8,
