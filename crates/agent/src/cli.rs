@@ -17,6 +17,8 @@ pub enum Command {
     Info,
     Init,
     Pairing,
+    #[cfg(target_os = "macos")]
+    Permissions,
     Devices {
         #[command(subcommand)]
         action: Option<DeviceAction>,

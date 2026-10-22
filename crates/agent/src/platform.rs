@@ -17,7 +17,17 @@ pub fn connect(display: Option<&str>) -> Result<Backend, ServerError> {
     })
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+pub fn connect(_display: Option<&str>) -> Result<Backend, ServerError> {
+    Ok(Backend {
+        screen: Box::new(wirehaus_capture::PollingScreen::new(
+            wirehaus_capture::MacDisplay::connect()?,
+        )),
+        input: Box::new(wirehaus_input::MacInput::connect()?),
+    })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn connect(_display: Option<&str>) -> Result<Backend, ServerError> {
     Err(ServerError::UnsupportedPlatform)
 }
@@ -31,7 +41,12 @@ pub fn clipboard_factory(display: Option<String>) -> Factory {
     })
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+pub fn clipboard_factory(_display: Option<String>) -> Factory {
+    Box::new(|| Ok(Box::new(wirehaus_clipboard::MacClipboard::connect())))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn clipboard_factory(_display: Option<String>) -> Factory {
     Box::new(|| {
         Err(wirehaus_clipboard::ClipboardError::Connect(

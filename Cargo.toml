@@ -14,6 +14,8 @@ authors = ["Cristóbal Tormo"]
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }
 thiserror = "2"
+core-graphics = { version = "0.25", features = ["highsierra"] }
+macos-accessibility-client = "0.0.1"
 x11rb = "0.14"
 
 [workspace.lints.rust]

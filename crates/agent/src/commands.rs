@@ -50,6 +50,30 @@ pub fn init(dir: &Path, clock: Clock, out: &mut impl Write) -> Result<(), Comman
     Ok(())
 }
 
+pub fn permissions(
+    screen_recording: bool,
+    input_control: bool,
+    out: &mut impl Write,
+) -> Result<bool, CommandError> {
+    let state = |granted: bool| if granted { "concedido" } else { "pendiente" };
+    writeln!(out, "Grabacion de pantalla: {}", state(screen_recording))?;
+    writeln!(
+        out,
+        "Control de teclado y raton (Accesibilidad): {}",
+        state(input_control)
+    )?;
+    let complete = screen_recording && input_control;
+    if complete {
+        writeln!(out, "El agente tiene todos los permisos que necesita.")?;
+    } else {
+        writeln!(
+            out,
+            "Concede lo pendiente en Ajustes del Sistema > Privacidad y seguridad, al programa que lanza el agente (la terminal o el propio wirehaus-agent). Si macOS lo pide, cierra y vuelve a abrir ese programa y repite este comando."
+        )?;
+    }
+    Ok(complete)
+}
+
 pub fn pairing(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
     let code = store.update(State::open_pairing)??;
     store.log("pairing_opened", "a pairing code was generated");
@@ -352,6 +376,23 @@ mod tests {
 
     fn text(out: Vec<u8>) -> String {
         String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn the_permissions_report_names_what_is_missing() {
+        let mut out = Vec::new();
+        assert!(!permissions(true, false, &mut out).unwrap());
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("Grabacion de pantalla: concedido"));
+        assert!(text.contains("Accesibilidad): pendiente"));
+        assert!(text.contains("Ajustes del Sistema"));
+        let mut done = Vec::new();
+        assert!(permissions(true, true, &mut done).unwrap());
+        assert!(
+            String::from_utf8(done)
+                .unwrap()
+                .contains("todos los permisos")
+        );
     }
 
     #[test]

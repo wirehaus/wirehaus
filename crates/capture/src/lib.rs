@@ -2,6 +2,9 @@ mod bitmap;
 mod damage;
 mod error;
 mod framebuffer;
+#[cfg(target_os = "macos")]
+mod macos;
+mod polling;
 #[cfg(target_os = "linux")]
 mod x11;
 
@@ -11,6 +14,9 @@ pub use damage::{
 };
 pub use error::CaptureError;
 pub use framebuffer::FrameBuffer;
+#[cfg(target_os = "macos")]
+pub use macos::{MacDisplay, request_screen_capture, screen_capture_allowed};
+pub use polling::{Grabber, PollingScreen};
 #[cfg(target_os = "linux")]
 pub use x11::X11Screen;
 

@@ -42,6 +42,13 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         }
         Command::Init => commands::init(&dir, system_clock(), &mut out)?,
         Command::Pairing => commands::pairing(&open()?, &mut out)?,
+        #[cfg(target_os = "macos")]
+        Command::Permissions => {
+            let screen = wirehaus_capture::screen_capture_allowed()
+                || wirehaus_capture::request_screen_capture();
+            let input = wirehaus_input::input_allowed() || wirehaus_input::request_input();
+            commands::permissions(screen, input, &mut out)?;
+        }
         Command::Devices { action: None } => commands::devices(&open()?, &mut out)?,
         Command::Devices {
             action: Some(DeviceAction::Revoke { device, code }),

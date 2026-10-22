@@ -6,6 +6,10 @@ pub enum InputError {
     Connect(String),
     #[error("the display has no XTEST extension")]
     MissingExtension,
+    #[error(
+        "controlling the keyboard and mouse is not allowed for this program; run \"wirehaus-agent permissions\""
+    )]
+    PermissionDenied,
     #[error("display request failed: {0}")]
     Request(String),
     #[error("key code {0} is outside the supported range")]

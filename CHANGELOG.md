@@ -27,6 +27,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Vídeo H.264 con OpenH264: cuando hay mucha actividad sostenida (desplazar una página, ver vídeo) el agente pasa a un flujo de vídeo y vuelve a las teselas JPEG, con un refresco completo, cuando la pantalla se calma. Solo se envía a visores que declaran poder decodificarlo; el visor aún no lo hace.
 - Visor web en TypeScript con lienzo, ratón, rueda y teclado.
 - El visor admite una dirección de agente distinta de la suya, indicada en el fragmento `#agent=`, solo cuando la compilación lo declara; la dirección se valida de forma estricta, se muestra en la cabecera y la clave fijada del agente se guarda por dirección.
+- Soporte de macOS: captura de pantalla por sondeo con `CGDisplay`, ratón, teclado y rueda con `CGEvent`, portapapeles con `pbcopy` y `pbpaste`, y la orden `wirehaus-agent permissions` para comprobar y solicitar los permisos de Grabación de pantalla y Accesibilidad.
+- El agente suelta las teclas y los botones que el visor dejó pulsados cuando una sesión termina por cualquier causa.
 
 ### Cambiado
 

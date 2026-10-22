@@ -20,7 +20,9 @@ El agente ya muestra y controla un escritorio Linux con X11 desde un navegador d
 
 ## Plataformas
 
-Windows 10 y 11, macOS y Linux (X11).
+Linux (X11) y macOS. Windows 10 y 11 y Linux con Wayland están previstos y todavía no funcionan.
+
+En macOS el agente necesita dos permisos del sistema, Grabación de pantalla y Accesibilidad. `wirehaus-agent permissions` los comprueba, los solicita y explica qué falta.
 
 ## Estructura
 

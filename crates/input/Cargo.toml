@@ -16,5 +16,9 @@ wirehaus-protocol = { path = "../protocol" }
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { workspace = true, features = ["xtest"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics.workspace = true
+macos-accessibility-client.workspace = true
+
 [lints]
 workspace = true

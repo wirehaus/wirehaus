@@ -10,6 +10,8 @@ pub enum CaptureError {
     UnsupportedFormat { depth: u8, bits_per_pixel: u8 },
     #[error("the display returned {actual} bytes but {expected} were expected")]
     ShortImage { expected: usize, actual: usize },
+    #[error("screen recording is not allowed for this program; run \"wirehaus-agent permissions\"")]
+    PermissionDenied,
     #[error("bitmap of {width}x{height} is not valid")]
     InvalidSize { width: u16, height: u16 },
 }
