@@ -1126,6 +1126,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wirehaus-clipboard"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "x11rb",
+]
+
+[[package]]
 name = "wirehaus-crypto"
 version = "0.1.0"
 dependencies = [

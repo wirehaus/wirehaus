@@ -1,0 +1,19 @@
+[package]
+name = "wirehaus-clipboard"
+description = "Text clipboard access for the Wirehaus agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../LICENSE"
+publish.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb.workspace = true
+
+[lints]
+workspace = true
