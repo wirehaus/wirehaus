@@ -1,4 +1,4 @@
-use jpeg_encoder::{ColorType, Encoder};
+use jpeg_encoder::{ColorType, Encoder, SamplingFactor};
 use wirehaus_capture::{Bitmap, Rect};
 use wirehaus_protocol::Codec;
 
@@ -36,7 +36,9 @@ impl TileEncoder for JpegEncoder {
         ensure_inside(bitmap, rect)?;
         let pixels = bitmap.crop(rect);
         let mut out = Vec::new();
-        Encoder::new(&mut out, self.quality)
+        let mut encoder = Encoder::new(&mut out, self.quality);
+        encoder.set_sampling_factor(SamplingFactor::F_2_2);
+        encoder
             .encode(&pixels, rect.width, rect.height, ColorType::Bgra)
             .map_err(|e| EncodeError::Encoder(e.to_string()))?;
         Ok(out)
