@@ -26,7 +26,7 @@ const HEAD_DEADLINE: Duration = Duration::from_secs(5);
 const HEAD_POLL: Duration = Duration::from_millis(5);
 const MAX_INBOUND_MESSAGE: usize = INBOUND_LIMIT + 64;
 const MAX_CONNECTIONS: usize = 64;
-const MAX_UNAUTHENTICATED: usize = 4;
+const MAX_UNAUTHENTICATED: usize = 16;
 const HEAD_END: &[u8] = b"\r\n\r\n";
 const TEXT: &str = "text/plain; charset=utf-8";
 

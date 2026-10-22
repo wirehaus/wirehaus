@@ -791,9 +791,9 @@ fn only_a_few_unauthenticated_connections_are_accepted_at_once() {
     let xvfb = Xvfb::start(10 + std::process::id() % 9);
     let server = Running::start(&xvfb.display);
     let mut idle = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..16 {
         idle.push(server.connect());
-        sleep(Duration::from_millis(50));
+        sleep(Duration::from_millis(20));
     }
     let error = server.connect_raw(Some(&server.origin())).unwrap_err();
     assert!(error.to_string().contains("503"), "{error}");

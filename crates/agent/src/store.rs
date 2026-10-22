@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -15,8 +16,15 @@ const STATE_FILE: &str = "state";
 const STATE_TEMP: &str = "state.tmp";
 const LOCK_FILE: &str = "state.lock";
 const LOG_FILE: &str = "access.log";
-const LOG_ROTATED: &str = "access.log.1";
 const MAX_LOG_BYTES: u64 = 1 << 20;
+const LOG_COPIES: u32 = 5;
+const NOISY_WINDOW: u64 = 10;
+const NOISY_EVENTS: [&str; 4] = [
+    "handshake_failed",
+    "unknown_device",
+    "refused_locked",
+    "pairing_failed",
+];
 const MAX_LOG_DETAIL: usize = 200;
 const LOCK_WAIT: Duration = Duration::from_secs(5);
 const LOCK_STALE: Duration = Duration::from_secs(30);
@@ -43,10 +51,16 @@ struct Cached {
     text: String,
 }
 
+struct Quiet {
+    last_written: u64,
+    suppressed: u64,
+}
+
 pub struct Store {
     dir: PathBuf,
     clock: Clock,
     cached: Mutex<Cached>,
+    quiet: Mutex<HashMap<String, Quiet>>,
 }
 
 impl std::fmt::Debug for Store {
@@ -100,6 +114,7 @@ impl Store {
             dir: dir.to_path_buf(),
             clock,
             cached: Mutex::new(Cached { state, text }),
+            quiet: Mutex::new(HashMap::new()),
         })
     }
 
@@ -116,6 +131,7 @@ impl Store {
             dir: dir.to_path_buf(),
             clock,
             cached: Mutex::new(Cached { state, text }),
+            quiet: Mutex::new(HashMap::new()),
         })
     }
 
@@ -142,13 +158,26 @@ impl Store {
     }
 
     pub fn log(&self, event: &str, detail: &str) {
-        let line = format!(
-            "{} {} {}\n",
-            self.now(),
-            clean(event, 40),
-            clean(detail, MAX_LOG_DETAIL)
-        );
-        let _ = self.append_log(&line);
+        let now = self.now();
+        let event = clean(event, 40);
+        let mut detail = clean(detail, MAX_LOG_DETAIL);
+        if NOISY_EVENTS.contains(&event.as_str()) {
+            let mut quiet = self.quiet.lock().unwrap_or_else(PoisonError::into_inner);
+            let entry = quiet.entry(event.clone()).or_insert(Quiet {
+                last_written: 0,
+                suppressed: 0,
+            });
+            if entry.last_written != 0 && now.saturating_sub(entry.last_written) < NOISY_WINDOW {
+                entry.suppressed += 1;
+                return;
+            }
+            if entry.suppressed > 0 {
+                detail = format!("{detail} (+{} similar events suppressed)", entry.suppressed);
+            }
+            entry.last_written = now;
+            entry.suppressed = 0;
+        }
+        let _ = self.append_log(&format!("{now} {event} {detail}\n"));
     }
 
     fn refresh(&self, cached: &mut Cached) -> Result<(), StoreError> {
@@ -165,10 +194,21 @@ impl Store {
     fn append_log(&self, line: &str) -> std::io::Result<()> {
         let path = self.dir.join(LOG_FILE);
         if fs::metadata(&path).is_ok_and(|meta| meta.len() >= MAX_LOG_BYTES) {
-            fs::rename(&path, self.dir.join(LOG_ROTATED))?;
+            self.rotate_log()?;
         }
         let mut file = private_options().append(true).create(true).open(path)?;
         file.write_all(line.as_bytes())
+    }
+
+    fn rotate_log(&self) -> std::io::Result<()> {
+        let numbered = |number: u32| self.dir.join(format!("{LOG_FILE}.{number}"));
+        let _ = fs::remove_file(numbered(LOG_COPIES));
+        for number in (1..LOG_COPIES).rev() {
+            if numbered(number).exists() {
+                fs::rename(numbered(number), numbered(number + 1))?;
+            }
+        }
+        fs::rename(self.dir.join(LOG_FILE), numbered(1))
     }
 }
 
@@ -529,6 +569,61 @@ mod tests {
     }
 
     #[test]
+    fn events_anyone_can_trigger_are_rate_limited_and_counted() {
+        let dir = TempDir::new();
+        let (clock, time) = clock(1000);
+        let store = Store::initialize(&dir.0, clock).unwrap();
+        for _ in 0..50 {
+            store.log("unknown_device", "ABC");
+        }
+        store.log("auth_ok", "Aula 3");
+        time.store(1000 + NOISY_WINDOW, Ordering::SeqCst);
+        store.log("unknown_device", "XYZ");
+        let text = fs::read_to_string(dir.0.join(LOG_FILE)).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3, "{text}");
+        assert!(lines[0].ends_with("unknown_device ABC"));
+        assert!(lines[1].contains("auth_ok"));
+        assert!(lines[2].contains("XYZ (+49 similar events suppressed)"));
+    }
+
+    #[test]
+    fn a_flood_of_anonymous_events_cannot_push_real_events_out_of_the_log() {
+        let dir = TempDir::new();
+        let (clock, time) = clock(5000);
+        let store = Store::initialize(&dir.0, clock).unwrap();
+        store.log("revoked", "Dispositivo importante");
+        for second in 0..20_000_u64 {
+            time.store(5000 + second * NOISY_WINDOW, Ordering::SeqCst);
+            store.log("unknown_device", &"K".repeat(MAX_LOG_DETAIL));
+        }
+        let mut all = String::new();
+        for name in [
+            "access.log",
+            "access.log.1",
+            "access.log.2",
+            "access.log.3",
+            "access.log.4",
+            "access.log.5",
+        ] {
+            all.push_str(&fs::read_to_string(dir.0.join(name)).unwrap_or_default());
+        }
+        assert!(all.contains("revoked Dispositivo importante"));
+    }
+
+    #[test]
+    fn auditing_events_are_never_dropped() {
+        let dir = TempDir::new();
+        let (clock, _) = clock(10);
+        let store = Store::initialize(&dir.0, clock).unwrap();
+        for _ in 0..5 {
+            store.log("totp_failed", "Aula 3");
+        }
+        let text = fs::read_to_string(dir.0.join(LOG_FILE)).unwrap();
+        assert_eq!(text.lines().count(), 5);
+    }
+
+    #[test]
     fn the_access_log_is_rotated_when_it_grows() {
         let dir = TempDir::new();
         let (clock, _) = clock(1);
@@ -539,7 +634,7 @@ mod tests {
         )
         .unwrap();
         store.log("connect", "after the rotation");
-        assert!(dir.0.join(LOG_ROTATED).exists());
+        assert!(dir.0.join(format!("{LOG_FILE}.1")).exists());
         let text = fs::read_to_string(dir.0.join(LOG_FILE)).unwrap();
         assert_eq!(text, "1 connect after the rotation\n");
     }

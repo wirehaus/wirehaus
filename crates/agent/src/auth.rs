@@ -13,7 +13,7 @@ use crate::link::{Incoming, Link, is_timeout};
 use crate::state::AuthError;
 use crate::store::Store;
 
-pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const CODE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_CODE_ATTEMPTS: u32 = 3;
 pub const INBOUND_LIMIT: usize = 4096;
