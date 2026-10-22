@@ -1,6 +1,6 @@
 #![cfg(target_os = "linux")]
 
-use std::path::Path;
+use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -27,7 +27,7 @@ impl Xvfb {
             .expect("Xvfb must be installed to run this test");
         let socket = format!("/tmp/.X11-unix/X{number}");
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !Path::new(&socket).exists() {
+        while UnixStream::connect(&socket).is_err() {
             assert!(Instant::now() < deadline, "Xvfb did not start in time");
             sleep(Duration::from_millis(50));
         }
