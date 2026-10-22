@@ -36,7 +36,7 @@ pub fn decode(text: &str) -> Result<Vec<u8>, CryptoError> {
             );
         }
     }
-    if buffer & ((1 << bits) - 1) != 0 {
+    if bits >= 5 || buffer & ((1 << bits) - 1) != 0 {
         return Err(CryptoError::InvalidBase32);
     }
     Ok(out)
@@ -80,6 +80,13 @@ mod tests {
     #[test]
     fn rejects_characters_outside_the_alphabet() {
         for text in ["MZXW1", "MZXW0", "MZXW8", "MZXW9", "MZX=", "MZXW6!", "ñ"] {
+            assert_eq!(decode(text), Err(CryptoError::InvalidBase32), "{text}");
+        }
+    }
+
+    #[test]
+    fn rejects_lengths_the_rfc_does_not_allow() {
+        for text in ["A", "MYA", "MZXW6YTBO", "MZXW6YTBOIA", "AAAAAAAAA"] {
             assert_eq!(decode(text), Err(CryptoError::InvalidBase32), "{text}");
         }
     }
