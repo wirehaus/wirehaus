@@ -1,6 +1,6 @@
 use wirehaus_protocol::{
-    AuthFailure, Button, Channel, Codec, ControlMessage, DesktopMessage, Frame, InputEvent,
-    TerminalMessage, ViewerMessage,
+    AuthFailure, Button, Channel, Codec, ControlMessage, DesktopMessage, Entry, EntryKind,
+    FilesMessage, Frame, InputEvent, TerminalMessage, ViewerMessage,
 };
 
 struct Rng(u64);
@@ -44,6 +44,29 @@ impl Rng {
 }
 
 const ROUNDS: usize = 200_000;
+
+fn file_samples() -> Vec<Vec<u8>> {
+    vec![
+        FilesMessage::Upload {
+            root: 1,
+            path: "docs/a.txt".to_owned(),
+            size: 40,
+        }
+        .encode(),
+        FilesMessage::Listing {
+            entries: vec![Entry {
+                name: "a".to_owned(),
+                kind: EntryKind::File,
+                size: 3,
+                modified: 9,
+            }],
+            truncated: false,
+        }
+        .encode(),
+        FilesMessage::Roots(vec!["home".to_owned()]).encode(),
+        FilesMessage::Data(vec![1, 2, 3]).encode(),
+    ]
+}
 
 fn valid_samples() -> Vec<Vec<u8>> {
     let mut out = Vec::new();
@@ -93,6 +116,7 @@ fn valid_samples() -> Vec<Vec<u8>> {
     );
     out.push(TerminalMessage::Input(b"ls\n".to_vec()).encode());
     out.push(TerminalMessage::Exited { code: 3 }.encode());
+    out.extend(file_samples());
     out.push(InputEvent::PointerMove { x: 3, y: 4 }.encode());
     out.push(
         InputEvent::Button {
@@ -148,6 +172,7 @@ fn no_decoder_panics_on_random_or_mutated_input() {
             let _ = ViewerMessage::decode(&bytes);
             let _ = ControlMessage::decode(&bytes);
             let _ = TerminalMessage::decode(&bytes);
+            let _ = FilesMessage::decode(&bytes);
         }
     }
 }
@@ -175,6 +200,9 @@ fn anything_that_decodes_encodes_back_to_the_same_bytes() {
                 accepted[3] += 1;
             }
             if let Ok(message) = TerminalMessage::decode(&bytes) {
+                assert_eq!(message.encode(), bytes);
+            }
+            if let Ok(message) = FilesMessage::decode(&bytes) {
                 assert_eq!(message.encode(), bytes);
             }
             if let Ok(message) = ControlMessage::decode(&bytes) {

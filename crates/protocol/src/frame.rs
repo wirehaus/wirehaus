@@ -3,6 +3,7 @@ use crate::error::ProtocolError;
 
 pub const HEADER_LEN: usize = 9;
 pub const MAX_PAYLOAD_LEN: usize = 1 << 20;
+pub const MAX_VIEWER_MESSAGE: usize = 36 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {

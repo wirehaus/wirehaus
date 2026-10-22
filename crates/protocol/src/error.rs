@@ -40,4 +40,6 @@ pub enum ProtocolError {
     },
     #[error("invalid control value {0}")]
     InvalidControl(u8),
+    #[error("message {0} carries text that is not valid UTF-8")]
+    InvalidText(u8),
 }

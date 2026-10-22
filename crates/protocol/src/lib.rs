@@ -2,6 +2,7 @@ mod channel;
 mod control;
 mod desktop;
 mod error;
+mod files;
 mod frame;
 mod input;
 mod terminal;
@@ -11,7 +12,11 @@ pub use channel::Channel;
 pub use control::{AuthFailure, CODE_LEN, ControlMessage};
 pub use desktop::{Codec, DesktopMessage};
 pub use error::ProtocolError;
-pub use frame::{Frame, HEADER_LEN, MAX_PAYLOAD_LEN};
+pub use files::{
+    Entry, EntryKind, FailureReason, FilesMessage, MAX_CHUNK, MAX_ENTRIES, MAX_NAME_LEN,
+    MAX_PATH_LEN, MAX_ROOTS,
+};
+pub use frame::{Frame, HEADER_LEN, MAX_PAYLOAD_LEN, MAX_VIEWER_MESSAGE};
 pub use input::{Button, InputEvent};
 pub use terminal::{
     MAX_DIMENSION, MAX_INPUT_CHUNK, MAX_OUTPUT_CHUNK, RefusalReason, TerminalMessage,
