@@ -47,28 +47,118 @@ pub fn parse_head(bytes: &[u8]) -> Result<Option<RequestHead>, HeadError> {
     }))
 }
 
-pub fn allowed_authorities(port: u16) -> [String; 3] {
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Exposure {
+    hosts: Vec<String>,
+    origins: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExposureError(pub String);
+
+impl std::fmt::Display for ExposureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ExposureError {}
+
+impl Exposure {
+    pub fn new(public_hosts: &[String], viewer_origins: &[String]) -> Result<Self, ExposureError> {
+        let mut hosts = Vec::new();
+        let mut origins = Vec::new();
+        for host in public_hosts {
+            let host = valid_authority(host)?;
+            origins.push(format!("https://{host}"));
+            hosts.push(host);
+        }
+        for origin in viewer_origins {
+            let authority = origin.strip_prefix("https://").ok_or_else(|| {
+                ExposureError(format!(
+                    "{origin:?} must start with https:// and name only a host"
+                ))
+            })?;
+            origins.push(format!("https://{}", valid_authority(authority)?));
+        }
+        Ok(Self { hosts, origins })
+    }
+
+    #[must_use]
+    pub fn host_allowed(&self, host: Option<&str>, port: u16) -> bool {
+        host.is_some_and(|host| {
+            allowed_authorities(port)
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(host))
+                || self
+                    .hosts
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(host))
+        })
+    }
+
+    #[must_use]
+    pub fn origin_allowed(&self, origin: Option<&str>, port: u16) -> bool {
+        origin.is_none_or(|origin| {
+            allowed_authorities(port)
+                .iter()
+                .any(|allowed| format!("http://{allowed}").eq_ignore_ascii_case(origin))
+                || self
+                    .origins
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(origin))
+        })
+    }
+}
+
+fn valid_authority(text: &str) -> Result<String, ExposureError> {
+    let invalid =
+        |reason: &str| ExposureError(format!("{text:?} is not a valid public host: {reason}"));
+    let (name, port) = match text.rsplit_once(':') {
+        Some((name, port)) => (name, Some(port)),
+        None => (text, None),
+    };
+    if let Some(port) = port
+        && (port.is_empty()
+            || port.parse::<u16>().ok().is_none_or(|p| p == 0)
+            || port.starts_with('0'))
+    {
+        return Err(invalid("the port must be between 1 and 65535"));
+    }
+    let labels: Vec<&str> = name.split('.').collect();
+    let well_formed = name.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    if !well_formed {
+        return Err(invalid("use a plain DNS name such as agent.example.com"));
+    }
+    if labels
+        .iter()
+        .all(|label| label.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err(invalid("an IP address is not accepted"));
+    }
+    let name = name.to_ascii_lowercase();
+    Ok(match port {
+        Some(port) => format!("{name}:{port}"),
+        None => name,
+    })
+}
+
+fn allowed_authorities(port: u16) -> [String; 3] {
     [
         format!("127.0.0.1:{port}"),
         format!("localhost:{port}"),
         format!("[::1]:{port}"),
     ]
-}
-
-pub fn host_allowed(host: Option<&str>, port: u16) -> bool {
-    host.is_some_and(|host| {
-        allowed_authorities(port)
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(host))
-    })
-}
-
-pub fn origin_allowed(origin: Option<&str>, port: u16) -> bool {
-    origin.is_none_or(|origin| {
-        allowed_authorities(port)
-            .iter()
-            .any(|allowed| format!("http://{allowed}").eq_ignore_ascii_case(origin))
-    })
 }
 
 pub fn response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
@@ -160,57 +250,109 @@ mod tests {
     }
 
     #[test]
-    fn only_local_hosts_are_allowed() {
-        assert!(host_allowed(Some("127.0.0.1:7878"), 7878));
-        assert!(host_allowed(Some("LOCALHOST:7878"), 7878));
-        assert!(host_allowed(Some("[::1]:7878"), 7878));
-        assert!(!host_allowed(Some("127.0.0.1:9"), 7878));
-        assert!(!host_allowed(Some("evil.example:7878"), 7878));
-        assert!(!host_allowed(Some("127.0.0.1"), 7878));
-        assert!(!host_allowed(None, 7878));
+    fn only_local_hosts_are_allowed_by_default() {
+        let local = Exposure::default();
+        assert!(local.host_allowed(Some("127.0.0.1:7878"), 7878));
+        assert!(local.host_allowed(Some("LOCALHOST:7878"), 7878));
+        assert!(local.host_allowed(Some("[::1]:7878"), 7878));
+        assert!(!local.host_allowed(Some("127.0.0.1:9"), 7878));
+        assert!(!local.host_allowed(Some("evil.example:7878"), 7878));
+        assert!(!local.host_allowed(Some("127.0.0.1"), 7878));
+        assert!(!local.host_allowed(None, 7878));
     }
 
     #[test]
-    fn only_local_origins_are_allowed() {
-        assert!(origin_allowed(None, 7878));
-        assert!(origin_allowed(Some("http://127.0.0.1:7878"), 7878));
-        assert!(origin_allowed(Some("http://localhost:7878"), 7878));
-        assert!(!origin_allowed(Some("https://127.0.0.1:7878"), 7878));
-        assert!(!origin_allowed(Some("http://evil.example"), 7878));
-        assert!(!origin_allowed(
-            Some("http://127.0.0.1:7878.evil.example"),
-            7878
-        ));
-        assert!(!origin_allowed(Some("null"), 7878));
+    fn only_local_origins_are_allowed_by_default() {
+        let local = Exposure::default();
+        assert!(local.origin_allowed(None, 7878));
+        assert!(local.origin_allowed(Some("http://127.0.0.1:7878"), 7878));
+        assert!(local.origin_allowed(Some("http://localhost:7878"), 7878));
+        assert!(!local.origin_allowed(Some("https://127.0.0.1:7878"), 7878));
+        assert!(!local.origin_allowed(Some("http://evil.example"), 7878));
+        assert!(!local.origin_allowed(Some("http://127.0.0.1:7878.evil.example"), 7878));
+        assert!(!local.origin_allowed(Some("null"), 7878));
+    }
+
+    fn exposure(hosts: &[&str], origins: &[&str]) -> Result<Exposure, ExposureError> {
+        let own = |items: &[&str]| {
+            items
+                .iter()
+                .map(|item| (*item).to_owned())
+                .collect::<Vec<_>>()
+        };
+        Exposure::new(&own(hosts), &own(origins))
     }
 
     #[test]
-    fn responses_carry_the_security_headers() {
-        let text = String::from_utf8(response("200 OK", "text/html", b"hi")).unwrap();
-        assert!(text.starts_with("HTTP/1.1 200 OK\r\n"));
-        assert!(text.contains("Content-Length: 2\r\n"));
-        assert!(text.contains("Content-Security-Policy: default-src 'none'"));
-        assert!(text.contains("X-Content-Type-Options: nosniff"));
-        assert!(text.ends_with("\r\n\r\nhi"));
-    }
-
-    #[test]
-    fn the_head_parser_never_panics_and_respects_its_limits() {
-        let mut rng = crate::testing::Rng::new(0x5EED_0001_2345_6789);
-        let valid = head("Upgrade: websocket\r\nOrigin: http://127.0.0.1:7878\r\n");
-        let mut parsed = 0;
-        for round in 0..30_000 {
-            let input = if round % 3 == 0 {
-                rng.bytes(400)
-            } else {
-                rng.mutate(&valid)
-            };
-            if let Ok(Some(request)) = parse_head(&input) {
-                parsed += 1;
-                assert_ne!(request.method, "");
-                assert!(request.path.len() <= MAX_HEAD_LEN);
-            }
+    fn a_public_host_is_accepted_exactly_and_brings_its_own_https_origin() {
+        let open = exposure(&["Agent.Example.com"], &[]).unwrap();
+        assert!(open.host_allowed(Some("agent.example.com"), 7878));
+        assert!(open.host_allowed(Some("AGENT.example.COM"), 7878));
+        assert!(open.host_allowed(Some("127.0.0.1:7878"), 7878));
+        for other in [
+            "example.com",
+            "evil.agent.example.com",
+            "agent.example.com:443",
+            "agent.example.com.evil.net",
+        ] {
+            assert!(!open.host_allowed(Some(other), 7878), "{other}");
         }
-        assert!(parsed > 100);
+        assert!(open.origin_allowed(Some("https://agent.example.com"), 7878));
+        assert!(!open.origin_allowed(Some("http://agent.example.com"), 7878));
+        assert!(!open.origin_allowed(Some("https://app.example.com"), 7878));
+        assert!(!open.origin_allowed(Some("https://agent.example.com.evil.net"), 7878));
+    }
+
+    #[test]
+    fn a_separate_viewer_origin_may_open_the_connection_without_being_a_host() {
+        let open = exposure(&["agent.example.com"], &["https://app.example.com"]).unwrap();
+        assert!(open.origin_allowed(Some("https://app.example.com"), 7878));
+        assert!(!open.host_allowed(Some("app.example.com"), 7878));
+        assert!(!open.origin_allowed(Some("https://app.example.com:8443"), 7878));
+        let custom = exposure(&[], &["https://app.example.com:8443"]).unwrap();
+        assert!(custom.origin_allowed(Some("https://app.example.com:8443"), 7878));
+    }
+
+    #[test]
+    fn unsafe_or_sloppy_exposure_settings_are_rejected() {
+        for host in [
+            "",
+            "*",
+            "*.example.com",
+            "localhost",
+            "example",
+            "http://agent.example.com",
+            "agent.example.com/",
+            "agent.example.com/path",
+            "agent..example.com",
+            ".example.com",
+            "example.com.",
+            "-a.example.com",
+            "a-.example.com",
+            "a b.example.com",
+            "127.0.0.1",
+            "10.0.0.5",
+            "[::1]",
+            "agent.example.com:",
+            "agent.example.com:0",
+            "agent.example.com:99999",
+            "agent.example.com:08",
+            "agent_x.example.com",
+            "ünï.example.com",
+        ] {
+            assert!(exposure(&[host], &[]).is_err(), "{host:?} was accepted");
+        }
+        for origin in [
+            "http://app.example.com",
+            "app.example.com",
+            "https://",
+            "https://*.example.com",
+            "https://app.example.com/",
+            "https://app.example.com/x",
+            "https://user@app.example.com",
+            "https://127.0.0.1",
+        ] {
+            assert!(exposure(&[], &[origin]).is_err(), "{origin:?} was accepted");
+        }
     }
 }

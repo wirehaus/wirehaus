@@ -96,7 +96,10 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
             quality,
             idle_minutes,
             viewer_hash,
+            public_hosts,
+            viewer_origins,
         } => {
+            let exposure = wirehaus_agent::Exposure::new(&public_hosts, &viewer_origins)?;
             let server = Server::bind(ServerConfig {
                 listen,
                 display,
@@ -106,6 +109,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
                 clock: None,
                 idle_timeout: Duration::from_secs(u64::from(idle_minutes) * 60),
                 viewer_hash,
+                exposure,
             })?;
             println!("listening on http://{}", server.local_addr()?);
             server.run(&AtomicBool::new(false))?;

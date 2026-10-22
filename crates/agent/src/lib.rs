@@ -20,5 +20,6 @@ pub mod terminal;
 mod testing;
 
 pub use error::ServerError;
+pub use http::{Exposure, ExposureError};
 pub use server::{Server, ServerConfig};
 pub use store::{Clock, Store, StoreError, default_dir, system_clock};

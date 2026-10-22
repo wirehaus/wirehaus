@@ -230,6 +230,8 @@ fn write_text(dir: &Path, text: &str) -> Result<(), StoreError> {
     file.sync_all()?;
     drop(file);
     fs::rename(&temp, dir.join(STATE_FILE))?;
+    #[cfg(unix)]
+    fs::File::open(dir)?.sync_all()?;
     Ok(())
 }
 

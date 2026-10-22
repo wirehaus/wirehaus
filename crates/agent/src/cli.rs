@@ -58,6 +58,10 @@ pub enum Command {
         idle_minutes: u32,
         #[arg(long, value_name = "SHA256")]
         viewer_hash: Option<String>,
+        #[arg(long = "public-host", value_name = "HOST")]
+        public_hosts: Vec<String>,
+        #[arg(long = "viewer-origin", value_name = "URL")]
+        viewer_origins: Vec<String>,
     },
 }
 

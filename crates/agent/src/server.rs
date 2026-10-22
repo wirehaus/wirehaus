@@ -11,9 +11,7 @@ use tungstenite::protocol::WebSocketConfig;
 use crate::auth::{self, INBOUND_LIMIT, Outcome};
 use crate::clipboard::Hub;
 use crate::error::ServerError;
-use crate::http::{
-    HeadError, MAX_HEAD_LEN, RequestHead, host_allowed, origin_allowed, parse_head, response,
-};
+use crate::http::{Exposure, HeadError, MAX_HEAD_LEN, RequestHead, parse_head, response};
 use crate::pacer::Pacer;
 use crate::platform;
 use crate::session::{self, Policy};
@@ -43,6 +41,7 @@ pub struct ServerConfig {
     pub clock: Option<Clock>,
     pub idle_timeout: Duration,
     pub viewer_hash: Option<String>,
+    pub exposure: Exposure,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -171,7 +170,11 @@ impl Server {
         let Some((head, head_len)) = read_head(&mut stream)? else {
             return Ok(());
         };
-        if !host_allowed(head.host.as_deref(), port) {
+        if !self
+            .config
+            .exposure
+            .host_allowed(head.host.as_deref(), port)
+        {
             return reply(
                 &mut stream,
                 head_len,
@@ -222,7 +225,11 @@ impl Server {
         if head.path != "/ws" {
             return reply(&mut stream, 0, false, "404 Not Found", b"not found");
         }
-        if !origin_allowed(head.origin.as_deref(), port) {
+        if !self
+            .config
+            .exposure
+            .origin_allowed(head.origin.as_deref(), port)
+        {
             return reply(&mut stream, 0, false, "403 Forbidden", b"forbidden origin");
         }
         let Some(pending) = CountGuard::enter(&self.unauthenticated, MAX_UNAUTHENTICATED) else {

@@ -101,6 +101,14 @@ impl Running {
     }
 
     fn start_with_idle(display: &str, idle_timeout: Duration) -> Self {
+        Self::start_configured(display, idle_timeout, wirehaus_agent::Exposure::default())
+    }
+
+    fn start_configured(
+        display: &str,
+        idle_timeout: Duration,
+        exposure: wirehaus_agent::Exposure,
+    ) -> Self {
         let root = std::env::temp_dir().join(format!(
             "wirehaus-serve-{}-{}",
             std::process::id(),
@@ -126,6 +134,7 @@ impl Running {
             clock: Some(clock),
             idle_timeout,
             viewer_hash: None,
+            exposure,
         })
         .unwrap();
         let port = server.local_addr().unwrap().port();
@@ -1924,6 +1933,7 @@ fn viewer_config(dir: &std::path::Path, state: PathBuf, hash: Option<String>) ->
         clock: None,
         idle_timeout: Duration::from_secs(3600),
         viewer_hash: hash,
+        exposure: wirehaus_agent::Exposure::default(),
     }
 }
 
@@ -1976,6 +1986,277 @@ fn the_viewer_is_served_from_what_was_verified_even_if_the_files_change_later() 
     let host = format!("Host: 127.0.0.1:{}\r\n", server.port);
     let reply = server.http(&format!("GET / HTTP/1.1\r\n{host}\r\n"));
     assert!(reply.ends_with("<title>viewer</title>"), "{reply}");
+}
+
+fn channel_name(channel: Channel) -> &'static str {
+    match channel {
+        Channel::Files => "files",
+        Channel::Clipboard => "clipboard",
+        Channel::Terminal => "terminal",
+        Channel::Desktop => "desktop",
+        _ => "other",
+    }
+}
+
+struct Dice(u64);
+
+impl Dice {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    fn below(&mut self, limit: usize) -> usize {
+        usize::try_from(self.next() % u64::try_from(limit).unwrap()).unwrap()
+    }
+
+    fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+        items[self.below(items.len())]
+    }
+
+    fn bytes(&mut self, max: usize) -> Vec<u8> {
+        let length = 1 + self.below(max);
+        (0..length)
+            .map(|_| u8::try_from(self.next() & 0xFF).unwrap())
+            .collect()
+    }
+}
+
+const FUZZ_PATHS: [&str; 16] = [
+    "",
+    "docs",
+    "docs/note.txt",
+    "new",
+    "new/inner",
+    "up.bin",
+    "..",
+    "../private/secret.txt",
+    "docs/../up.bin",
+    "/etc/passwd",
+    "a\\b",
+    "nul\0byte",
+    "escape",
+    "escape/secret.txt",
+    ".wirehaus-1.part",
+    "x/y/z/w",
+];
+
+fn random_files_message(dice: &mut Dice) -> FilesMessage {
+    let root = u8::try_from(dice.below(3)).unwrap();
+    let path = dice.pick(&FUZZ_PATHS).to_owned();
+    match dice.below(10) {
+        0 => FilesMessage::ListRoots,
+        1 => FilesMessage::List { root, path },
+        2 => FilesMessage::Download { root, path },
+        3 => FilesMessage::Upload {
+            root,
+            path,
+            size: [0, 1, 70_000, 5_000_000, u64::MAX][dice.below(5)],
+        },
+        4 => FilesMessage::Mkdir { root, path },
+        5 => FilesMessage::Remove { root, path },
+        6 => FilesMessage::Cancel,
+        7 => FilesMessage::Data(dice.bytes(wirehaus_protocol::MAX_CHUNK)),
+        8 => FilesMessage::Done,
+        _ => FilesMessage::Ack {
+            bytes: [0, 1, 65_536, 9_999_999, u64::MAX][dice.below(5)],
+        },
+    }
+}
+
+fn random_clipboard_message(dice: &mut Dice) -> ClipboardMessage {
+    if dice.below(3) == 0 {
+        return ClipboardMessage::Read;
+    }
+    ClipboardMessage::Write(
+        ["a", "ñandú", "línea\ncon\tcontrol", &"x".repeat(30_000)][dice.below(4)].to_owned(),
+    )
+}
+
+fn random_viewer_message(dice: &mut Dice) -> ViewerMessage {
+    match dice.below(5) {
+        0 => ViewerMessage::FrameAck {
+            sequence: u32::try_from(dice.next() & 0xFFFF_FFFF).unwrap(),
+        },
+        1 => ViewerMessage::Capabilities {
+            video: dice.below(2) == 0,
+        },
+        2 => ViewerMessage::Input(InputEvent::Key {
+            code: u16::try_from(dice.next() & 0xFFFF).unwrap(),
+            pressed: dice.below(2) == 0,
+        }),
+        3 => ViewerMessage::Input(InputEvent::Wheel {
+            horizontal: i16::try_from(dice.next() & 0x7FFF).unwrap() - 16_000,
+            vertical: i16::try_from(dice.next() & 0x7FFF).unwrap() - 16_000,
+        }),
+        _ => ViewerMessage::Input(InputEvent::PointerMove {
+            x: u16::try_from(dice.next() & 0x1FF).unwrap(),
+            y: u16::try_from(dice.next() & 0x1FF).unwrap(),
+        }),
+    }
+}
+
+fn random_terminal_message(dice: &mut Dice) -> TerminalMessage {
+    match dice.below(4) {
+        0 => TerminalMessage::Open {
+            columns: u16::try_from(1 + dice.below(500)).unwrap(),
+            rows: u16::try_from(1 + dice.below(500)).unwrap(),
+        },
+        1 => TerminalMessage::Input(dice.bytes(wirehaus_protocol::MAX_INPUT_CHUNK)),
+        2 => TerminalMessage::Resize {
+            columns: u16::try_from(1 + dice.below(500)).unwrap(),
+            rows: u16::try_from(1 + dice.below(500)).unwrap(),
+        },
+        _ => TerminalMessage::Close,
+    }
+}
+
+fn random_frame(dice: &mut Dice) -> Frame {
+    let stream = u32::try_from(dice.below(8)).unwrap();
+    let (channel, payload) = match dice.below(4) {
+        0 => (Channel::Files, random_files_message(dice).encode()),
+        1 => (Channel::Clipboard, random_clipboard_message(dice).encode()),
+        2 => (Channel::Desktop, random_viewer_message(dice).encode()),
+        _ => (Channel::Terminal, random_terminal_message(dice).encode()),
+    };
+    Frame::new(channel, stream, payload).unwrap()
+}
+
+#[test]
+fn an_authenticated_viewer_cannot_crash_or_wedge_the_agent_with_valid_looking_messages() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let folder = SharedFolder::new();
+    share(&server, &folder);
+    set_clipboard_mode(&server, ClipboardMode::Both);
+    std::os::unix::fs::symlink(folder.base.join("private"), folder.shared().join("escape"))
+        .unwrap();
+    let (mut client, device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(5));
+    let seed = std::env::var("WIREHAUS_FUZZ_SEED")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0x00FF_1CE0_DEAD_BEEF_u64);
+    let rounds: usize = std::env::var("WIREHAUS_FUZZ_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(4000);
+    let mut dice = Dice(seed);
+    let mut replies = std::collections::HashMap::new();
+    for round in 0..rounds {
+        client.send(&random_frame(&mut dice));
+        if round % 7 != 0 {
+            continue;
+        }
+        loop {
+            match client.read_frame() {
+                Received::Got(frame) => {
+                    if let Ok(DesktopMessage::FrameEnd { sequence }) =
+                        DesktopMessage::decode(&frame.payload)
+                    {
+                        client.send_viewer(ViewerMessage::FrameAck { sequence });
+                    }
+                    *replies
+                        .entry(channel_name(frame.channel))
+                        .or_insert(0_usize) += 1;
+                }
+                Received::Timeout => break,
+                Received::Closed => panic!("the agent ended the session at round {round}"),
+            }
+        }
+    }
+    assert!(
+        replies.get("files").copied().unwrap_or(0) > 100,
+        "{replies:?}"
+    );
+    assert!(
+        replies.get("clipboard").copied().unwrap_or(0) > 10,
+        "{replies:?}"
+    );
+    assert!(
+        replies.get("terminal").copied().unwrap_or(0) > 10,
+        "{replies:?}"
+    );
+    assert!(!folder.base.join("private/planted.txt").exists());
+    assert_eq!(
+        fs::read(folder.base.join("private/secret.txt")).unwrap(),
+        b"secret"
+    );
+    drop(client);
+    sleep(Duration::from_millis(600));
+    let mut again = reconnect_and_login(&server, &device);
+    again.set_timeout(Duration::from_secs(5));
+    assert!(matches!(
+        next_tile_or_resize(&mut again),
+        DesktopMessage::Resize { .. } | DesktopMessage::Tile { .. }
+    ));
+}
+
+fn websocket_status(server: &Running, host: &str, origin: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let request = format!(
+        "GET /ws HTTP/1.1\r\nHost: {host}\r\nOrigin: {origin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut buffer = [0_u8; 64];
+    let read = stream.read(&mut buffer).unwrap_or(0);
+    let _ = stream.shutdown(Shutdown::Both);
+    String::from_utf8_lossy(&buffer[..read])
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+#[test]
+fn a_configured_public_host_and_viewer_origin_are_accepted_and_nothing_else() {
+    let xvfb = Xvfb::start_unique();
+    let exposure = wirehaus_agent::Exposure::new(
+        &["agent.example.com".to_owned()],
+        &["https://app.example.com".to_owned()],
+    )
+    .unwrap();
+    let server = Running::start_configured(&xvfb.display, Duration::from_secs(3600), exposure);
+
+    let reply = server.http("GET / HTTP/1.1\r\nHost: agent.example.com\r\n\r\n");
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    let reply = server.http("GET / HTTP/1.1\r\nHost: evil.example.com\r\n\r\n");
+    assert!(reply.starts_with("HTTP/1.1 403"), "{reply}");
+
+    let local = format!("127.0.0.1:{}", server.port);
+    for (host, origin, accepted) in [
+        ("agent.example.com", "https://agent.example.com", true),
+        ("agent.example.com", "https://app.example.com", true),
+        ("agent.example.com", "https://evil.example.com", false),
+        ("agent.example.com", "http://agent.example.com", false),
+        ("agent.example.com", "null", false),
+        ("evil.example.com", "https://agent.example.com", false),
+        (local.as_str(), "https://app.example.com", true),
+        (local.as_str(), "https://evil.example.com", false),
+    ] {
+        let status = websocket_status(&server, host, origin);
+        let expected = if accepted {
+            "HTTP/1.1 101"
+        } else {
+            "HTTP/1.1 403"
+        };
+        assert!(status.starts_with(expected), "{host} {origin}: {status}");
+    }
+}
+
+#[test]
+fn without_configuration_a_public_name_is_refused() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let reply = server.http("GET / HTTP/1.1\r\nHost: agent.example.com\r\n\r\n");
+    assert!(reply.starts_with("HTTP/1.1 403"), "{reply}");
+    let status = websocket_status(&server, "agent.example.com", "https://agent.example.com");
+    assert!(status.starts_with("HTTP/1.1 403"), "{status}");
 }
 
 #[test]
@@ -2036,6 +2317,7 @@ fn refuses_to_bind_outside_the_loopback_interface() {
         clock: None,
         idle_timeout: Duration::from_secs(3600),
         viewer_hash: None,
+        exposure: wirehaus_agent::Exposure::default(),
     });
     assert!(matches!(result, Err(ServerError::NotLoopback(_))));
 }
@@ -2052,6 +2334,7 @@ fn refuses_to_start_without_an_agent_identity() {
         clock: None,
         idle_timeout: Duration::from_secs(3600),
         viewer_hash: None,
+        exposure: wirehaus_agent::Exposure::default(),
     });
     assert!(matches!(result, Err(ServerError::Store(_))));
 }
