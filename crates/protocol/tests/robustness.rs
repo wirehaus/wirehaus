@@ -1,6 +1,6 @@
 use wirehaus_protocol::{
     AuthFailure, Button, Channel, Codec, ControlMessage, DesktopMessage, Frame, InputEvent,
-    ViewerMessage,
+    TerminalMessage, ViewerMessage,
 };
 
 struct Rng(u64);
@@ -84,6 +84,15 @@ fn valid_samples() -> Vec<Vec<u8>> {
         .encode(),
     );
     out.push(ViewerMessage::Capabilities { video: true }.encode());
+    out.push(
+        TerminalMessage::Open {
+            columns: 80,
+            rows: 24,
+        }
+        .encode(),
+    );
+    out.push(TerminalMessage::Input(b"ls\n".to_vec()).encode());
+    out.push(TerminalMessage::Exited { code: 3 }.encode());
     out.push(InputEvent::PointerMove { x: 3, y: 4 }.encode());
     out.push(
         InputEvent::Button {
@@ -138,6 +147,7 @@ fn no_decoder_panics_on_random_or_mutated_input() {
             let _ = InputEvent::decode(&bytes);
             let _ = ViewerMessage::decode(&bytes);
             let _ = ControlMessage::decode(&bytes);
+            let _ = TerminalMessage::decode(&bytes);
         }
     }
 }
@@ -163,6 +173,9 @@ fn anything_that_decodes_encodes_back_to_the_same_bytes() {
             if let Ok(message) = ViewerMessage::decode(&bytes) {
                 assert_eq!(message.encode(), bytes);
                 accepted[3] += 1;
+            }
+            if let Ok(message) = TerminalMessage::decode(&bytes) {
+                assert_eq!(message.encode(), bytes);
             }
             if let Ok(message) = ControlMessage::decode(&bytes) {
                 assert_eq!(message.encode(), bytes);
