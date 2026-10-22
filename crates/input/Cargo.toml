@@ -1,0 +1,20 @@
+[package]
+name = "wirehaus-input"
+description = "Keyboard and mouse injection for the Wirehaus agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../LICENSE"
+publish.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+wirehaus-protocol = { path = "../protocol" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { workspace = true, features = ["xtest"] }
+
+[lints]
+workspace = true

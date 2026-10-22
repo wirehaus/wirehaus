@@ -266,6 +266,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wirehaus-input"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "wirehaus-protocol",
+ "x11rb",
+]
+
+[[package]]
 name = "wirehaus-protocol"
 version = "0.1.0"
 dependencies = [
