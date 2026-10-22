@@ -1,3 +1,4 @@
+import { CLIPBOARD_CHANNEL, type ClipboardMessage, decodeClipboard } from './clipboardprotocol.js';
 import { FILES_CHANNEL, type FilesMessage, decodeFiles } from './filesprotocol.js';
 import { evdevCode } from './keymap.js';
 import {
@@ -23,6 +24,8 @@ import {
 import { Handshake, type Session, generateDeviceKey, loadCrypto } from './secure.js';
 import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './storage.js';
 import { VideoPlayer, videoSupported } from './video.js';
+
+export type ClipboardListener = (message: ClipboardMessage) => void;
 
 export type FilesListener = (stream: number, message: FilesMessage) => void;
 
@@ -61,6 +64,7 @@ export class Viewer {
   private pendingMove: { x: number; y: number } | null = null;
   terminalListener: TerminalListener | null = null;
   filesListener: FilesListener | null = null;
+  clipboardListener: ClipboardListener | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -242,6 +246,8 @@ export class Viewer {
       this.terminalListener?.(frame.stream, decodeTerminal(frame.payload));
     } else if (this.phase === 'streaming' && frame.channel === FILES_CHANNEL) {
       this.filesListener?.(frame.stream, decodeFiles(frame.payload));
+    } else if (this.phase === 'streaming' && frame.channel === CLIPBOARD_CHANNEL) {
+      this.clipboardListener?.(decodeClipboard(frame.payload));
     } else {
       this.fail(socket);
     }
@@ -337,6 +343,10 @@ export class Viewer {
 
   sendFiles(stream: number, payload: Uint8Array): void {
     this.send(FILES_CHANNEL, payload, stream);
+  }
+
+  sendClipboard(stream: number, payload: Uint8Array): void {
+    this.send(CLIPBOARD_CHANNEL, payload, stream);
   }
 
   bufferedBytes(): number {

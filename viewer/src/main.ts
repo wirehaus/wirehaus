@@ -4,6 +4,7 @@ import {
   encodeTerminalOpen,
   encodeTerminalResize,
 } from './protocol.js';
+import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
 import { type Messages, messagesFor } from './strings.js';
 import { Terminals } from './terminals.js';
@@ -29,6 +30,7 @@ const screen = element<HTMLCanvasElement>('screen');
 const tabs = element<HTMLElement>('tabs');
 const terminalHost = element<HTMLElement>('terminals');
 const filesHost = element<HTMLElement>('files');
+const clipboardHost = element<HTMLElement>('clipboard');
 const pairForm = element<HTMLFormElement>('pair-form');
 const pairCode = element<HTMLInputElement>('pair-code');
 const pairName = element<HTMLInputElement>('pair-name');
@@ -108,11 +110,13 @@ function show(state: ViewerState): void {
     case 'refused':
       terminals.endAll();
       files.reset();
+      clipboard.reset();
       status.textContent = refusal(state, messages);
       break;
     case 'closed':
       terminals.endAll();
       files.reset();
+      clipboard.reset();
       status.textContent = messages.closed;
       break;
   }
@@ -175,29 +179,53 @@ const files = new FilesPanel(
 );
 viewer.filesListener = (stream, message) => files.receive(stream, message);
 
-let filesOpen = false;
+const clipboard = new ClipboardPanel(
+  clipboardHost,
+  { send: (stream, payload) => viewer.sendClipboard(stream, payload) },
+  {
+    intro: messages.clipboardIntro,
+    placeholder: messages.clipboardPlaceholder,
+    send: messages.clipboardSend,
+    fetch: messages.clipboardFetch,
+    sent: messages.clipboardSent,
+    received: messages.clipboardReceived,
+    copied: messages.clipboardCopied,
+    empty: messages.clipboardEmpty,
+    tooLong: messages.clipboardTooLong,
+    nothingToSend: messages.clipboardNothingToSend,
+    failure: (reason) => messages.clipboardFailure[reason],
+    closed: messages.closed,
+  },
+);
+viewer.clipboardListener = (message) => clipboard.receive(message);
+
+type Panel = 'desktop' | 'files' | 'clipboard';
+
+let panel: Panel = 'desktop';
 
 function showView(): void {
   const connected = lastKind === 'connected';
   const onTerminal = terminals.activeStream() !== null;
-  screen.hidden = !connected || onTerminal || filesOpen;
+  const shows = (wanted: Panel): boolean => connected && !onTerminal && panel === wanted;
+  screen.hidden = !shows('desktop');
+  filesHost.hidden = !shows('files');
+  clipboardHost.hidden = !shows('clipboard');
   terminalHost.hidden = !connected || !onTerminal;
-  filesHost.hidden = !connected || onTerminal || !filesOpen;
+}
+
+function selectPanel(wanted: Panel): void {
+  panel = wanted;
+  terminals.activate(null);
+  if (wanted === 'files') {
+    files.show();
+  }
 }
 
 function selectDesktop(): void {
-  filesOpen = false;
-  terminals.activate(null);
-}
-
-function selectFiles(): void {
-  filesOpen = true;
-  terminals.activate(null);
-  files.show();
+  selectPanel('desktop');
 }
 
 function selectTerminal(stream: number): void {
-  filesOpen = false;
   terminals.activate(stream);
 }
 
@@ -215,8 +243,9 @@ function tabButton(label: string, selected: boolean, onSelect: () => void): HTML
 function renderTabs(): void {
   const active = terminals.activeStream();
   const items: HTMLElement[] = [
-    tabButton(messages.tabDesktop, active === null && !filesOpen, selectDesktop),
-    tabButton(messages.tabFiles, active === null && filesOpen, selectFiles),
+    tabButton(messages.tabDesktop, active === null && panel === 'desktop', () => selectPanel('desktop')),
+    tabButton(messages.tabFiles, active === null && panel === 'files', () => selectPanel('files')),
+    tabButton(messages.tabClipboard, active === null && panel === 'clipboard', () => selectPanel('clipboard')),
   ];
   for (const stream of terminals.streams()) {
     const wrapper = tabButton(messages.terminalTitle(stream), active === stream, () => selectTerminal(stream));
@@ -241,10 +270,7 @@ function renderTabs(): void {
   add.setAttribute('aria-label', messages.newTerminal);
   add.title = messages.newTerminal;
   add.textContent = '+';
-  add.addEventListener('click', () => {
-    filesOpen = false;
-    terminals.create();
-  });
+  add.addEventListener('click', () => terminals.create());
   items.push(add);
   tabs.replaceChildren(...items);
   showView();

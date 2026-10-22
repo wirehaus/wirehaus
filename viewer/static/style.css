@@ -351,3 +351,53 @@ body {
   color: var(--muted);
   font-size: 14px;
 }
+
+#clipboard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(720px, 100%);
+  padding: 16px;
+  align-self: start;
+  justify-self: center;
+}
+
+.clipboard-intro,
+.clipboard-notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.clipboard-notice {
+  min-height: 1.2em;
+}
+
+.clipboard-text {
+  width: 100%;
+  min-height: 220px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: vertical;
+}
+
+.clipboard-text:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.clipboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#clipboard button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

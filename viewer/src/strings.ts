@@ -1,3 +1,4 @@
+import type { ClipboardFailure } from './clipboardprotocol.js';
 import type { FileFailure } from './filesprotocol.js';
 
 export type Messages = {
@@ -55,6 +56,18 @@ export type Messages = {
   filesTooBig: (name: string) => string;
   filesFailure: Record<FileFailure, string>;
   filesClosed: string;
+  tabClipboard: string;
+  clipboardIntro: string;
+  clipboardPlaceholder: string;
+  clipboardSend: string;
+  clipboardFetch: string;
+  clipboardSent: string;
+  clipboardReceived: string;
+  clipboardCopied: string;
+  clipboardEmpty: string;
+  clipboardTooLong: (limit: number) => string;
+  clipboardNothingToSend: string;
+  clipboardFailure: Record<ClipboardFailure, string>;
 };
 
 const catalog: Record<string, Messages> = {
@@ -129,6 +142,25 @@ const catalog: Record<string, Messages> = {
       io: 'Ha ocurrido un error en el disco del agente.',
     },
     filesClosed: 'Desconectado.',
+    tabClipboard: 'Portapapeles',
+    clipboardIntro:
+      'Escribe o pega aquí el texto que quieres llevar al ordenador remoto, o tráete el que hayas copiado allí. Nada se sincroniza solo.',
+    clipboardPlaceholder: 'Texto',
+    clipboardSend: 'Enviar al ordenador remoto',
+    clipboardFetch: 'Traer del ordenador remoto',
+    clipboardSent: 'Enviado. Ya puedes pegarlo allí.',
+    clipboardReceived: 'Recibido.',
+    clipboardCopied: 'Recibido y copiado a tu portapapeles.',
+    clipboardEmpty: 'El portapapeles remoto está vacío o no tiene texto.',
+    clipboardTooLong: (limit) => `El texto es demasiado largo (máximo ${limit / 1024} KiB).`,
+    clipboardNothingToSend: 'No hay texto que enviar.',
+    clipboardFailure: {
+      notAllowed:
+        'El portapapeles está desactivado en esa dirección. Actívalo en el ordenador de casa con "wirehaus-agent clipboard allow --code".',
+      tooLarge: 'El texto es demasiado grande.',
+      unavailable: 'El portapapeles del ordenador remoto no está disponible ahora.',
+      timeout: 'El ordenador remoto no ha respondido a tiempo.',
+    },
   },
   en: {
     loading: 'Loading',
@@ -201,6 +233,25 @@ const catalog: Record<string, Messages> = {
       io: 'A disk error occurred on the agent.',
     },
     filesClosed: 'Disconnected.',
+    tabClipboard: 'Clipboard',
+    clipboardIntro:
+      'Type or paste here the text you want to take to the remote computer, or bring back what you copied there. Nothing syncs by itself.',
+    clipboardPlaceholder: 'Text',
+    clipboardSend: 'Send to the remote computer',
+    clipboardFetch: 'Bring from the remote computer',
+    clipboardSent: 'Sent. You can paste it there now.',
+    clipboardReceived: 'Received.',
+    clipboardCopied: 'Received and copied to your clipboard.',
+    clipboardEmpty: 'The remote clipboard is empty or has no text.',
+    clipboardTooLong: (limit) => `The text is too long (${limit / 1024} KiB maximum).`,
+    clipboardNothingToSend: 'There is no text to send.',
+    clipboardFailure: {
+      notAllowed:
+        'The clipboard is disabled in that direction. Enable it on the home computer with "wirehaus-agent clipboard allow --code".',
+      tooLarge: 'The text is too large.',
+      unavailable: 'The remote clipboard is not available right now.',
+      timeout: 'The remote computer did not answer in time.',
+    },
   },
 };
 
