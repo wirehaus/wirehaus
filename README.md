@@ -22,7 +22,7 @@ El agente ya muestra y controla un escritorio Linux con X11 desde un navegador d
 
 Linux (X11) y macOS. Windows 10 y 11 y Linux con Wayland están previstos y todavía no funcionan.
 
-En macOS el agente necesita dos permisos del sistema, Grabación de pantalla y Accesibilidad. `wirehaus-agent permissions` los comprueba, los solicita y explica qué falta.
+En macOS el agente necesita dos permisos del sistema, Grabación de pantalla y Accesibilidad. `wirehaus-agent permissions` los comprueba, los solicita y explica qué falta. `wirehaus-agent service install` lo deja funcionando como servicio de usuario. macOS asocia los permisos a la firma del programa: `scripts/macos-sign.sh <binario>` lo firma con una identidad estable para no tener que volver a concederlos tras cada compilación.
 
 ## Estructura
 
