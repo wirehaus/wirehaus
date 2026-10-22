@@ -13,7 +13,7 @@ authors.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb.workspace = true
+x11rb = { workspace = true, features = ["damage"] }
 
 [lints]
 workspace = true

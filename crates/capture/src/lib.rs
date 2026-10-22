@@ -5,12 +5,27 @@ mod error;
 mod x11;
 
 pub use bitmap::{Bitmap, Rect};
-pub use damage::{MAX_RUN_WIDTH, TILE_SIZE, all_tiles, changed_tiles, coalesce};
+pub use damage::{
+    MAX_RUN_WIDTH, TILE_SIZE, all_tiles, changed_tiles, coalesce, tile_count, tiles_touching,
+};
 pub use error::CaptureError;
 #[cfg(target_os = "linux")]
 pub use x11::X11Screen;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Region {
+    pub rect: Rect,
+    pub bitmap: Bitmap,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Update {
+    pub width: u16,
+    pub height: u16,
+    pub resized: bool,
+    pub regions: Vec<Region>,
+}
+
 pub trait ScreenSource {
-    fn size(&self) -> (u16, u16);
-    fn grab(&mut self) -> Result<Bitmap, CaptureError>;
+    fn next_update(&mut self) -> Result<Update, CaptureError>;
 }

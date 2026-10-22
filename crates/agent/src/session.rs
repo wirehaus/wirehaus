@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tungstenite::{Error as WsError, Message, WebSocket};
-use wirehaus_capture::{Bitmap, Rect, all_tiles, changed_tiles, coalesce};
+use wirehaus_capture::{Rect, Region, Update, all_tiles, coalesce};
 use wirehaus_encode::{JpegEncoder, TileEncoder};
 use wirehaus_input::{InputError, InputSink};
 use wirehaus_protocol::{Channel, DesktopMessage, Frame, InputEvent, ProtocolError};
@@ -24,12 +24,10 @@ pub fn run(
     stop: &AtomicBool,
 ) -> Result<(), ServerError> {
     socket.get_ref().set_write_timeout(Some(WRITE_TIMEOUT))?;
-    let mut previous: Option<Bitmap> = None;
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
-        let current = backend.screen.grab()?;
-        send_changes(&mut socket, &mut encoder, previous.as_ref(), &current)?;
-        previous = Some(current);
+        let update = backend.screen.next_update()?;
+        send_update(&mut socket, &mut encoder, &update)?;
         socket.flush().or_else(ignore_would_block)?;
         if !receive(&mut socket, backend.input.as_mut(), deadline)? {
             return Ok(());
@@ -39,55 +37,56 @@ pub fn run(
     Ok(())
 }
 
-fn send_changes(
+fn send_update(
     socket: &mut WebSocket<TcpStream>,
     encoder: &mut JpegEncoder,
-    previous: Option<&Bitmap>,
-    current: &Bitmap,
+    update: &Update,
 ) -> Result<(), ServerError> {
-    let tiles = match previous {
-        Some(old) if same_size(old, current) => changed_tiles(old, current),
-        _ => {
-            send_message(
-                socket,
-                &DesktopMessage::Resize {
-                    width: current.width(),
-                    height: current.height(),
-                },
-            )?;
-            all_tiles(current)
-        }
-    };
-    for rect in coalesce(&tiles) {
-        send_rect(socket, encoder, current, rect)?;
+    if update.resized {
+        send_message(
+            socket,
+            &DesktopMessage::Resize {
+                width: update.width,
+                height: update.height,
+            },
+        )?;
     }
-    Ok(())
+    update
+        .regions
+        .iter()
+        .try_for_each(|region| send_region(socket, encoder, region))
 }
 
-fn same_size(a: &Bitmap, b: &Bitmap) -> bool {
-    a.width() == b.width() && a.height() == b.height()
+fn send_region(
+    socket: &mut WebSocket<TcpStream>,
+    encoder: &mut JpegEncoder,
+    region: &Region,
+) -> Result<(), ServerError> {
+    coalesce(&all_tiles(&region.bitmap))
+        .into_iter()
+        .try_for_each(|local| send_rect(socket, encoder, region, local))
 }
 
 fn send_rect(
     socket: &mut WebSocket<TcpStream>,
     encoder: &mut JpegEncoder,
-    bitmap: &Bitmap,
-    rect: Rect,
+    region: &Region,
+    local: Rect,
 ) -> Result<(), ServerError> {
     let message = DesktopMessage::Tile {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
+        x: region.rect.x.saturating_add(local.x),
+        y: region.rect.y.saturating_add(local.y),
+        width: local.width,
+        height: local.height,
         codec: encoder.codec(),
-        data: encoder.encode(bitmap, rect)?,
+        data: encoder.encode(&region.bitmap, local)?,
     };
     match Frame::new(Channel::Desktop, 0, message.encode()) {
         Ok(frame) => send_frame(socket, &frame),
-        Err(ProtocolError::PayloadTooLarge { .. }) => match split(rect) {
+        Err(ProtocolError::PayloadTooLarge { .. }) => match split(local) {
             Some(halves) => halves
                 .into_iter()
-                .try_for_each(|half| send_rect(socket, encoder, bitmap, half)),
+                .try_for_each(|half| send_rect(socket, encoder, region, half)),
             None => Err(ProtocolError::PayloadTooLarge {
                 len: usize::MAX,
                 max: wirehaus_protocol::MAX_PAYLOAD_LEN,
