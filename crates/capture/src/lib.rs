@@ -16,7 +16,7 @@ pub use error::CaptureError;
 pub use framebuffer::FrameBuffer;
 #[cfg(target_os = "macos")]
 pub use macos::{MacDisplay, request_screen_capture, screen_capture_allowed};
-pub use polling::{Grabber, PollingScreen};
+pub use polling::{Backoff, Grabber, PollingScreen};
 #[cfg(target_os = "linux")]
 pub use x11::X11Screen;
 
@@ -36,4 +36,6 @@ pub struct Update {
 
 pub trait ScreenSource {
     fn next_update(&mut self) -> Result<Update, CaptureError>;
+
+    fn wake(&mut self) {}
 }

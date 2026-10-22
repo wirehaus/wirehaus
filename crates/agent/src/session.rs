@@ -116,6 +116,7 @@ fn serve(
         )?;
         if active {
             last_activity = Instant::now();
+            backend.screen.wake();
         }
         if !open {
             return Ok(());

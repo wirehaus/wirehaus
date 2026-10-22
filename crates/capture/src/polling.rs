@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use crate::bitmap::{Bitmap, Rect};
 use crate::damage::{changed_tiles, coalesce};
 use crate::error::CaptureError;
@@ -7,10 +9,54 @@ pub trait Grabber {
     fn grab(&mut self) -> Result<Bitmap, CaptureError>;
 }
 
+const BUSY_PERCENT: usize = 2;
+const BUSY_GRABS: u32 = 15;
+const SLOW_GRABS: u32 = 60;
+const MEDIUM_INTERVAL: Duration = Duration::from_millis(100);
+const SLOW_INTERVAL: Duration = Duration::from_millis(250);
+
+fn interval(quiet: u32) -> Duration {
+    if quiet < BUSY_GRABS {
+        Duration::ZERO
+    } else if quiet < SLOW_GRABS {
+        MEDIUM_INTERVAL
+    } else {
+        SLOW_INTERVAL
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Backoff {
+    quiet: u32,
+    last: Option<Instant>,
+}
+
+impl Backoff {
+    #[must_use]
+    pub fn due(&self, now: Instant) -> bool {
+        self.last
+            .is_none_or(|last| now.saturating_duration_since(last) >= interval(self.quiet))
+    }
+
+    pub fn observe(&mut self, now: Instant, busy: bool) {
+        self.last = Some(now);
+        self.quiet = if busy {
+            0
+        } else {
+            self.quiet.saturating_add(1)
+        };
+    }
+
+    pub fn wake(&mut self) {
+        self.quiet = 0;
+    }
+}
+
 #[derive(Debug)]
 pub struct PollingScreen<G> {
     grabber: G,
     previous: Option<Bitmap>,
+    backoff: Backoff,
 }
 
 impl<G: Grabber> PollingScreen<G> {
@@ -18,12 +64,24 @@ impl<G: Grabber> PollingScreen<G> {
         Self {
             grabber,
             previous: None,
+            backoff: Backoff::default(),
         }
     }
 }
 
 impl<G: Grabber> ScreenSource for PollingScreen<G> {
     fn next_update(&mut self) -> Result<Update, CaptureError> {
+        let now = Instant::now();
+        if let Some(previous) = &self.previous
+            && !self.backoff.due(now)
+        {
+            return Ok(Update {
+                width: previous.width(),
+                height: previous.height(),
+                resized: false,
+                regions: Vec::new(),
+            });
+        }
         let current = self.grabber.grab()?;
         let (width, height) = (current.width(), current.height());
         let same_size = self
@@ -42,6 +100,8 @@ impl<G: Grabber> ScreenSource for PollingScreen<G> {
                 bitmap: current.clone(),
             }],
         };
+        self.backoff
+            .observe(now, !same_size || is_busy(&regions, width, height));
         self.previous = Some(current);
         Ok(Update {
             width,
@@ -50,6 +110,18 @@ impl<G: Grabber> ScreenSource for PollingScreen<G> {
             regions,
         })
     }
+
+    fn wake(&mut self) {
+        self.backoff.wake();
+    }
+}
+
+fn is_busy(regions: &[Region], width: u16, height: u16) -> bool {
+    let changed: usize = regions
+        .iter()
+        .map(|region| usize::from(region.rect.width) * usize::from(region.rect.height))
+        .sum();
+    changed * 100 >= usize::from(width) * usize::from(height) * BUSY_PERCENT
 }
 
 fn changed_regions(previous: &Bitmap, current: &Bitmap) -> Result<Vec<Region>, CaptureError> {
@@ -136,6 +208,93 @@ mod tests {
         assert!(update.resized);
         assert_eq!((update.width, update.height), (120, 80));
         assert_eq!(update.regions.len(), 1);
+    }
+
+    #[test]
+    fn polling_slows_down_when_nothing_changes_and_speeds_up_when_woken() {
+        let frames: Vec<Bitmap> = (0..200).map(|_| solid(100, 70, 1)).collect();
+        let mut screen = screen(frames);
+        for _ in 0..=BUSY_GRABS {
+            screen.next_update().unwrap();
+        }
+        let consumed = screen.grabber.0.len();
+        let update = screen.next_update().unwrap();
+        assert_eq!(update.regions.len(), 0);
+        assert_eq!((update.width, update.height), (100, 70));
+        assert_eq!(screen.grabber.0.len(), consumed);
+        screen.wake();
+        screen.next_update().unwrap();
+        assert_eq!(screen.grabber.0.len(), consumed - 1);
+    }
+
+    #[test]
+    fn a_change_resets_the_backoff() {
+        let mut backoff = Backoff::default();
+        let start = Instant::now();
+        assert!(backoff.due(start));
+        for tick in 0..BUSY_GRABS {
+            backoff.observe(start, tick == 0);
+        }
+        assert!(backoff.due(start));
+        backoff.observe(start, false);
+        assert!(!backoff.due(start));
+        assert!(!backoff.due(start + MEDIUM_INTERVAL / 2));
+        assert!(backoff.due(start + MEDIUM_INTERVAL));
+        backoff.observe(start, true);
+        assert!(backoff.due(start));
+    }
+
+    #[test]
+    fn the_interval_grows_in_two_steps_and_wake_returns_to_full_rate() {
+        let mut backoff = Backoff::default();
+        let start = Instant::now();
+        for _ in 0..SLOW_GRABS {
+            backoff.observe(start, false);
+        }
+        assert!(!backoff.due(start + MEDIUM_INTERVAL));
+        assert!(backoff.due(start + SLOW_INTERVAL));
+        backoff.wake();
+        assert!(backoff.due(start));
+    }
+
+    fn reads_before_throttling() -> usize {
+        usize::try_from(BUSY_GRABS).unwrap() + 1
+    }
+
+    #[test]
+    fn small_changes_do_not_keep_the_polling_at_full_rate() {
+        let first = solid(800, 600, 1);
+        let mut frames = vec![first.clone()];
+        for step in 1..reads_before_throttling() + 4 {
+            let mut next = first.clone();
+            next.paste(10, 10, &solid(4, 4, u8::try_from(step).unwrap()))
+                .unwrap();
+            frames.push(next);
+        }
+        let mut screen = screen(frames);
+        for _ in 0..reads_before_throttling() {
+            assert!(screen.next_update().unwrap().regions.len() <= 1);
+        }
+        let consumed = screen.grabber.0.len();
+        assert_eq!(screen.next_update().unwrap().regions.len(), 0);
+        assert_eq!(screen.grabber.0.len(), consumed);
+    }
+
+    #[test]
+    fn after_a_large_change_the_polling_continues_at_full_rate() {
+        let mut frames = vec![solid(800, 600, 1); reads_before_throttling()];
+        frames.push(solid(800, 600, 9));
+        frames.push(solid(800, 600, 9));
+        let mut screen = screen(frames);
+        for _ in 0..reads_before_throttling() {
+            screen.next_update().unwrap();
+        }
+        assert_eq!(screen.next_update().unwrap().regions.len(), 0);
+        screen.wake();
+        assert_ne!(screen.next_update().unwrap().regions.len(), 0);
+        let consumed = screen.grabber.0.len();
+        screen.next_update().unwrap();
+        assert_eq!(screen.grabber.0.len(), consumed - 1);
     }
 
     #[test]
