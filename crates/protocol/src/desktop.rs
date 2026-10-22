@@ -34,10 +34,14 @@ pub enum DesktopMessage {
         codec: Codec,
         data: Vec<u8>,
     },
+    FrameEnd {
+        sequence: u32,
+    },
 }
 
 const RESIZE: u8 = 0;
 const TILE: u8 = 1;
+const FRAME_END: u8 = 2;
 const TILE_HEADER_LEN: usize = 9;
 
 impl DesktopMessage {
@@ -65,6 +69,11 @@ impl DesktopMessage {
                 }
                 out.push(codec.tag());
                 out.extend_from_slice(data);
+                out
+            }
+            DesktopMessage::FrameEnd { sequence } => {
+                let mut out = vec![FRAME_END];
+                out.extend_from_slice(&sequence.to_be_bytes());
                 out
             }
         }
@@ -97,6 +106,14 @@ impl DesktopMessage {
                     height: value(6),
                     codec: Codec::from_tag(codec[0])?,
                     data: data.to_vec(),
+                })
+            }
+            FRAME_END => {
+                let bytes: [u8; 4] = body
+                    .try_into()
+                    .map_err(|_| bad_length(tag, 4, body.len()))?;
+                Ok(DesktopMessage::FrameEnd {
+                    sequence: u32::from_be_bytes(bytes),
                 })
             }
             other => Err(ProtocolError::UnknownDesktop(other)),
@@ -154,6 +171,29 @@ mod tests {
             tile().encode(),
             [1, 0, 64, 0, 128, 1, 0, 0, 64, 0, 0xff, 0xd8, 0xff]
         );
+    }
+
+    #[test]
+    fn encodes_the_frame_end_layout() {
+        assert_eq!(
+            DesktopMessage::FrameEnd {
+                sequence: 0x0102_0304
+            }
+            .encode(),
+            [2, 1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn rejects_a_frame_end_of_the_wrong_length() {
+        assert!(matches!(
+            DesktopMessage::decode(&[2, 1, 2, 3]),
+            Err(ProtocolError::BadDesktopLength { tag: 2, .. })
+        ));
+        assert!(matches!(
+            DesktopMessage::decode(&[2, 1, 2, 3, 4, 5]),
+            Err(ProtocolError::BadDesktopLength { tag: 2, .. })
+        ));
     }
 
     #[test]
