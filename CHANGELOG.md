@@ -17,6 +17,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Codificación de teselas en JPEG.
 - Servidor local del agente (`wirehaus-agent serve`): solo en la interfaz de bucle local, con comprobación de `Host` y `Origin`, un único visor a la vez y entrega de los ficheros del visor.
 - La captura de pantalla pide a X las zonas dañadas (extensión DAMAGE) y solo lee lo que cambia; sin DAMAGE compara teselas.
+- Control de flujo: el visor confirma cada lote de pantalla y el agente limita lo que lleva sin confirmar y adapta la calidad JPEG al enlace.
 - Visor web en TypeScript con lienzo, ratón, rueda y teclado.
 
 ### Cambiado

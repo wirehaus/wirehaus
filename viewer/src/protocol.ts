@@ -4,6 +4,7 @@ export const DESKTOP_CHANNEL = 0;
 
 const RESIZE = 0;
 const TILE = 1;
+const FRAME_END = 2;
 const TILE_HEADER_LEN = 9;
 
 export const CODEC_JPEG = 0;
@@ -24,7 +25,8 @@ export type DesktopMessage =
       height: number;
       codec: number;
       data: Uint8Array;
-    };
+    }
+  | { kind: 'frameEnd'; sequence: number };
 
 export type MouseButton = 'left' | 'middle' | 'right';
 
@@ -98,6 +100,12 @@ export function decodeDesktop(payload: Uint8Array): DesktopMessage {
       data: payload.subarray(1 + TILE_HEADER_LEN),
     };
   }
+  if (tag === FRAME_END) {
+    if (payload.length !== 5) {
+      throw new ProtocolError('bad frame end length');
+    }
+    return { kind: 'frameEnd', sequence: view.getUint32(1) };
+  }
   throw new ProtocolError(`unknown desktop message ${tag}`);
 }
 
@@ -130,6 +138,14 @@ export function encodeInput(event: InputEvent): Uint8Array {
       return out;
     }
   }
+}
+
+export function encodeFrameAck(sequence: number): Uint8Array {
+  const out = new Uint8Array(5);
+  const view = new DataView(out.buffer);
+  view.setUint8(0, 4);
+  view.setUint32(1, sequence);
+  return out;
 }
 
 function buttonTag(button: MouseButton): number {

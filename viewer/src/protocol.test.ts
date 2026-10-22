@@ -7,6 +7,7 @@ import {
   decodeDesktop,
   decodeFrame,
   encodeFrame,
+  encodeFrameAck,
   encodeInput,
 } from './protocol.js';
 
@@ -62,4 +63,19 @@ test('rejects malformed desktop messages', () => {
   assert.throws(() => decodeDesktop(Uint8Array.of(0, 1, 2, 3)), ProtocolError);
   assert.throws(() => decodeDesktop(Uint8Array.of(0, 1, 2, 3, 4, 5)), ProtocolError);
   assert.throws(() => decodeDesktop(Uint8Array.of(1, 0, 0, 0, 0, 0, 1, 0, 1)), ProtocolError);
+});
+
+test('decodes the frame end marker the agent sends', () => {
+  assert.deepEqual(decodeDesktop(Uint8Array.of(2, 1, 2, 3, 4)), { kind: 'frameEnd', sequence: 0x01020304 });
+  assert.deepEqual(decodeDesktop(Uint8Array.of(2, 0xff, 0xff, 0xff, 0xff)), {
+    kind: 'frameEnd',
+    sequence: 0xffffffff,
+  });
+  assert.throws(() => decodeDesktop(Uint8Array.of(2, 1, 2, 3)), ProtocolError);
+  assert.throws(() => decodeDesktop(Uint8Array.of(2, 1, 2, 3, 4, 5)), ProtocolError);
+});
+
+test('encodes the acknowledgement layout the agent expects', () => {
+  assert.deepEqual([...encodeFrameAck(0x01020304)], [4, 1, 2, 3, 4]);
+  assert.deepEqual([...encodeFrameAck(0xfffffffe)], [4, 0xff, 0xff, 0xff, 0xfe]);
 });

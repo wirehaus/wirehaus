@@ -8,6 +8,7 @@ import {
   decodeDesktop,
   decodeFrame,
   encodeFrame,
+  encodeFrameAck,
   encodeInput,
 } from './protocol.js';
 
@@ -81,6 +82,11 @@ export class Viewer {
       this.canvas.focus();
       return;
     }
+    if (message.kind === 'frameEnd') {
+      const sequence = message.sequence;
+      this.drawing = this.drawing.then(() => this.acknowledge(sequence));
+      return;
+    }
     if (message.codec !== CODEC_JPEG) {
       return;
     }
@@ -93,6 +99,12 @@ export class Viewer {
         bitmap.close();
       })
       .catch(() => undefined);
+  }
+
+  private acknowledge(sequence: number): void {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(encodeFrame(DESKTOP_CHANNEL, 0, encodeFrameAck(sequence)));
+    }
   }
 
   private fit(): void {
