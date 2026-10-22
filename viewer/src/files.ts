@@ -1,3 +1,4 @@
+import { saveBlob } from './download.js';
 import {
   type FileEntry,
   type FileFailure,
@@ -335,13 +336,7 @@ export class FilesPanel {
   private finish(stream: number, transfer: Transfer): void {
     this.end(stream);
     if (transfer.kind === 'download') {
-      const blob = new Blob(transfer.parts as BlobPart[]);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = transfer.name;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      saveBlob(new Blob(transfer.parts as BlobPart[]), transfer.name);
     } else {
       this.refresh();
     }

@@ -401,3 +401,13 @@ body {
   opacity: 0.4;
   cursor: default;
 }
+
+#tools {
+  display: flex;
+  gap: 8px;
+}
+
+#tools-notice {
+  color: var(--muted);
+  font-size: 13px;
+}

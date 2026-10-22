@@ -4,6 +4,7 @@ import {
   encodeTerminalOpen,
   encodeTerminalResize,
 } from './protocol.js';
+import { DesktopCapture } from './capture.js';
 import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
 import { type Messages, messagesFor } from './strings.js';
@@ -28,6 +29,8 @@ const pairPanel = element<HTMLElement>('pair');
 const codePanel = element<HTMLElement>('code');
 const screen = element<HTMLCanvasElement>('screen');
 const tabs = element<HTMLElement>('tabs');
+const tools = element<HTMLElement>('tools');
+const toolsNotice = element<HTMLElement>('tools-notice');
 const terminalHost = element<HTMLElement>('terminals');
 const filesHost = element<HTMLElement>('files');
 const clipboardHost = element<HTMLElement>('clipboard');
@@ -82,6 +85,24 @@ function endedText(reason: 'idle' | 'revoked' | 'locked'): string {
   }
 }
 
+const capture = new DesktopCapture(
+  screen,
+  element<HTMLButtonElement>('shot'),
+  element<HTMLButtonElement>('record'),
+  {
+    screenshot: messages.screenshot,
+    recordStart: messages.recordStart,
+    recordStop: messages.recordStop,
+    saved: messages.captureSaved,
+    unsupported: messages.recordUnsupported,
+    failed: messages.captureFailed,
+    limit: messages.recordLimit,
+  },
+  (text) => {
+    toolsNotice.textContent = text;
+  },
+);
+
 let lastKind: ViewerState['kind'] = 'loading';
 
 function show(state: ViewerState): void {
@@ -89,6 +110,10 @@ function show(state: ViewerState): void {
   pairPanel.hidden = state.kind !== 'needsPairing';
   codePanel.hidden = state.kind !== 'needsCode';
   tabs.hidden = state.kind !== 'connected';
+  if (state.kind !== 'connected') {
+    capture.stop();
+    toolsNotice.textContent = '';
+  }
   showView();
   forget.hidden = state.kind === 'loading' || state.kind === 'needsPairing';
   reconnect.hidden = state.kind !== 'closed' && state.kind !== 'refused' && state.kind !== 'ended';
@@ -231,6 +256,7 @@ function showView(): void {
   const onTerminal = terminals.activeStream() !== null;
   const shows = (wanted: Panel): boolean => connected && !onTerminal && panel === wanted;
   screen.hidden = !shows('desktop');
+  tools.hidden = !shows('desktop');
   filesHost.hidden = !shows('files');
   clipboardHost.hidden = !shows('clipboard');
   terminalHost.hidden = !connected || !onTerminal;

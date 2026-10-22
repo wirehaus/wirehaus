@@ -60,6 +60,13 @@ export type Messages = {
   filesTooBig: (name: string) => string;
   filesFailure: Record<FileFailure, string>;
   filesClosed: string;
+  screenshot: string;
+  recordStart: string;
+  recordStop: (seconds: number) => string;
+  captureSaved: (name: string) => string;
+  recordUnsupported: string;
+  captureFailed: string;
+  recordLimit: string;
   tabClipboard: string;
   clipboardIntro: string;
   clipboardPlaceholder: string;
@@ -150,6 +157,13 @@ const catalog: Record<string, Messages> = {
       io: 'Ha ocurrido un error en el disco del agente.',
     },
     filesClosed: 'Desconectado.',
+    screenshot: 'Captura',
+    recordStart: 'Grabar',
+    recordStop: (seconds) => `Parar (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')})`,
+    captureSaved: (name) => `Guardado: ${name}`,
+    recordUnsupported: 'Este navegador no puede grabar vídeo.',
+    captureFailed: 'No se pudo guardar.',
+    recordLimit: 'Grabación detenida al llegar al límite de 30 minutos o 1 GiB. Se ha guardado lo grabado.',
     tabClipboard: 'Portapapeles',
     clipboardIntro:
       'Escribe o pega aquí el texto que quieres llevar al ordenador remoto, o tráete el que hayas copiado allí. Nada se sincroniza solo.',
@@ -245,6 +259,13 @@ const catalog: Record<string, Messages> = {
       io: 'A disk error occurred on the agent.',
     },
     filesClosed: 'Disconnected.',
+    screenshot: 'Screenshot',
+    recordStart: 'Record',
+    recordStop: (seconds) => `Stop (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')})`,
+    captureSaved: (name) => `Saved: ${name}`,
+    recordUnsupported: 'This browser cannot record video.',
+    captureFailed: 'Could not save.',
+    recordLimit: 'Recording stopped at the limit of 30 minutes or 1 GiB. What was recorded has been saved.',
     tabClipboard: 'Clipboard',
     clipboardIntro:
       'Type or paste here the text you want to take to the remote computer, or bring back what you copied there. Nothing syncs by itself.',
