@@ -30,4 +30,14 @@ pub enum ProtocolError {
     },
     #[error("unknown codec {0}")]
     UnknownCodec(u8),
+    #[error("unknown control message tag {0}")]
+    UnknownControl(u8),
+    #[error("control message {tag} needs {expected} bytes but has {actual}")]
+    BadControlLength {
+        tag: u8,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("invalid control value {0}")]
+    InvalidControl(u8),
 }
