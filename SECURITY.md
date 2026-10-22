@@ -18,4 +18,4 @@ Todavía no hay versiones publicadas. Cuando las haya, solo la última versión 
 
 ## Alcance
 
-Entra en el alcance el agente, el protocolo, el visor web y el servicio de registro. No entran los fallos de software de terceros que Wirehaus usa como dependencia: informa de ellos a sus responsables.
+Entra en el alcance el agente, el protocolo y el visor web. No entran los fallos de software de terceros que Wirehaus usa como dependencia: informa de ellos a sus responsables.
