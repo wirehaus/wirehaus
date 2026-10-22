@@ -19,6 +19,8 @@ pub enum ServerError {
     Input(#[from] wirehaus_input::InputError),
     #[error(transparent)]
     Store(#[from] crate::store::StoreError),
+    #[error("the viewer cannot be trusted: {0}")]
+    Viewer(#[from] crate::integrity::IntegrityError),
     #[error("encryption failed: {0}")]
     Crypto(#[from] wirehaus_crypto::CryptoError),
     #[error("encoding failed: {0}")]

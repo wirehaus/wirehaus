@@ -6,7 +6,8 @@
   "license": "SEE LICENSE IN ../LICENSE",
   "scripts": {
     "build:wasm": "sh scripts/build-wasm.sh",
-    "build": "npm run build:wasm && tsc -p tsconfig.json && node scripts/copy-static.mjs",
+    "build": "npm run build:wasm && tsc -p tsconfig.json && node scripts/copy-static.mjs && npm run build:manifest",
+    "build:manifest": "cargo run --quiet --manifest-path ../Cargo.toml -p wirehaus-agent --locked -- viewer manifest --viewer-dir dist",
     "test": "npm run build:wasm && tsc -p tsconfig.test.json && node --test build-test/*.test.js"
   },
   "devDependencies": {

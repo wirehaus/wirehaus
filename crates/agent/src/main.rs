@@ -14,6 +14,7 @@ use wirehaus_agent::state::ClipboardMode;
 
 use crate::cli::{
     Cli, ClipboardAction, Command, DeviceAction, Direction, FilesAction, TerminalAction,
+    ViewerAction,
 };
 
 fn main() -> ExitCode {
@@ -54,6 +55,18 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Terminal {
             action: TerminalAction::Deny,
         } => commands::terminal(&open()?, false, None, &mut out)?,
+        Command::Viewer { action } => match action {
+            ViewerAction::Manifest { viewer_dir } => {
+                println!(
+                    "{}",
+                    wirehaus_agent::static_files::write_manifest(&viewer_dir)?
+                );
+            }
+            ViewerAction::Hash { viewer_dir } => {
+                let viewer = wirehaus_agent::static_files::Viewer::open(&viewer_dir, None)?;
+                println!("{}", viewer.bundle());
+            }
+        },
         Command::Clipboard { action } => match action {
             ClipboardAction::Allow { code, direction } => {
                 let mode = match direction {
@@ -82,6 +95,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
             viewer_dir,
             quality,
             idle_minutes,
+            viewer_hash,
         } => {
             let server = Server::bind(ServerConfig {
                 listen,
@@ -91,6 +105,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
                 state_dir: dir,
                 clock: None,
                 idle_timeout: Duration::from_secs(u64::from(idle_minutes) * 60),
+                viewer_hash,
             })?;
             println!("listening on http://{}", server.local_addr()?);
             server.run(&AtomicBool::new(false))?;

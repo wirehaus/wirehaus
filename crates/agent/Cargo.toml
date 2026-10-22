@@ -21,6 +21,7 @@ path = "src/main.rs"
 clap.workspace = true
 httparse = "1"
 portable-pty = "0.9"
+sha2 = "0.10"
 thiserror.workspace = true
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 wirehaus-capture = { path = "../capture" }

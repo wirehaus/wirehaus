@@ -29,6 +29,10 @@ pub enum Command {
         #[command(subcommand)]
         action: ClipboardAction,
     },
+    Viewer {
+        #[command(subcommand)]
+        action: ViewerAction,
+    },
     Files {
         #[command(subcommand)]
         action: FilesAction,
@@ -52,6 +56,20 @@ pub enum Command {
         quality: u8,
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u32).range(1..=1440))]
         idle_minutes: u32,
+        #[arg(long, value_name = "SHA256")]
+        viewer_hash: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ViewerAction {
+    Manifest {
+        #[arg(long, default_value = "viewer/dist")]
+        viewer_dir: PathBuf,
+    },
+    Hash {
+        #[arg(long, default_value = "viewer/dist")]
+        viewer_dir: PathBuf,
     },
 }
 

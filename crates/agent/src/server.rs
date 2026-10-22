@@ -17,7 +17,7 @@ use crate::http::{
 use crate::pacer::Pacer;
 use crate::platform;
 use crate::session::{self, Policy};
-use crate::static_files;
+use crate::static_files::Viewer;
 use crate::store::{Clock, Store, system_clock};
 use crate::stream::Stream;
 use wirehaus_crypto::keys::PublicKey;
@@ -42,6 +42,7 @@ pub struct ServerConfig {
     pub state_dir: PathBuf,
     pub clock: Option<Clock>,
     pub idle_timeout: Duration,
+    pub viewer_hash: Option<String>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -66,6 +67,7 @@ pub struct Server {
     config: ServerConfig,
     store: Arc<Store>,
     clipboard: Arc<Hub>,
+    viewer: Viewer,
     tickets: Mutex<Tickets>,
     connections: AtomicUsize,
     unauthenticated: AtomicUsize,
@@ -109,6 +111,7 @@ impl Server {
         listener.set_nonblocking(true)?;
         let clock = config.clock.clone().unwrap_or_else(system_clock);
         let store = Arc::new(Store::open(&config.state_dir, clock)?);
+        let viewer = Viewer::open(&config.viewer_dir, config.viewer_hash.as_deref())?;
         let clipboard = Arc::new(Hub::new(platform::clipboard_factory(
             config.display.clone(),
         )));
@@ -117,6 +120,7 @@ impl Server {
             config,
             store,
             clipboard,
+            viewer,
             tickets: Mutex::new(Tickets::new()),
             connections: AtomicUsize::new(0),
             unauthenticated: AtomicUsize::new(0),
@@ -198,7 +202,7 @@ impl Server {
                 b"method not allowed",
             );
         }
-        match static_files::load(&self.config.viewer_dir, &head.path) {
+        match self.viewer.get(&head.path) {
             Some(file) => {
                 consume(stream, head_len)?;
                 finish(stream, &response("200 OK", file.content_type, &file.body))

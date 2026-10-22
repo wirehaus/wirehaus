@@ -109,6 +109,7 @@ impl Running {
         let viewer = root.join("viewer");
         fs::create_dir_all(&viewer).unwrap();
         fs::write(viewer.join("index.html"), b"<title>viewer</title>").unwrap();
+        wirehaus_agent::static_files::write_manifest(&viewer).unwrap();
         let time = Arc::new(AtomicU64::new(START_TIME));
         let clock: Clock = {
             let shared = Arc::clone(&time);
@@ -124,6 +125,7 @@ impl Running {
             state_dir,
             clock: Some(clock),
             idle_timeout,
+            viewer_hash: None,
         })
         .unwrap();
         let port = server.local_addr().unwrap().port();
@@ -1912,6 +1914,70 @@ fn a_malformed_or_backwards_clipboard_message_ends_the_session() {
     assert!(again.wait_closed(Duration::from_secs(5)));
 }
 
+fn viewer_config(dir: &std::path::Path, state: PathBuf, hash: Option<String>) -> ServerConfig {
+    ServerConfig {
+        listen: "127.0.0.1:0".parse().unwrap(),
+        display: None,
+        viewer_dir: dir.to_path_buf(),
+        jpeg_quality: 70,
+        state_dir: state,
+        clock: None,
+        idle_timeout: Duration::from_secs(3600),
+        viewer_hash: hash,
+    }
+}
+
+#[test]
+fn the_agent_refuses_to_start_with_a_viewer_that_does_not_match_its_manifest() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let viewer = server.dir.join("viewer");
+    let state = server.dir.join("state");
+    fs::write(viewer.join("index.html"), b"<title>tampered</title>").unwrap();
+    let result = Server::bind(viewer_config(&viewer, state.clone(), None));
+    assert!(matches!(result, Err(ServerError::Viewer(_))), "{result:?}");
+    fs::write(viewer.join("index.html"), b"<title>viewer</title>").unwrap();
+    fs::write(viewer.join("extra.js"), b"x").unwrap();
+    assert!(matches!(
+        Server::bind(viewer_config(&viewer, state, None)),
+        Err(ServerError::Viewer(_))
+    ));
+}
+
+#[test]
+fn a_pinned_viewer_hash_is_enforced_and_the_manifest_is_served() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let viewer = server.dir.join("viewer");
+    let state = server.dir.join("state");
+    let bundle = wirehaus_agent::static_files::write_manifest(&viewer).unwrap();
+    assert!(Server::bind(viewer_config(&viewer, state.clone(), Some(bundle.clone()))).is_ok());
+    let wrong = "f".repeat(64);
+    assert!(matches!(
+        Server::bind(viewer_config(&viewer, state, Some(wrong))),
+        Err(ServerError::Viewer(_))
+    ));
+    let host = format!("Host: 127.0.0.1:{}\r\n", server.port);
+    let reply = server.http(&format!("GET /manifest.sha256 HTTP/1.1\r\n{host}\r\n"));
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    assert!(reply.contains("text/plain"), "{reply}");
+    assert!(reply.contains("  index.html\n"), "{reply}");
+}
+
+#[test]
+fn the_viewer_is_served_from_what_was_verified_even_if_the_files_change_later() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    fs::write(
+        server.dir.join("viewer").join("index.html"),
+        b"<title>changed after start</title>",
+    )
+    .unwrap();
+    let host = format!("Host: 127.0.0.1:{}\r\n", server.port);
+    let reply = server.http(&format!("GET / HTTP/1.1\r\n{host}\r\n"));
+    assert!(reply.ends_with("<title>viewer</title>"), "{reply}");
+}
+
 #[test]
 fn rejects_foreign_origins_and_hosts() {
     let xvfb = Xvfb::start_unique();
@@ -1969,6 +2035,7 @@ fn refuses_to_bind_outside_the_loopback_interface() {
         state_dir: PathBuf::from("."),
         clock: None,
         idle_timeout: Duration::from_secs(3600),
+        viewer_hash: None,
     });
     assert!(matches!(result, Err(ServerError::NotLoopback(_))));
 }
@@ -1984,6 +2051,7 @@ fn refuses_to_start_without_an_agent_identity() {
         state_dir: dir,
         clock: None,
         idle_timeout: Duration::from_secs(3600),
+        viewer_hash: None,
     });
     assert!(matches!(result, Err(ServerError::Store(_))));
 }

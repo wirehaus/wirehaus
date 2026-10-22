@@ -66,6 +66,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
         working-directory: .
+      - run: sudo apt-get update && sudo apt-get install -y nasm
+        working-directory: .
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -73,4 +75,7 @@ jobs:
           cache-dependency-path: viewer/package-lock.json
       - run: npm ci
       - run: npm run build
+      - run: |
+          echo "Viewer bundle hash: $(cat dist/manifest.sha256 | sha256sum | cut -d' ' -f1)" >> "$GITHUB_STEP_SUMMARY"
+          (cd dist && sha256sum --check --quiet manifest.sha256)
       - run: npm test
