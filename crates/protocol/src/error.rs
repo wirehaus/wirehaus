@@ -20,4 +20,14 @@ pub enum ProtocolError {
     },
     #[error("invalid input value {0}")]
     InvalidInput(u8),
+    #[error("unknown desktop message tag {0}")]
+    UnknownDesktop(u8),
+    #[error("desktop message {tag} needs {expected} bytes but has {actual}")]
+    BadDesktopLength {
+        tag: u8,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("unknown codec {0}")]
+    UnknownCodec(u8),
 }
