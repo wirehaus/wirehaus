@@ -23,8 +23,8 @@ use wirehaus_crypto::session::{Limits, Session};
 use wirehaus_crypto::totp::TotpSecret;
 use wirehaus_protocol::{
     AuthFailure, Channel, ClipboardFailure, ClipboardMessage, Codec, ControlMessage,
-    DesktopMessage, FailureReason, FilesMessage, Frame, HEADER_LEN, InputEvent, MAX_PAYLOAD_LEN,
-    RefusalReason, TerminalMessage, ViewerMessage,
+    DesktopMessage, EndReason, FailureReason, FilesMessage, Frame, HEADER_LEN, InputEvent,
+    MAX_PAYLOAD_LEN, RefusalReason, TerminalMessage, ViewerMessage,
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt, CreateGCAux, Rectangle};
@@ -97,6 +97,10 @@ struct Running {
 
 impl Running {
     fn start(display: &str) -> Self {
+        Self::start_with_idle(display, Duration::from_secs(3600))
+    }
+
+    fn start_with_idle(display: &str, idle_timeout: Duration) -> Self {
         let root = std::env::temp_dir().join(format!(
             "wirehaus-serve-{}-{}",
             std::process::id(),
@@ -119,6 +123,7 @@ impl Running {
             jpeg_quality: 70,
             state_dir,
             clock: Some(clock),
+            idle_timeout,
         })
         .unwrap();
         let port = server.local_addr().unwrap().port();
@@ -218,6 +223,7 @@ enum Received<T> {
 struct Client {
     socket: Socket,
     session: Session,
+    ticket: Option<[u8; 32]>,
 }
 
 impl Client {
@@ -240,7 +246,15 @@ impl Client {
             match self.socket.read() {
                 Ok(Message::Binary(bytes)) => {
                     if let Some(message) = self.session.open(&bytes).unwrap() {
-                        return Received::Got(Frame::decode(&message).unwrap());
+                        let frame = Frame::decode(&message).unwrap();
+                        if frame.channel == Channel::Control
+                            && let Ok(ControlMessage::Ticket { ticket }) =
+                                ControlMessage::decode(&frame.payload)
+                        {
+                            self.ticket = Some(ticket);
+                            continue;
+                        }
+                        return Received::Got(frame);
                     }
                 }
                 Ok(Message::Ping(_) | Message::Pong(_)) => {}
@@ -311,6 +325,11 @@ impl Client {
         self.read_control()
     }
 
+    fn resume(&mut self, ticket: [u8; 32]) -> Received<ControlMessage> {
+        self.send_control(ControlMessage::Resume { ticket });
+        self.read_control()
+    }
+
     fn expect_auth_required(&mut self) {
         match self.read_control() {
             Received::Got(ControlMessage::AuthRequired) => {}
@@ -349,6 +368,7 @@ fn start_pairing(
     Some(Client {
         socket,
         session: outcome.session,
+        ticket: None,
     })
 }
 
@@ -363,6 +383,7 @@ fn start_reconnect(server: &Running, device: &StaticKey, agent: &PublicKey) -> O
     Some(Client {
         socket,
         session: outcome.session,
+        ticket: None,
     })
 }
 
@@ -1509,6 +1530,233 @@ fn a_malformed_files_message_ends_the_session() {
     assert!(client.wait_closed(Duration::from_secs(5)));
 }
 
+impl Client {
+    fn wait_for_ticket(&mut self) -> [u8; 32] {
+        self.set_timeout(Duration::from_millis(300));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self.ticket.is_none() && Instant::now() < deadline {
+            if let Received::Got(frame) = self.read_frame()
+                && let Ok(DesktopMessage::FrameEnd { sequence }) =
+                    DesktopMessage::decode(&frame.payload)
+            {
+                self.send_viewer(ViewerMessage::FrameAck { sequence });
+            }
+        }
+        self.ticket.expect("the agent never sent a ticket")
+    }
+
+    fn read_until_session_ends(&mut self, within: Duration) -> Option<EndReason> {
+        self.set_timeout(Duration::from_millis(200));
+        let deadline = Instant::now() + within;
+        let mut reason = None;
+        while Instant::now() < deadline {
+            match self.read_frame() {
+                Received::Got(frame) => {
+                    if frame.channel == Channel::Control
+                        && let Ok(ControlMessage::SessionEnded { reason: ended }) =
+                            ControlMessage::decode(&frame.payload)
+                    {
+                        reason = Some(ended);
+                    } else if let Ok(DesktopMessage::FrameEnd { sequence }) =
+                        DesktopMessage::decode(&frame.payload)
+                    {
+                        self.send_viewer(ViewerMessage::FrameAck { sequence });
+                    }
+                }
+                Received::Closed => return reason,
+                Received::Timeout => {}
+            }
+        }
+        None
+    }
+}
+
+fn resume_when_possible(server: &Running, device: &StaticKey, ticket: [u8; 32]) -> Option<Client> {
+    for _ in 0..60 {
+        let mut client =
+            start_reconnect(server, device, &server.agent_key()).expect("reconnection handshake");
+        client.expect_auth_required();
+        match client.resume(ticket) {
+            Received::Got(ControlMessage::AuthOk) => return Some(client),
+            Received::Got(ControlMessage::AuthRequired) => {
+                drop(client);
+                sleep(Duration::from_millis(100));
+            }
+            other => panic!("unexpected answer to a ticket: {}", describe(&other)),
+        }
+    }
+    None
+}
+
+fn refused_ticket(server: &Running, device: &StaticKey, ticket: [u8; 32]) -> bool {
+    let mut client =
+        start_reconnect(server, device, &server.agent_key()).expect("reconnection handshake");
+    client.expect_auth_required();
+    matches!(
+        client.resume(ticket),
+        Received::Got(ControlMessage::AuthRequired)
+    )
+}
+
+#[test]
+fn a_ticket_resumes_a_dropped_session_without_a_new_code_and_only_once() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut first, device) = pair_and_login(&server, "Aula 3");
+    let ticket = first.wait_for_ticket();
+    drop(first);
+
+    let mut second = resume_when_possible(&server, &device, ticket).expect("resumption");
+    let renewed = second.wait_for_ticket();
+    assert_ne!(renewed, ticket);
+    let _screen = next_tile_or_resize(&mut second);
+    drop(second);
+    sleep(Duration::from_millis(600));
+    assert!(refused_ticket(&server, &device, ticket));
+    assert!(resume_when_possible(&server, &device, renewed).is_some());
+}
+
+#[test]
+fn a_ticket_stops_working_after_the_grace_period() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut first, device) = pair_and_login(&server, "Aula 3");
+    let ticket = first.wait_for_ticket();
+    drop(first);
+    sleep(Duration::from_millis(600));
+    server.time.fetch_add(299, Ordering::SeqCst);
+    assert!(resume_when_possible(&server, &device, ticket).is_some());
+    sleep(Duration::from_millis(600));
+    server.time.fetch_add(301, Ordering::SeqCst);
+    assert!(refused_ticket(&server, &device, ticket));
+}
+
+#[test]
+fn a_wrong_ticket_falls_back_to_the_second_factor_without_counting_as_a_failure() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut first, device) = pair_and_login(&server, "Aula 3");
+    first.wait_for_ticket();
+    drop(first);
+    sleep(Duration::from_millis(600));
+    for _ in 0..5 {
+        assert!(refused_ticket(&server, &device, [7; 32]));
+    }
+    let mut client = start_reconnect(&server, &device, &server.agent_key()).unwrap();
+    client.expect_auth_required();
+    assert!(matches!(
+        client.resume([9; 32]),
+        Received::Got(ControlMessage::AuthRequired)
+    ));
+    client.expect_ok(&server.fresh_totp());
+}
+
+#[test]
+fn a_ticket_cannot_be_presented_twice_on_one_connection_or_while_pairing() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut first, device) = pair_and_login(&server, "Aula 3");
+    first.wait_for_ticket();
+    drop(first);
+    sleep(Duration::from_millis(600));
+    let mut client = start_reconnect(&server, &device, &server.agent_key()).unwrap();
+    client.expect_auth_required();
+    assert!(matches!(
+        client.resume([1; 32]),
+        Received::Got(ControlMessage::AuthRequired)
+    ));
+    client.send_control(ControlMessage::Resume { ticket: [2; 32] });
+    assert!(client.wait_closed(Duration::from_secs(5)));
+
+    let new_device = StaticKey::generate().unwrap();
+    let code = server.open_pairing();
+    let mut pairing = start_pairing(&server, &new_device, &code, "Otro").unwrap();
+    pairing.expect_auth_required();
+    pairing.send_control(ControlMessage::Resume { ticket: [3; 32] });
+    assert!(pairing.wait_closed(Duration::from_secs(5)));
+}
+
+#[test]
+fn a_protocol_violation_revokes_the_ticket() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, device) = pair_and_login(&server, "Aula 3");
+    let ticket = client.wait_for_ticket();
+    client.send(&Frame::new(Channel::Terminal, 1, vec![99, 1, 2]).unwrap());
+    assert!(client.wait_closed(Duration::from_secs(5)));
+    sleep(Duration::from_millis(600));
+    assert!(refused_ticket(&server, &device, ticket));
+}
+
+#[test]
+fn an_idle_session_is_closed_with_a_notice_and_loses_its_ticket() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start_with_idle(&xvfb.display, Duration::from_secs(2));
+    let (mut client, device) = pair_and_login(&server, "Aula 3");
+    let ticket = client.wait_for_ticket();
+    let reason = client.read_until_session_ends(Duration::from_secs(10));
+    assert_eq!(reason, Some(EndReason::Idle));
+    sleep(Duration::from_millis(600));
+    assert!(refused_ticket(&server, &device, ticket));
+}
+
+#[test]
+fn activity_keeps_a_session_alive_past_the_idle_limit() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start_with_idle(&xvfb.display, Duration::from_secs(2));
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(100));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut moved = 0_u16;
+    while Instant::now() < deadline {
+        moved = (moved + 1) % 200;
+        client.send_viewer(ViewerMessage::Input(InputEvent::PointerMove {
+            x: moved,
+            y: 10,
+        }));
+        if let Received::Got(frame) = client.read_frame()
+            && let Ok(DesktopMessage::FrameEnd { sequence }) =
+                DesktopMessage::decode(&frame.payload)
+        {
+            client.send_viewer(ViewerMessage::FrameAck { sequence });
+        }
+        sleep(Duration::from_millis(100));
+    }
+    assert!(!client.wait_closed(Duration::from_millis(500)));
+}
+
+#[test]
+fn a_revoked_viewer_is_told_why_it_was_cut_off() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, device) = pair_and_login(&server, "Aula 3");
+    let key = device.public();
+    server
+        .store
+        .update(|state, _| state.remove_device(&key))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        client.read_until_session_ends(Duration::from_secs(6)),
+        Some(EndReason::Revoked)
+    );
+}
+
+#[test]
+fn a_locked_agent_tells_the_viewer_before_it_closes() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    server
+        .store
+        .update(|state, _| state.set_locked(true))
+        .unwrap();
+    assert_eq!(
+        client.read_until_session_ends(Duration::from_secs(6)),
+        Some(EndReason::Locked)
+    );
+}
+
 fn send_clipboard(client: &mut Client, stream: u32, message: &ClipboardMessage) {
     client.send(&Frame::new(Channel::Clipboard, stream, message.encode()).unwrap());
 }
@@ -1720,6 +1968,7 @@ fn refuses_to_bind_outside_the_loopback_interface() {
         jpeg_quality: 70,
         state_dir: PathBuf::from("."),
         clock: None,
+        idle_timeout: Duration::from_secs(3600),
     });
     assert!(matches!(result, Err(ServerError::NotLoopback(_))));
 }
@@ -1734,6 +1983,7 @@ fn refuses_to_start_without_an_agent_identity() {
         jpeg_quality: 70,
         state_dir: dir,
         clock: None,
+        idle_timeout: Duration::from_secs(3600),
     });
     assert!(matches!(result, Err(ServerError::Store(_))));
 }

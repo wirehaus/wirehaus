@@ -29,6 +29,8 @@ pub enum ServerError {
     UnexpectedChannel(wirehaus_protocol::Channel),
     #[error("access was revoked or the agent was locked")]
     AccessRevoked,
+    #[error("the session ended after a period without activity")]
+    IdleTimeout,
     #[error("the viewer stopped acknowledging frames")]
     ViewerStalled,
     #[error("the viewer sent a message that is not binary")]

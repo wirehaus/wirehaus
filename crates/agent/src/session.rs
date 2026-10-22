@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use wirehaus_input::{InputError, InputSink};
 use wirehaus_protocol::{
-    Channel, ClipboardFailure, ClipboardMessage, DesktopMessage, FilesMessage, Frame,
-    TerminalMessage, ViewerMessage,
+    Channel, ClipboardFailure, ClipboardMessage, ControlMessage, DesktopMessage, EndReason,
+    FilesMessage, Frame, TerminalMessage, ViewerMessage,
 };
 
 use crate::clipboard::{Hub, Requests};
@@ -25,7 +25,8 @@ const MAX_MESSAGES_PER_TICK: usize = 256;
 const REVOCATION_CHECK_TICKS: u32 = 30;
 
 pub struct Policy<'a> {
-    pub revoked: &'a dyn Fn() -> bool,
+    pub revoked: &'a dyn Fn() -> Option<EndReason>,
+    pub idle_timeout: Duration,
     pub terminal_allowed: &'a dyn Fn() -> bool,
     pub file_roots: &'a dyn Fn() -> Vec<PathBuf>,
     pub clipboard_mode: &'a dyn Fn() -> ClipboardMode,
@@ -54,12 +55,19 @@ pub fn run(
     link.set_write_timeout(WRITE_TIMEOUT)?;
     let mut ticks: u32 = 0;
     let mut viewer_decodes_video = false;
+    let mut last_activity = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
         ticks = ticks.wrapping_add(1);
-        if ticks.is_multiple_of(REVOCATION_CHECK_TICKS) && (policy.revoked)() {
-            link.close();
+        if ticks.is_multiple_of(REVOCATION_CHECK_TICKS)
+            && let Some(reason) = (policy.revoked)()
+        {
+            end_session(&mut link, reason);
             return Err(ServerError::AccessRevoked);
+        }
+        if files.active() == 0 && last_activity.elapsed() >= policy.idle_timeout {
+            end_session(&mut link, EndReason::Idle);
+            return Err(ServerError::IdleTimeout);
         }
         pacer.tick();
         if pacer.may_send() {
@@ -78,11 +86,12 @@ pub fn run(
         pump_terminals(&mut link, &mut terminals)?;
         pump_files(&mut link, &mut files, policy)?;
         pump_clipboard(&mut link, &mut clipboard)?;
-        if !receive(
+        let mut active = false;
+        let open = receive(
             &mut link,
             backend.input.as_mut(),
             &mut pacer,
-            &mut viewer_decodes_video,
+            (&mut viewer_decodes_video, &mut active),
             &mut Services {
                 terminals: &mut terminals,
                 files: &mut files,
@@ -90,7 +99,11 @@ pub fn run(
                 policy,
             },
             deadline,
-        )? {
+        )?;
+        if active {
+            last_activity = Instant::now();
+        }
+        if !open {
             return Ok(());
         }
     }
@@ -98,11 +111,17 @@ pub fn run(
     Ok(())
 }
 
+fn end_session(link: &mut Link, reason: EndReason) {
+    let _ = link.send_control(ControlMessage::SessionEnded { reason });
+    let _ = link.flush();
+    link.close();
+}
+
 fn receive(
     link: &mut Link,
     input: &mut dyn InputSink,
     pacer: &mut Pacer,
-    video: &mut bool,
+    (video, active): (&mut bool, &mut bool),
     services: &mut Services,
     deadline: Instant,
 ) -> Result<bool, ServerError> {
@@ -114,20 +133,23 @@ fn receive(
         }
         match link.receive(wait)? {
             Incoming::Frame(frame) if frame.channel == Channel::Terminal => {
+                *active = true;
                 let allowed = (services.policy.terminal_allowed)();
                 terminal_frame(&frame, services.terminals, allowed, link)?;
                 handled += 1;
             }
             Incoming::Frame(frame) if frame.channel == Channel::Clipboard => {
+                *active = true;
                 clipboard_frame(&frame, services, link)?;
                 handled += 1;
             }
             Incoming::Frame(frame) if frame.channel == Channel::Files => {
+                *active = true;
                 files_frame(&frame, services, link)?;
                 handled += 1;
             }
             Incoming::Frame(frame) => {
-                handle_frame(&frame, input, pacer, video)?;
+                *active |= handle_frame(&frame, input, pacer, video)?;
                 handled += 1;
             }
             Incoming::Idle => {}
@@ -270,24 +292,24 @@ fn handle_frame(
     input: &mut dyn InputSink,
     pacer: &mut Pacer,
     video: &mut bool,
-) -> Result<(), ServerError> {
+) -> Result<bool, ServerError> {
     if frame.channel != Channel::Desktop {
         return Err(ServerError::UnexpectedChannel(frame.channel));
     }
     match ViewerMessage::decode(&frame.payload)? {
         ViewerMessage::Input(event) => match input.send(event) {
             Ok(()) | Err(InputError::PointerOutOfRange { .. } | InputError::KeyOutOfRange(_)) => {
-                Ok(())
+                Ok(true)
             }
             Err(error) => Err(error.into()),
         },
         ViewerMessage::FrameAck { sequence } => {
             pacer.acknowledged(sequence);
-            Ok(())
+            Ok(false)
         }
         ViewerMessage::Capabilities { video: decodes } => {
             *video = decodes;
-            Ok(())
+            Ok(false)
         }
     }
 }

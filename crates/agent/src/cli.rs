@@ -50,6 +50,8 @@ pub enum Command {
         viewer_dir: PathBuf,
         #[arg(long, default_value_t = 70, value_parser = clap::value_parser!(u8).range(1..=100))]
         quality: u8,
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u32).range(1..=1440))]
+        idle_minutes: u32,
     },
 }
 

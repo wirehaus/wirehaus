@@ -68,20 +68,12 @@ impl Tickets {
         self.entries.retain(|entry| entry.device != *device);
     }
 
-    pub fn redeem(&mut self, device: &PublicKey, presented: &[u8; TICKET_BYTES], now: u64) -> bool {
+    pub fn verify(&mut self, device: &PublicKey, presented: &[u8; TICKET_BYTES], now: u64) -> bool {
         self.prune(now);
-        let Some(position) = self
-            .entries
+        self.entries
             .iter()
-            .position(|entry| entry.device == *device && entry.valid_until.is_some())
-        else {
-            return false;
-        };
-        let matches: bool = self.entries[position].secret.ct_eq(presented).into();
-        if matches {
-            self.entries.remove(position);
-        }
-        matches
+            .find(|entry| entry.device == *device && entry.valid_until.is_some())
+            .is_some_and(|entry| entry.secret.ct_eq(presented).into())
     }
 
     fn prune(&mut self, now: u64) {
@@ -115,21 +107,22 @@ mod tests {
         let key = device();
         let first = tickets.issue(key, 100).unwrap();
         assert_ne!(first, [0; TICKET_BYTES]);
-        assert!(!tickets.redeem(&key, &first, 100));
+        assert!(!tickets.verify(&key, &first, 100));
         let second = tickets.issue(key, 100).unwrap();
         assert_ne!(first, second);
         assert_eq!(tickets.len(), 1);
     }
 
     #[test]
-    fn a_suspended_ticket_works_once_within_the_grace_period() {
+    fn a_suspended_ticket_verifies_within_the_grace_period_until_a_new_one_replaces_it() {
         let mut tickets = Tickets::new();
         let key = device();
         let ticket = tickets.issue(key, 100).unwrap();
         tickets.suspend(&key, 1000);
-        assert!(tickets.redeem(&key, &ticket, 1000 + GRACE_SECONDS));
-        assert!(!tickets.redeem(&key, &ticket, 1000 + GRACE_SECONDS));
-        assert!(tickets.is_empty());
+        assert!(tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS));
+        assert!(tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS));
+        tickets.issue(key, 1000 + GRACE_SECONDS).unwrap();
+        assert!(!tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS));
     }
 
     #[test]
@@ -138,7 +131,7 @@ mod tests {
         let key = device();
         let ticket = tickets.issue(key, 100).unwrap();
         tickets.suspend(&key, 1000);
-        assert!(!tickets.redeem(&key, &ticket, 1000 + GRACE_SECONDS + 1));
+        assert!(!tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS + 1));
         assert!(tickets.is_empty());
     }
 
@@ -150,9 +143,9 @@ mod tests {
         tickets.suspend(&key, 0);
         let mut wrong = ticket;
         wrong[0] ^= 1;
-        assert!(!tickets.redeem(&key, &wrong, 1));
-        assert!(!tickets.redeem(&other, &ticket, 1));
-        assert!(tickets.redeem(&key, &ticket, 2));
+        assert!(!tickets.verify(&key, &wrong, 1));
+        assert!(!tickets.verify(&other, &ticket, 1));
+        assert!(tickets.verify(&key, &ticket, 2));
     }
 
     #[test]
@@ -162,7 +155,7 @@ mod tests {
         let ticket = tickets.issue(key, 0).unwrap();
         tickets.suspend(&key, 0);
         tickets.revoke(&key);
-        assert!(!tickets.redeem(&key, &ticket, 1));
+        assert!(!tickets.verify(&key, &ticket, 1));
     }
 
     #[test]
@@ -173,8 +166,8 @@ mod tests {
         tickets.suspend(&key, 0);
         let new = tickets.issue(key, 10).unwrap();
         tickets.suspend(&key, 10);
-        assert!(!tickets.redeem(&key, &old, 11));
-        assert!(tickets.redeem(&key, &new, 11));
+        assert!(!tickets.verify(&key, &old, 11));
+        assert!(tickets.verify(&key, &new, 11));
     }
 
     #[test]
@@ -187,8 +180,8 @@ mod tests {
             tickets.suspend(key, 0);
         }
         assert_eq!(tickets.len(), MAX_ENTRIES);
-        assert!(!tickets.redeem(&keys[0], &issued[0], 1));
+        assert!(!tickets.verify(&keys[0], &issued[0], 1));
         let last = keys.len() - 1;
-        assert!(tickets.redeem(&keys[last], &issued[last], 1));
+        assert!(tickets.verify(&keys[last], &issued[last], 1));
     }
 }

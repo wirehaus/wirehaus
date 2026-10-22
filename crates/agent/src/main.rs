@@ -3,6 +3,7 @@ mod cli;
 use std::io::stdout;
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 use clap::Parser;
 use wirehaus_agent::commands;
@@ -80,6 +81,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
             display,
             viewer_dir,
             quality,
+            idle_minutes,
         } => {
             let server = Server::bind(ServerConfig {
                 listen,
@@ -88,6 +90,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
                 jpeg_quality: quality,
                 state_dir: dir,
                 clock: None,
+                idle_timeout: Duration::from_secs(u64::from(idle_minutes) * 60),
             })?;
             println!("listening on http://{}", server.local_addr()?);
             server.run(&AtomicBool::new(false))?;

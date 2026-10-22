@@ -1,8 +1,8 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,7 +20,9 @@ use crate::session::{self, Policy};
 use crate::static_files;
 use crate::store::{Clock, Store, system_clock};
 use crate::stream::Stream;
-use wirehaus_protocol::{AuthFailure, ControlMessage};
+use wirehaus_crypto::keys::PublicKey;
+use wirehaus_crypto::ticket::Tickets;
+use wirehaus_protocol::{AuthFailure, ControlMessage, EndReason, TICKET_LEN};
 
 const ACCEPT_POLL: Duration = Duration::from_millis(20);
 const HEAD_DEADLINE: Duration = Duration::from_secs(5);
@@ -39,6 +41,7 @@ pub struct ServerConfig {
     pub jpeg_quality: u8,
     pub state_dir: PathBuf,
     pub clock: Option<Clock>,
+    pub idle_timeout: Duration,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -63,6 +66,7 @@ pub struct Server {
     config: ServerConfig,
     store: Arc<Store>,
     clipboard: Arc<Hub>,
+    tickets: Mutex<Tickets>,
     connections: AtomicUsize,
     unauthenticated: AtomicUsize,
 }
@@ -113,6 +117,7 @@ impl Server {
             config,
             store,
             clipboard,
+            tickets: Mutex::new(Tickets::new()),
             connections: AtomicUsize::new(0),
             unauthenticated: AtomicUsize::new(0),
         })
@@ -231,7 +236,7 @@ impl Server {
             .max_frame_size(Some(MAX_INBOUND_MESSAGE));
         let socket = tungstenite::accept_with_config(stream, Some(config))
             .map_err(|e| ServerError::WebSocket(e.to_string()))?;
-        let outcome = auth::negotiate(socket, &self.store)?;
+        let outcome = auth::negotiate(socket, &self.store, &self.tickets)?;
         drop(pending);
         match outcome {
             Outcome::Refused => Ok(()),
@@ -268,7 +273,9 @@ impl Server {
                 return Err(error);
             }
         };
+        let ticket = self.issue_ticket(&identity.device)?;
         link.send_control(ControlMessage::AuthOk)?;
+        link.send_control(ControlMessage::Ticket { ticket })?;
         link.flush()?;
         self.store.log("session_start", name);
         let result = session::run(
@@ -282,10 +289,17 @@ impl Server {
                 revoked: &|| {
                     self.store
                         .read(|state, _| {
-                            state.is_locked() || state.device(&identity.device).is_none()
+                            if state.is_locked() {
+                                Some(EndReason::Locked)
+                            } else if state.device(&identity.device).is_none() {
+                                Some(EndReason::Revoked)
+                            } else {
+                                None
+                            }
                         })
-                        .unwrap_or(true)
+                        .unwrap_or(Some(EndReason::Revoked))
                 },
+                idle_timeout: self.config.idle_timeout,
                 terminal_allowed: &|| {
                     self.store
                         .read(|state, _| state.terminal_allowed())
@@ -305,7 +319,32 @@ impl Server {
             },
         );
         self.store.log("session_end", name);
+        self.settle_ticket(&identity.device, &result);
         result
+    }
+
+    fn issue_ticket(&self, device: &PublicKey) -> Result<[u8; TICKET_LEN], ServerError> {
+        let now = self.store.read(|_, now| now)?;
+        Ok(self
+            .tickets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .issue(*device, now)?)
+    }
+
+    fn settle_ticket(&self, device: &PublicKey, result: &Result<(), ServerError>) {
+        let keeps_grace = matches!(
+            result,
+            Ok(())
+                | Err(ServerError::ViewerStalled | ServerError::Io(_) | ServerError::WebSocket(_))
+        );
+        let now = self.store.read(|_, now| now).unwrap_or(0);
+        let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);
+        if keeps_grace {
+            tickets.suspend(device, now);
+        } else {
+            tickets.revoke(device);
+        }
     }
 }
 

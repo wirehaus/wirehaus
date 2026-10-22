@@ -1,4 +1,5 @@
 use std::net::TcpStream;
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use tungstenite::{Error as WsError, Message, WebSocket};
@@ -6,7 +7,10 @@ use wirehaus_crypto::handshake::{Accepted, Established, Mode, Replied};
 use wirehaus_crypto::keys::PublicKey;
 use wirehaus_crypto::lockout::Denied;
 use wirehaus_crypto::session::Limits;
-use wirehaus_protocol::{AuthFailure, Channel, ControlMessage, Frame, HEADER_LEN, MAX_PAYLOAD_LEN};
+use wirehaus_crypto::ticket::Tickets;
+use wirehaus_protocol::{
+    AuthFailure, Channel, ControlMessage, Frame, HEADER_LEN, MAX_PAYLOAD_LEN, TICKET_LEN,
+};
 
 use crate::error::ServerError;
 use crate::link::{Incoming, Link, is_timeout};
@@ -31,7 +35,11 @@ pub enum Outcome {
     Refused,
 }
 
-pub fn negotiate(mut socket: WebSocket<TcpStream>, store: &Store) -> Result<Outcome, ServerError> {
+pub fn negotiate(
+    mut socket: WebSocket<TcpStream>,
+    store: &Store,
+    tickets: &Mutex<Tickets>,
+) -> Result<Outcome, ServerError> {
     let Some(first) = read_binary(&mut socket, Instant::now() + HANDSHAKE_TIMEOUT)? else {
         return Ok(Outcome::Refused);
     };
@@ -63,7 +71,7 @@ pub fn negotiate(mut socket: WebSocket<TcpStream>, store: &Store) -> Result<Outc
         }
     };
     match accepted.mode() {
-        Mode::Reconnect => reconnect(socket, store, accepted),
+        Mode::Reconnect => reconnect(socket, store, tickets, accepted),
         Mode::Pairing => pair(socket, store, accepted),
     }
 }
@@ -71,6 +79,7 @@ pub fn negotiate(mut socket: WebSocket<TcpStream>, store: &Store) -> Result<Outc
 fn reconnect(
     mut socket: WebSocket<TcpStream>,
     store: &Store,
+    tickets: &Mutex<Tickets>,
     accepted: Accepted,
 ) -> Result<Outcome, ServerError> {
     let Some(device) = accepted.device() else {
@@ -95,9 +104,9 @@ fn reconnect(
     authenticate(
         Link::new(socket, established.session),
         store,
+        Some(tickets),
         device,
         name,
-        false,
     )
 }
 
@@ -130,26 +139,45 @@ fn pair(
         }
     };
     let name = device_name.unwrap_or_default();
-    authenticate(Link::new(socket, session), store, device, name, true)
+    authenticate(Link::new(socket, session), store, None, device, name)
 }
 
 fn authenticate(
     mut link: Link,
     store: &Store,
+    tickets: Option<&Mutex<Tickets>>,
     device: PublicKey,
     name: String,
-    pairing: bool,
 ) -> Result<Outcome, ServerError> {
+    let pairing = tickets.is_none();
     if !pairing && let Err(denied) = store.read(|state, now| state.check_device(&device, now))? {
         return Ok(refuse(&mut link, store, &name, denied_failure(denied)));
     }
     link.send_control(ControlMessage::AuthRequired)?;
     link.flush()?;
-    for _ in 0..MAX_CODE_ATTEMPTS {
-        let Some(code) = read_code(&mut link)? else {
-            store.log("totp_timeout", &name);
-            link.close();
-            return Ok(Outcome::Refused);
+    let mut resumed = false;
+    let mut failures = 0;
+    while failures < MAX_CODE_ATTEMPTS {
+        let code = match read_credential(&mut link)? {
+            None => {
+                store.log("totp_timeout", &name);
+                link.close();
+                return Ok(Outcome::Refused);
+            }
+            Some(Credential::Resume(ticket)) => {
+                let Some(tickets) = tickets.filter(|_| !resumed) else {
+                    return Err(ServerError::UnexpectedMessage);
+                };
+                resumed = true;
+                if resume_valid(store, tickets, &device, &ticket)? {
+                    return succeed(link, store, device, name, false, true);
+                }
+                store.log("resume_refused", &name);
+                link.send_control(ControlMessage::AuthRequired)?;
+                link.flush()?;
+                continue;
+            }
+            Some(Credential::Code(code)) => code,
         };
         let verdict = store.update(|state, now| {
             let verdict = state.verify_totp((!pairing).then_some(&device), &code, now);
@@ -159,11 +187,12 @@ fn authenticate(
             verdict
         })?;
         match verdict {
-            Ok(()) => return succeed(link, store, device, name, pairing),
+            Ok(()) => return succeed(link, store, device, name, pairing, false),
             Err(AuthError::Denied(denied)) => {
                 return Ok(refuse(&mut link, store, &name, denied_failure(denied)));
             }
             Err(AuthError::WrongCode) => {
+                failures += 1;
                 store.log("totp_failed", &name);
                 if !pairing
                     && let Err(denied) =
@@ -180,12 +209,32 @@ fn authenticate(
     Ok(Outcome::Refused)
 }
 
+fn resume_valid(
+    store: &Store,
+    tickets: &Mutex<Tickets>,
+    device: &PublicKey,
+    ticket: &[u8; TICKET_LEN],
+) -> Result<bool, ServerError> {
+    let usable = store.read(|state, now| {
+        let known = state.device(device).is_some();
+        (known && state.check_device(device, now).is_ok()).then_some(now)
+    })?;
+    let Some(now) = usable else {
+        return Ok(false);
+    };
+    Ok(tickets
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .verify(device, ticket, now))
+}
+
 fn succeed(
     mut link: Link,
     store: &Store,
     device: PublicKey,
     name: String,
     pairing: bool,
+    resumed: bool,
 ) -> Result<Outcome, ServerError> {
     if pairing {
         let added = store.update(|state, now| {
@@ -200,7 +249,7 @@ fn succeed(
         }
         store.log("paired", &format!("{name} {}", device.to_text()));
     }
-    store.log("auth_ok", &name);
+    store.log(if resumed { "auth_resumed" } else { "auth_ok" }, &name);
     Ok(Outcome::Authenticated(
         Box::new(link),
         Identity { device, name },
@@ -238,7 +287,12 @@ fn denied_failure(denied: Denied) -> (AuthFailure, u32) {
     }
 }
 
-fn read_code(link: &mut Link) -> Result<Option<String>, ServerError> {
+enum Credential {
+    Code(String),
+    Resume([u8; TICKET_LEN]),
+}
+
+fn read_credential(link: &mut Link) -> Result<Option<Credential>, ServerError> {
     let deadline = Instant::now() + CODE_TIMEOUT;
     loop {
         let wait = deadline.saturating_duration_since(Instant::now());
@@ -246,19 +300,22 @@ fn read_code(link: &mut Link) -> Result<Option<String>, ServerError> {
             return Ok(None);
         }
         match link.receive(wait)? {
-            Incoming::Frame(frame) => return code_of(&frame).map(Some),
+            Incoming::Frame(frame) => return credential_of(&frame).map(Some),
             Incoming::Idle => {}
             Incoming::Closed => return Ok(None),
         }
     }
 }
 
-fn code_of(frame: &Frame) -> Result<String, ServerError> {
+fn credential_of(frame: &Frame) -> Result<Credential, ServerError> {
     if frame.channel != Channel::Control {
         return Err(ServerError::UnexpectedChannel(frame.channel));
     }
     match ControlMessage::decode(&frame.payload)? {
-        ControlMessage::Totp { code } => Ok(code.iter().map(|&digit| char::from(digit)).collect()),
+        ControlMessage::Totp { code } => Ok(Credential::Code(
+            code.iter().map(|&digit| char::from(digit)).collect(),
+        )),
+        ControlMessage::Resume { ticket } => Ok(Credential::Resume(ticket)),
         _ => Err(ServerError::UnexpectedMessage),
     }
 }
