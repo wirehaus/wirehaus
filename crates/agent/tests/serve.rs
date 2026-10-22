@@ -1135,6 +1135,27 @@ fn terminal_text_until(client: &mut Client, stream: u32, wanted: &str) -> String
     seen
 }
 
+fn terminal_texts_until(
+    client: &mut Client,
+    wanted: &[(u32, &str)],
+) -> std::collections::HashMap<u32, String> {
+    let mut seen: std::collections::HashMap<u32, String> = wanted
+        .iter()
+        .map(|&(stream, _)| (stream, String::new()))
+        .collect();
+    while wanted
+        .iter()
+        .any(|&(stream, text)| !seen[&stream].contains(text))
+    {
+        if let (id, TerminalMessage::Output(data)) = next_terminal(client)
+            && let Some(text) = seen.get_mut(&id)
+        {
+            text.push_str(&String::from_utf8_lossy(&data));
+        }
+    }
+    seen
+}
+
 #[test]
 fn a_terminal_is_refused_until_the_owner_allows_it_and_then_runs_commands() {
     let xvfb = Xvfb::start_unique();
@@ -1230,11 +1251,11 @@ fn terminal_sessions_are_independent_and_limited() {
         2,
         &TerminalMessage::Input(b"echo two-$((2))\n".to_vec()),
     );
-    let first = terminal_text_until(&mut client, 1, "one-1");
-    assert!(first.contains("one-1"));
-    assert!(!first.contains("two-2"));
-    let second = terminal_text_until(&mut client, 2, "two-2");
-    assert!(second.contains("two-2"));
+    let seen = terminal_texts_until(&mut client, &[(1, "one-1"), (2, "two-2")]);
+    assert!(seen[&1].contains("one-1"));
+    assert!(!seen[&1].contains("two-2"));
+    assert!(seen[&2].contains("two-2"));
+    assert!(!seen[&2].contains("one-1"));
 }
 
 #[test]
