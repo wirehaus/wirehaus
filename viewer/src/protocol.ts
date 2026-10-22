@@ -5,6 +5,7 @@ export const TERMINAL_CHANNEL = 1;
 export const CONTROL_CHANNEL = 6;
 export const MAX_INPUT_CHUNK = 3072;
 export const CODE_LEN = 6;
+export const TICKET_LEN = 32;
 
 const RESIZE = 0;
 const TILE = 1;
@@ -45,10 +46,14 @@ export type InputEvent =
 
 export type AuthFailure = 'wrongCode' | 'locked' | 'suspended' | 'busy';
 
+export type EndReason = 'idle' | 'revoked' | 'locked';
+
 export type ControlMessage =
   | { kind: 'authRequired' }
   | { kind: 'authOk' }
-  | { kind: 'authFailed'; reason: AuthFailure; retryAfter: number };
+  | { kind: 'authFailed'; reason: AuthFailure; retryAfter: number }
+  | { kind: 'ticket'; ticket: Uint8Array }
+  | { kind: 'sessionEnded'; reason: EndReason };
 
 export class ProtocolError extends Error {}
 
@@ -194,6 +199,7 @@ function buttonTag(button: MouseButton): number {
 }
 
 const FAILURES: AuthFailure[] = ['wrongCode', 'locked', 'suspended', 'busy'];
+const END_REASONS: EndReason[] = ['idle', 'revoked', 'locked'];
 
 export function decodeControl(payload: Uint8Array): ControlMessage {
   const tag = payload[0];
@@ -216,6 +222,17 @@ export function decodeControl(payload: Uint8Array): ControlMessage {
       }
       return { kind: 'authFailed', reason, retryAfter: view.getUint32(2) };
     }
+    case 5:
+      expectLength(payload, 1 + TICKET_LEN);
+      return { kind: 'ticket', ticket: payload.slice(1) };
+    case 6: {
+      expectLength(payload, 2);
+      const reason = END_REASONS[view.getUint8(1)];
+      if (reason === undefined) {
+        throw new ProtocolError('unknown end reason');
+      }
+      return { kind: 'sessionEnded', reason };
+    }
     default:
       throw new ProtocolError(`unknown control message ${tag}`);
   }
@@ -230,6 +247,16 @@ export function encodeTotp(code: string): Uint8Array {
   for (let index = 0; index < CODE_LEN; index += 1) {
     out[1 + index] = code.charCodeAt(index);
   }
+  return out;
+}
+
+export function encodeResume(ticket: Uint8Array): Uint8Array {
+  if (ticket.length !== TICKET_LEN) {
+    throw new ProtocolError('a ticket must be 32 bytes');
+  }
+  const out = new Uint8Array(1 + TICKET_LEN);
+  out[0] = 4;
+  out.set(ticket, 1);
   return out;
 }
 

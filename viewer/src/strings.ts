@@ -6,6 +6,10 @@ export type Messages = {
   connecting: string;
   connected: (width: number, height: number) => string;
   closed: string;
+  reconnecting: (attempt: number) => string;
+  endedIdle: string;
+  endedRevoked: string;
+  endedLocked: string;
   reconnect: string;
   forget: string;
   pairTitle: string;
@@ -76,6 +80,10 @@ const catalog: Record<string, Messages> = {
     connecting: 'Conectando',
     connected: (width, height) => `Conectado, ${width}x${height}`,
     closed: 'Desconectado.',
+    reconnecting: (attempt) => `Conexión perdida. Reconectando, intento ${attempt}.`,
+    endedIdle: 'Sesión cerrada por inactividad. Vuelve a entrar con tu código.',
+    endedRevoked: 'Este equipo ya no tiene acceso al ordenador remoto.',
+    endedLocked: 'El agente se ha bloqueado desde el ordenador de casa.',
     reconnect: 'Reconectar',
     forget: 'Olvidar este equipo',
     pairTitle: 'Emparejar este equipo',
@@ -167,6 +175,10 @@ const catalog: Record<string, Messages> = {
     connecting: 'Connecting',
     connected: (width, height) => `Connected, ${width}x${height}`,
     closed: 'Disconnected.',
+    reconnecting: (attempt) => `Connection lost. Reconnecting, attempt ${attempt}.`,
+    endedIdle: 'Session closed after inactivity. Sign in again with your code.',
+    endedRevoked: 'This device no longer has access to the remote computer.',
+    endedLocked: 'The agent was locked from the home computer.',
     reconnect: 'Reconnect',
     forget: 'Forget this device',
     pairTitle: 'Pair this device',

@@ -12,6 +12,9 @@ import {
   type InputEvent,
   type MouseButton,
   decodeControl,
+  encodeResume,
+  type EndReason,
+  ProtocolError,
   decodeDesktop,
   decodeFrame,
   decodeTerminal,
@@ -40,11 +43,14 @@ export type ViewerState =
   | { kind: 'needsCode'; error?: 'wrong' | 'invalid' }
   | { kind: 'connected'; width: number; height: number }
   | { kind: 'refused'; reason: RefusalReason; retryAfter: number }
+  | { kind: 'reconnecting'; attempt: number }
+  | { kind: 'ended'; reason: EndReason }
   | { kind: 'closed' };
 
 type Phase = 'handshake' | 'authenticating' | 'streaming';
 
 const BUTTONS: Record<number, MouseButton> = { 0: 'left', 1: 'middle', 2: 'right' };
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 const PIXELS_PER_NOTCH = 100;
 const MAX_NOTCHES = 10;
 
@@ -62,6 +68,12 @@ export class Viewer {
   private readonly pressedKeys = new Set<number>();
   private readonly pressedButtons = new Set<MouseButton>();
   private pendingMove: { x: number; y: number } | null = null;
+  private ticket: Uint8Array | null = null;
+  private resumeSent = false;
+  private retrying = false;
+  private retries = 0;
+  private retryTimer: number | undefined;
+  private endedBy: EndReason | null = null;
   terminalListener: TerminalListener | null = null;
   filesListener: FilesListener | null = null;
   clipboardListener: ClipboardListener | null = null;
@@ -125,6 +137,8 @@ export class Viewer {
   }
 
   async forget(): Promise<void> {
+    this.ticket = null;
+    this.stopRetrying();
     this.close();
     await forgetIdentity().catch(() => undefined);
     this.identity = undefined;
@@ -132,6 +146,7 @@ export class Viewer {
   }
 
   async reconnect(): Promise<void> {
+    this.stopRetrying();
     this.close();
     await this.start();
   }
@@ -148,6 +163,8 @@ export class Viewer {
     this.report({ kind: 'connecting' });
     this.handshake = handshake;
     this.pairing = pairing;
+    this.resumeSent = false;
+    this.endedBy = null;
     this.phase = 'handshake';
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     const socket = new WebSocket(`${scheme}://${location.host}/ws`);
@@ -187,10 +204,41 @@ export class Viewer {
       return;
     }
     const phase = this.phase;
+    const endedBy = this.endedBy;
     this.close();
+    if (endedBy !== null) {
+      this.ticket = null;
+      this.stopRetrying();
+      this.report({ kind: 'ended', reason: endedBy });
+      return;
+    }
+    if (this.ticket !== null && (phase === 'streaming' || this.retrying) && this.scheduleRetry()) {
+      return;
+    }
+    this.ticket = null;
+    this.stopRetrying();
     this.report(
       phase === 'streaming' ? { kind: 'closed' } : { kind: 'refused', reason: 'unknown', retryAfter: 0 },
     );
+  }
+
+  private scheduleRetry(): boolean {
+    const delay = RETRY_DELAYS_MS[this.retries];
+    if (delay === undefined) {
+      return false;
+    }
+    this.retrying = true;
+    this.retries += 1;
+    this.report({ kind: 'reconnecting', attempt: this.retries });
+    this.retryTimer = window.setTimeout(() => void this.start(), delay);
+    return true;
+  }
+
+  private stopRetrying(): void {
+    window.clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    this.retrying = false;
+    this.retries = 0;
   }
 
   private fail(socket: WebSocket): void {
@@ -240,6 +288,8 @@ export class Viewer {
   private dispatch(socket: WebSocket, frame: { channel: number; stream: number; payload: Uint8Array }): void {
     if (this.phase === 'authenticating' && frame.channel === CONTROL_CHANNEL) {
       this.control(socket, frame.payload);
+    } else if (this.phase === 'streaming' && frame.channel === CONTROL_CHANNEL) {
+      this.streamControl(frame.payload);
     } else if (this.phase === 'streaming' && frame.channel === DESKTOP_CHANNEL) {
       this.apply(decodeDesktop(frame.payload));
     } else if (this.phase === 'streaming' && frame.channel === TERMINAL_CHANNEL) {
@@ -257,9 +307,17 @@ export class Viewer {
     const message = decodeControl(payload);
     switch (message.kind) {
       case 'authRequired':
+        if (this.ticket !== null && !this.resumeSent && !this.pairing) {
+          this.resumeSent = true;
+          this.send(CONTROL_CHANNEL, encodeResume(this.ticket));
+          return;
+        }
+        this.ticket = null;
+        this.stopRetrying();
         this.report({ kind: 'needsCode' });
         return;
       case 'authOk':
+        this.stopRetrying();
         this.phase = 'streaming';
         this.report({ kind: 'connecting' });
         void this.pinAgent();
@@ -271,8 +329,29 @@ export class Viewer {
           return;
         }
         this.close();
+        if (message.reason === 'busy' && this.retrying && this.scheduleRetry()) {
+          return;
+        }
+        this.ticket = null;
+        this.stopRetrying();
         this.report({ kind: 'refused', reason: message.reason, retryAfter: message.retryAfter });
         void socket;
+        return;
+      case 'ticket':
+      case 'sessionEnded':
+        this.fail(socket);
+    }
+  }
+
+  private streamControl(payload: Uint8Array): void {
+    const message = decodeControl(payload);
+    if (message.kind === 'ticket') {
+      this.ticket = message.ticket;
+    } else if (message.kind === 'sessionEnded') {
+      this.endedBy = message.reason;
+      this.ticket = null;
+    } else {
+      throw new ProtocolError('unexpected control message');
     }
   }
 

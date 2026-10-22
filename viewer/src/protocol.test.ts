@@ -12,6 +12,7 @@ import {
   encodeFrame,
   encodeFrameAck,
   encodeInput,
+  encodeResume,
   encodeTerminalClose,
   encodeTerminalInput,
   encodeTerminalOpen,
@@ -182,4 +183,30 @@ test('rejects malformed terminal messages', () => {
   assert.throws(() => decodeTerminal(Uint8Array.of(5, 0, 0, 1)), ProtocolError);
   assert.throws(() => decodeTerminal(Uint8Array.of(6, 9)), ProtocolError);
   assert.throws(() => decodeTerminal(Uint8Array.of(9)), ProtocolError);
+});
+
+test('encodes a resume request with the agent layout', () => {
+  const ticket = Uint8Array.from({ length: 32 }, (_, index) => index);
+  const bytes = encodeResume(ticket);
+  assert.equal(bytes.length, 33);
+  assert.equal(bytes[0], 4);
+  assert.deepEqual([...bytes.subarray(1)], [...ticket]);
+  assert.throws(() => encodeResume(new Uint8Array(31)), ProtocolError);
+  assert.throws(() => encodeResume(new Uint8Array(33)), ProtocolError);
+});
+
+test('decodes the ticket and the end of the session', () => {
+  const body = Uint8Array.from({ length: 32 }, (_, index) => 255 - index);
+  const decoded = decodeControl(Uint8Array.from([5, ...body]));
+  assert.equal(decoded.kind, 'ticket');
+  assert.deepEqual(decoded.kind === 'ticket' ? [...decoded.ticket] : [], [...body]);
+  assert.deepEqual(decodeControl(Uint8Array.of(6, 0)), { kind: 'sessionEnded', reason: 'idle' });
+  assert.deepEqual(decodeControl(Uint8Array.of(6, 1)), { kind: 'sessionEnded', reason: 'revoked' });
+  assert.deepEqual(decodeControl(Uint8Array.of(6, 2)), { kind: 'sessionEnded', reason: 'locked' });
+});
+
+test('rejects malformed ticket and end messages', () => {
+  for (const bytes of [[5], [5, 1, 2], new Array(34).fill(5), [6], [6, 3], [6, 0, 0]]) {
+    assert.throws(() => decodeControl(Uint8Array.from(bytes)), ProtocolError, bytes.join(','));
+  }
 });

@@ -71,6 +71,17 @@ function refusal(state: Extract<ViewerState, { kind: 'refused' }>, texts: Messag
   }
 }
 
+function endedText(reason: 'idle' | 'revoked' | 'locked'): string {
+  switch (reason) {
+    case 'idle':
+      return messages.endedIdle;
+    case 'revoked':
+      return messages.endedRevoked;
+    case 'locked':
+      return messages.endedLocked;
+  }
+}
+
 let lastKind: ViewerState['kind'] = 'loading';
 
 function show(state: ViewerState): void {
@@ -80,7 +91,7 @@ function show(state: ViewerState): void {
   tabs.hidden = state.kind !== 'connected';
   showView();
   forget.hidden = state.kind === 'loading' || state.kind === 'needsPairing';
-  reconnect.hidden = state.kind !== 'closed' && state.kind !== 'refused';
+  reconnect.hidden = state.kind !== 'closed' && state.kind !== 'refused' && state.kind !== 'ended';
   pairError.textContent = state.kind === 'needsPairing' && state.error !== undefined ? messages.pairInvalid : '';
   codeError.textContent =
     state.kind === 'needsCode' && state.error === 'wrong'
@@ -118,6 +129,18 @@ function show(state: ViewerState): void {
       files.reset();
       clipboard.reset();
       status.textContent = messages.closed;
+      break;
+    case 'reconnecting':
+      terminals.endAll();
+      files.reset();
+      clipboard.reset();
+      status.textContent = messages.reconnecting(state.attempt);
+      break;
+    case 'ended':
+      terminals.endAll();
+      files.reset();
+      clipboard.reset();
+      status.textContent = endedText(state.reason);
       break;
   }
 }
