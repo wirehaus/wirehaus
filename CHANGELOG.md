@@ -16,6 +16,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Inyección de ratón y teclado en X11 mediante XTEST.
 - Codificación de teselas en JPEG.
 - Servidor local del agente (`wirehaus-agent serve`): solo en la interfaz de bucle local, con comprobación de `Host` y `Origin`, un único visor a la vez y entrega de los ficheros del visor.
+- La captura de pantalla pide a X las zonas dañadas (extensión DAMAGE) y solo lee lo que cambia; sin DAMAGE compara teselas.
 - Visor web en TypeScript con lienzo, ratón, rueda y teclado.
 
 ### Cambiado
