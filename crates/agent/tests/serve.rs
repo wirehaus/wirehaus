@@ -399,6 +399,18 @@ impl Painter {
         Self { connection, root }
     }
 
+    fn fill_area(&self, area: Rectangle, color: u32) {
+        let gc = self.connection.generate_id().unwrap();
+        self.connection
+            .create_gc(gc, self.root, &CreateGCAux::new().foreground(color))
+            .unwrap();
+        self.connection
+            .poly_fill_rectangle(self.root, gc, &[area])
+            .unwrap();
+        self.connection.free_gc(gc).unwrap();
+        self.connection.sync().unwrap();
+    }
+
     fn fill_rectangle(&self, x: i16, color: u32) {
         let gc = self.connection.generate_id().unwrap();
         self.connection
@@ -920,6 +932,158 @@ fn stops_sending_until_the_viewer_acknowledges_batches() {
     );
     client.send_viewer(ViewerMessage::FrameAck { sequence: 0 });
     assert_eq!(next_frame_end(&mut client), BATCH_LIMIT);
+}
+
+fn decoded_center(picture: &openh264::decoder::DecodedYUV<'_>) -> [u8; 3] {
+    use openh264::formats::YUVSource;
+    let (width, height) = picture.dimensions();
+    let (luma_stride, chroma_stride, _) = picture.strides();
+    let (row, column) = (height / 2, width / 2);
+    let luma = (f64::from(picture.y()[row * luma_stride + column]) - 16.0) / 219.0;
+    let blue_difference =
+        (f64::from(picture.u()[(row / 2) * chroma_stride + column / 2]) - 128.0) / 224.0;
+    let red_difference =
+        (f64::from(picture.v()[(row / 2) * chroma_stride + column / 2]) - 128.0) / 224.0;
+    let channels = [
+        luma + 1.5748 * red_difference,
+        luma - 0.1873 * blue_difference - 0.4681 * red_difference,
+        luma + 1.8556 * blue_difference,
+    ];
+    channels.map(|value| {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let byte = (value * 255.0).round().clamp(0.0, 255.0) as u8;
+        byte
+    })
+}
+
+#[test]
+fn a_capable_viewer_gets_h264_under_heavy_activity_and_tiles_again_when_it_calms_down() {
+    let xvfb = Xvfb::start(30 + std::process::id() % 9);
+    let painter = Painter::connect(&xvfb.display);
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.send_viewer(ViewerMessage::Capabilities { video: true });
+    client.set_timeout(Duration::from_millis(150));
+
+    let palette: [(u32, [u8; 3]); 3] = [
+        (0x00ff_0000, [255, 0, 0]),
+        (0x0000_ff00, [0, 255, 0]),
+        (0x0000_00ff, [0, 0, 255]),
+    ];
+    let painting = AtomicBool::new(true);
+    let mut viewer = openh264::decoder::Decoder::new().unwrap();
+    let mut videos = 0;
+    let mut matching = 0;
+    let mut keyframes = 0;
+    thread::scope(|scope| {
+        scope.spawn(|| {
+            let mut round = 0_usize;
+            while painting.load(Ordering::SeqCst) {
+                let (color, _) = palette[round % palette.len()];
+                painter.fill_area(
+                    Rectangle {
+                        x: 0,
+                        y: 0,
+                        width: 320,
+                        height: 160,
+                    },
+                    color,
+                );
+                round += 1;
+                sleep(Duration::from_millis(20));
+            }
+        });
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline && !(videos >= 6 && matching >= 3) {
+            match client.read_desktop() {
+                Received::Got(DesktopMessage::FrameEnd { sequence }) => {
+                    client.send_viewer(ViewerMessage::FrameAck { sequence });
+                }
+                Received::Got(DesktopMessage::Video {
+                    keyframe,
+                    data,
+                    width,
+                    height,
+                }) => {
+                    assert_eq!((width, height), (320, 200));
+                    videos += 1;
+                    keyframes += usize::from(keyframe);
+                    if let Some(picture) = viewer.decode(&data).unwrap() {
+                        let center = decoded_center(&picture);
+                        if palette.iter().any(|(_, rgb)| {
+                            rgb.iter().zip(center).all(|(a, b)| a.abs_diff(b) <= 14)
+                        }) {
+                            matching += 1;
+                        }
+                    }
+                }
+                Received::Got(_) | Received::Timeout => {}
+                Received::Closed => panic!("the stream closed"),
+            }
+        }
+        painting.store(false, Ordering::SeqCst);
+    });
+    assert!(videos >= 6, "only {videos} video pictures arrived");
+    assert!(keyframes >= 1, "no keyframe arrived");
+    assert!(
+        matching >= 3,
+        "only {matching} decoded pictures had the painted colours"
+    );
+
+    let mut refreshed = 0_u64;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && refreshed < 320 * 200 {
+        match client.read_desktop() {
+            Received::Got(DesktopMessage::FrameEnd { sequence }) => {
+                client.send_viewer(ViewerMessage::FrameAck { sequence });
+            }
+            Received::Got(DesktopMessage::Tile { width, height, .. }) => {
+                refreshed += u64::from(width) * u64::from(height);
+            }
+            Received::Got(_) | Received::Timeout => {}
+            Received::Closed => panic!("the stream closed"),
+        }
+    }
+    assert!(
+        refreshed >= 320 * 200,
+        "the screen was not refreshed with tiles: {refreshed}"
+    );
+}
+
+#[test]
+fn a_viewer_that_does_not_declare_video_support_keeps_getting_tiles_under_heavy_activity() {
+    let xvfb = Xvfb::start(40 + std::process::id() % 9);
+    let painter = Painter::connect(&xvfb.display);
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(150));
+    let mut tiles = 0;
+    for round in 0..40_u32 {
+        painter.fill_area(
+            Rectangle {
+                x: 0,
+                y: 0,
+                width: 320,
+                height: 160,
+            },
+            0x00ff_0000 + round,
+        );
+        loop {
+            match client.read_desktop() {
+                Received::Got(DesktopMessage::FrameEnd { sequence }) => {
+                    client.send_viewer(ViewerMessage::FrameAck { sequence });
+                }
+                Received::Got(DesktopMessage::Video { .. }) => {
+                    panic!("video sent to a viewer that cannot decode it")
+                }
+                Received::Got(DesktopMessage::Tile { .. }) => tiles += 1,
+                Received::Got(_) => {}
+                Received::Timeout => break,
+                Received::Closed => panic!("the stream closed"),
+            }
+        }
+    }
+    assert!(tiles > 10);
 }
 
 #[test]

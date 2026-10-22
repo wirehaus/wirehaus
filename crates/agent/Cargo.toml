@@ -24,9 +24,12 @@ thiserror.workspace = true
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 wirehaus-capture = { path = "../capture" }
 wirehaus-crypto = { path = "../crypto" }
-wirehaus-encode = { path = "../encode" }
+wirehaus-encode = { path = "../encode", features = ["h264"] }
 wirehaus-input = { path = "../input" }
 wirehaus-protocol = { path = "../protocol" }
+
+[dev-dependencies]
+openh264 = "0.9"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 x11rb.workspace = true

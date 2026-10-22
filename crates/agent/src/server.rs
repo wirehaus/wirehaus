@@ -7,7 +7,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tungstenite::protocol::WebSocketConfig;
-use wirehaus_encode::JpegEncoder;
 
 use crate::auth::{self, INBOUND_LIMIT, Outcome};
 use crate::error::ServerError;
@@ -19,6 +18,7 @@ use crate::platform;
 use crate::session;
 use crate::static_files;
 use crate::store::{Clock, Store, system_clock};
+use crate::stream::Stream;
 use wirehaus_protocol::{AuthFailure, ControlMessage};
 
 const ACCEPT_POLL: Duration = Duration::from_millis(20);
@@ -268,7 +268,7 @@ impl Server {
         let result = session::run(
             link,
             backend,
-            JpegEncoder::new(self.config.jpeg_quality),
+            Stream::new(self.config.jpeg_quality),
             Pacer::new(self.config.jpeg_quality),
             stop,
             &|| {

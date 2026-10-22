@@ -17,6 +17,16 @@ pub enum Incoming {
     Closed,
 }
 
+pub trait FrameSink {
+    fn send_frame(&mut self, frame: &Frame) -> Result<usize, ServerError>;
+}
+
+impl FrameSink for Link {
+    fn send_frame(&mut self, frame: &Frame) -> Result<usize, ServerError> {
+        Link::send_frame(self, frame)
+    }
+}
+
 pub struct Link {
     socket: WebSocket<TcpStream>,
     session: Session,
