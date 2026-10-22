@@ -23,6 +23,8 @@ pub enum ServerError {
     Protocol(#[from] wirehaus_protocol::ProtocolError),
     #[error("unexpected message on the {0:?} channel")]
     UnexpectedChannel(wirehaus_protocol::Channel),
+    #[error("the viewer stopped acknowledging frames")]
+    ViewerStalled,
     #[error("the viewer sent a message that is not binary")]
     UnexpectedMessage,
     #[error("websocket error: {0}")]

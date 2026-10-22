@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
 use wirehaus_agent::{Server, ServerConfig, ServerError};
-use wirehaus_protocol::{Channel, Codec, DesktopMessage, Frame, InputEvent};
+use wirehaus_protocol::{Channel, Codec, DesktopMessage, Frame, InputEvent, ViewerMessage};
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt};
+use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt, CreateGCAux, Rectangle};
 use x11rb::wrapper::ConnectionExt as _;
 
 struct Xvfb {
@@ -131,7 +131,7 @@ impl Drop for Running {
 
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
-fn next_desktop(socket: &mut Socket) -> DesktopMessage {
+fn read_desktop(socket: &mut Socket) -> DesktopMessage {
     loop {
         match socket.read().unwrap() {
             Message::Binary(bytes) => {
@@ -145,11 +145,26 @@ fn next_desktop(socket: &mut Socket) -> DesktopMessage {
     }
 }
 
-fn send_input(socket: &mut Socket, event: InputEvent) {
-    let frame = Frame::new(Channel::Desktop, 0, event.encode()).unwrap();
+fn send_viewer_message(socket: &mut Socket, message: ViewerMessage) {
+    let frame = Frame::new(Channel::Desktop, 0, message.encode()).unwrap();
     socket
         .send(Message::Binary(frame.encode().unwrap().into()))
         .unwrap();
+}
+
+fn next_desktop(socket: &mut Socket) -> DesktopMessage {
+    loop {
+        match read_desktop(socket) {
+            DesktopMessage::FrameEnd { sequence } => {
+                send_viewer_message(socket, ViewerMessage::FrameAck { sequence });
+            }
+            other => return other,
+        }
+    }
+}
+
+fn send_input(socket: &mut Socket, event: InputEvent) {
+    send_viewer_message(socket, ViewerMessage::Input(event));
 }
 
 fn paint_root(display: &str, color: u32) {
@@ -163,6 +178,40 @@ fn paint_root(display: &str, color: u32) {
         .unwrap();
     connection.clear_area(false, root, 0, 0, 0, 0).unwrap();
     connection.sync().unwrap();
+}
+
+struct Painter {
+    connection: x11rb::rust_connection::RustConnection,
+    root: u32,
+}
+
+impl Painter {
+    fn connect(display: &str) -> Self {
+        let (connection, number) = x11rb::connect(Some(display)).unwrap();
+        let root = connection.setup().roots[number].root;
+        Self { connection, root }
+    }
+
+    fn fill_rectangle(&self, x: i16, color: u32) {
+        let gc = self.connection.generate_id().unwrap();
+        self.connection
+            .create_gc(gc, self.root, &CreateGCAux::new().foreground(color))
+            .unwrap();
+        self.connection
+            .poly_fill_rectangle(
+                self.root,
+                gc,
+                &[Rectangle {
+                    x,
+                    y: 10,
+                    width: 20,
+                    height: 20,
+                }],
+            )
+            .unwrap();
+        self.connection.free_gc(gc).unwrap();
+        self.connection.sync().unwrap();
+    }
 }
 
 fn pointer_at(display: &str) -> (i16, i16) {
@@ -200,7 +249,7 @@ fn streams_the_screen_and_applies_input() {
                 assert_eq!(&data[..2], [0xFF, 0xD8]);
                 covered += u32::from(width) * u32::from(height);
             }
-            resize @ DesktopMessage::Resize { .. } => panic!("expected a tile, got {resize:?}"),
+            other => panic!("expected a tile, got {other:?}"),
         }
     }
     assert_eq!(covered, 320 * 200);
@@ -221,6 +270,61 @@ fn streams_the_screen_and_applies_input() {
             updated += u32::from(width) * u32::from(height);
         }
     }
+}
+
+const BATCH_LIMIT: u32 = 8;
+
+fn next_frame_end(socket: &mut Socket) -> u32 {
+    loop {
+        if let DesktopMessage::FrameEnd { sequence } = read_desktop(socket) {
+            return sequence;
+        }
+    }
+}
+
+fn nothing_arrives_within(socket: &mut Socket, wait: Duration) -> bool {
+    let MaybeTlsStream::Plain(stream) = socket.get_mut() else {
+        unreachable!();
+    };
+    stream.set_read_timeout(Some(wait)).unwrap();
+    let silent = matches!(
+        socket.read(),
+        Err(tungstenite::Error::Io(ref e))
+            if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+    );
+    let MaybeTlsStream::Plain(stream) = socket.get_mut() else {
+        unreachable!();
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    silent
+}
+
+#[test]
+fn stops_sending_until_the_viewer_acknowledges_batches() {
+    let xvfb = Xvfb::start(10 + std::process::id() % 9);
+    let painter = Painter::connect(&xvfb.display);
+    let server = Running::start(&xvfb.display);
+    let mut socket = server.connect(Some(&server.origin())).unwrap();
+
+    assert_eq!(next_frame_end(&mut socket), 0);
+    for expected in 1..BATCH_LIMIT {
+        painter.fill_rectangle(
+            i16::try_from(expected * 30).unwrap(),
+            0x00ff_0000 + expected,
+        );
+        assert_eq!(next_frame_end(&mut socket), expected);
+    }
+
+    painter.fill_rectangle(130, 0x0000_ff00);
+    assert!(
+        nothing_arrives_within(&mut socket, Duration::from_millis(800)),
+        "the agent kept sending although the batch limit was reached"
+    );
+
+    send_viewer_message(&mut socket, ViewerMessage::FrameAck { sequence: 0 });
+    assert_eq!(next_frame_end(&mut socket), BATCH_LIMIT);
 }
 
 #[test]

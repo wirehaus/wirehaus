@@ -1,5 +1,6 @@
 mod error;
 mod http;
+mod pacer;
 mod platform;
 mod server;
 mod session;

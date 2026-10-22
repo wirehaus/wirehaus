@@ -12,6 +12,7 @@ use crate::error::ServerError;
 use crate::http::{
     HeadError, MAX_HEAD_LEN, RequestHead, host_allowed, origin_allowed, parse_head, response,
 };
+use crate::pacer::Pacer;
 use crate::platform;
 use crate::session;
 use crate::static_files;
@@ -184,6 +185,7 @@ impl Server {
             socket,
             backend,
             JpegEncoder::new(self.config.jpeg_quality),
+            Pacer::new(self.config.jpeg_quality),
             stop,
         )
     }
