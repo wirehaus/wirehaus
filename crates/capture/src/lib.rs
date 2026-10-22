@@ -5,7 +5,7 @@ mod error;
 mod x11;
 
 pub use bitmap::{Bitmap, Rect};
-pub use damage::{TILE_SIZE, changed_tiles};
+pub use damage::{MAX_RUN_WIDTH, TILE_SIZE, changed_tiles, coalesce};
 pub use error::CaptureError;
 #[cfg(target_os = "linux")]
 pub use x11::X11Screen;

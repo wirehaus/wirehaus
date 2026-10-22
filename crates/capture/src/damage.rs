@@ -1,6 +1,7 @@
 use crate::bitmap::{Bitmap, Rect};
 
 pub const TILE_SIZE: u16 = 64;
+pub const MAX_RUN_WIDTH: u16 = 2048;
 
 #[must_use]
 pub fn changed_tiles(previous: &Bitmap, current: &Bitmap) -> Vec<Rect> {
@@ -17,6 +18,25 @@ pub fn changed_tiles(previous: &Bitmap, current: &Bitmap) -> Vec<Rect> {
         }
     }
     tiles
+}
+
+#[must_use]
+pub fn coalesce(tiles: &[Rect]) -> Vec<Rect> {
+    let mut runs: Vec<Rect> = Vec::new();
+    for &tile in tiles {
+        match runs.last_mut() {
+            Some(run) if continues(*run, tile) => run.width += tile.width,
+            _ => runs.push(tile),
+        }
+    }
+    runs
+}
+
+fn continues(run: Rect, tile: Rect) -> bool {
+    run.y == tile.y
+        && run.height == tile.height
+        && u32::from(run.x) + u32::from(run.width) == u32::from(tile.x)
+        && u32::from(run.width) + u32::from(tile.width) <= u32::from(MAX_RUN_WIDTH)
 }
 
 fn whole(bitmap: &Bitmap) -> Rect {
@@ -53,6 +73,15 @@ mod tests {
             width,
             height,
             vec![0; usize::from(width) * usize::from(height) * 4],
+        )
+        .unwrap()
+    }
+
+    fn all_changed(width: u16, height: u16) -> Bitmap {
+        Bitmap::new(
+            width,
+            height,
+            vec![1; usize::from(width) * usize::from(height) * 4],
         )
         .unwrap()
     }
@@ -97,6 +126,73 @@ mod tests {
                 width: 8,
                 height: 2
             }]
+        );
+    }
+
+    #[test]
+    fn joins_neighbours_on_the_same_row() {
+        let changed = changed_tiles(&blank(200, 130), &all_changed(200, 130));
+        assert_eq!(changed.len(), 4 * 3);
+        assert_eq!(
+            coalesce(&changed),
+            [
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 200,
+                    height: 64
+                },
+                Rect {
+                    x: 0,
+                    y: 64,
+                    width: 200,
+                    height: 64
+                },
+                Rect {
+                    x: 0,
+                    y: 128,
+                    width: 200,
+                    height: 2
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_separated_tiles_apart() {
+        let tiles = [
+            Rect {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 64,
+            },
+            Rect {
+                x: 128,
+                y: 0,
+                width: 64,
+                height: 64,
+            },
+        ];
+        assert_eq!(coalesce(&tiles), tiles);
+    }
+
+    #[test]
+    fn caps_the_width_of_a_run() {
+        let tiles: Vec<Rect> = (0..40)
+            .map(|i| Rect {
+                x: i * 64,
+                y: 0,
+                width: 64,
+                height: 64,
+            })
+            .collect();
+        let runs = coalesce(&tiles);
+        assert_eq!(runs.len(), 2);
+        assert!(runs.iter().all(|run| run.width <= MAX_RUN_WIDTH));
+        assert_eq!(
+            runs.iter().map(|run| u32::from(run.width)).sum::<u32>(),
+            40 * 64
         );
     }
 
