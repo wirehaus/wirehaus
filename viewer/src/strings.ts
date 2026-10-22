@@ -27,6 +27,7 @@ export type Messages = {
   locked: (seconds: number) => string;
   suspended: string;
   busy: string;
+  unavailable: string;
   refused: string;
   failed: string;
   agentMissing: string;
@@ -111,6 +112,7 @@ const catalog: Record<string, Messages> = {
     locked: (seconds) => `Demasiados intentos. Espera ${seconds} segundos y vuelve a probar.`,
     suspended: 'Este equipo está suspendido. Reactívalo desde el ordenador de casa.',
     busy: 'Ya hay otro visor conectado.',
+    unavailable: 'El agente no puede capturar la pantalla ni controlar el equipo. Revisa los permisos en el equipo remoto.',
     refused:
       'El agente no ha aceptado la conexión. Puede estar apagado, bloqueado, o no reconocer este equipo. Si lo revocaste o cambió el agente, olvida este equipo y empareja de nuevo.',
     failed: 'La conexión segura ha fallado.',
@@ -215,6 +217,7 @@ const catalog: Record<string, Messages> = {
     locked: (seconds) => `Too many attempts. Wait ${seconds} seconds and try again.`,
     suspended: 'This device is suspended. Reactivate it from the home computer.',
     busy: 'Another viewer is already connected.',
+    unavailable: 'The agent cannot capture the screen or control the computer. Check its permissions on the remote computer.',
     refused:
       'The agent did not accept the connection. It may be off, locked, or not recognise this device. If you revoked it or the agent changed, forget this device and pair again.',
     failed: 'The secure connection failed.',

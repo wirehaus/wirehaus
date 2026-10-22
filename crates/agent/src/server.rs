@@ -280,6 +280,11 @@ impl Server {
             Ok(backend) => backend,
             Err(error) => {
                 self.store.log("no_display", &error.to_string());
+                let _ = link.send_control(ControlMessage::AuthFailed {
+                    reason: AuthFailure::Unavailable,
+                    retry_after: 0,
+                });
+                let _ = link.flush();
                 link.close();
                 return Err(error);
             }

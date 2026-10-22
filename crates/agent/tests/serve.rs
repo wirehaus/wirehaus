@@ -884,6 +884,25 @@ fn an_idle_unauthenticated_connection_does_not_take_the_viewer_slot() {
 }
 
 #[test]
+fn a_viewer_that_logs_in_is_told_when_the_agent_cannot_open_the_display() {
+    let server = Running::start(":58");
+    let device = StaticKey::generate().unwrap();
+    let code = server.open_pairing();
+    let mut client = start_pairing(&server, &device, &code, "Aula 3").expect("pairing handshake");
+    client.expect_auth_required();
+    match client.login(&server.fresh_totp()) {
+        Received::Got(ControlMessage::AuthFailed {
+            reason: AuthFailure::Unavailable,
+            retry_after: 0,
+        }) => {}
+        other => panic!(
+            "the viewer was not told the agent is unavailable: {}",
+            describe(&other)
+        ),
+    }
+}
+
+#[test]
 fn only_a_few_unauthenticated_connections_are_accepted_at_once() {
     let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);

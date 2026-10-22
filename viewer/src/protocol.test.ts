@@ -103,6 +103,11 @@ test('decodes the control messages the agent sends', () => {
     reason: 'busy',
     retryAfter: 0xffffffff,
   });
+  assert.deepEqual(decodeControl(Uint8Array.of(3, 4, 0, 0, 0, 0)), {
+    kind: 'authFailed',
+    reason: 'unavailable',
+    retryAfter: 0,
+  });
 });
 
 test('rejects malformed control messages', () => {
@@ -112,6 +117,7 @@ test('rejects malformed control messages', () => {
   assert.throws(() => decodeControl(Uint8Array.of(2, 0)), ProtocolError);
   assert.throws(() => decodeControl(Uint8Array.of(3, 1, 0, 0, 0)), ProtocolError);
   assert.throws(() => decodeControl(Uint8Array.of(3, 9, 0, 0, 0, 0)), ProtocolError);
+  assert.throws(() => decodeControl(Uint8Array.of(3, 5, 0, 0, 0, 0)), ProtocolError);
 });
 
 test('encodes the second factor code with the agent layout', () => {

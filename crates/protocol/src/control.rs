@@ -9,6 +9,7 @@ pub enum AuthFailure {
     Locked,
     Suspended,
     Busy,
+    Unavailable,
 }
 
 impl AuthFailure {
@@ -18,6 +19,7 @@ impl AuthFailure {
             AuthFailure::Locked => 1,
             AuthFailure::Suspended => 2,
             AuthFailure::Busy => 3,
+            AuthFailure::Unavailable => 4,
         }
     }
 
@@ -27,6 +29,7 @@ impl AuthFailure {
             1 => Ok(AuthFailure::Locked),
             2 => Ok(AuthFailure::Suspended),
             3 => Ok(AuthFailure::Busy),
+            4 => Ok(AuthFailure::Unavailable),
             other => Err(ProtocolError::InvalidControl(other)),
         }
     }
@@ -223,7 +226,11 @@ mod tests {
         for message in SAMPLES {
             assert_eq!(ControlMessage::decode(&message.encode()).unwrap(), message);
         }
-        for reason in [AuthFailure::Suspended, AuthFailure::WrongCode] {
+        for reason in [
+            AuthFailure::Suspended,
+            AuthFailure::WrongCode,
+            AuthFailure::Unavailable,
+        ] {
             let message = ControlMessage::AuthFailed {
                 reason,
                 retry_after: 7,
@@ -248,6 +255,19 @@ mod tests {
             .encode(),
             [3, 1, 1, 2, 3, 4]
         );
+    }
+
+    #[test]
+    fn encodes_the_unavailable_refusal_and_rejects_the_next_unknown_reason() {
+        assert_eq!(
+            ControlMessage::AuthFailed {
+                reason: AuthFailure::Unavailable,
+                retry_after: 0
+            }
+            .encode(),
+            [3, 4, 0, 0, 0, 0]
+        );
+        assert!(ControlMessage::decode(&[3, 5, 0, 0, 0, 0]).is_err());
     }
 
     #[test]

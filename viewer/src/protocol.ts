@@ -44,7 +44,7 @@ export type InputEvent =
   | { kind: 'wheel'; horizontal: number; vertical: number }
   | { kind: 'key'; code: number; pressed: boolean };
 
-export type AuthFailure = 'wrongCode' | 'locked' | 'suspended' | 'busy';
+export type AuthFailure = 'wrongCode' | 'locked' | 'suspended' | 'busy' | 'unavailable';
 
 export type EndReason = 'idle' | 'revoked' | 'locked';
 
@@ -198,7 +198,7 @@ function buttonTag(button: MouseButton): number {
   }
 }
 
-const FAILURES: AuthFailure[] = ['wrongCode', 'locked', 'suspended', 'busy'];
+const FAILURES: AuthFailure[] = ['wrongCode', 'locked', 'suspended', 'busy', 'unavailable'];
 const END_REASONS: EndReason[] = ['idle', 'revoked', 'locked'];
 
 export function decodeControl(payload: Uint8Array): ControlMessage {

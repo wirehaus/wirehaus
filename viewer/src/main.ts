@@ -69,6 +69,8 @@ function refusal(state: Extract<ViewerState, { kind: 'refused' }>, texts: Messag
       return texts.suspended;
     case 'busy':
       return texts.busy;
+    case 'unavailable':
+      return texts.unavailable;
     case 'failed':
       return texts.failed;
     case 'unknown':

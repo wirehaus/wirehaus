@@ -31,6 +31,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - El agente suelta las teclas y los botones que el visor dejó pulsados cuando una sesión termina por cualquier causa.
 - Sondeo adaptativo de la pantalla en macOS: ritmo completo con actividad y hasta una lectura cada 250 ms en reposo; la entrada del visor lo reactiva.
 - Orden `wirehaus-agent service install`, `uninstall` y `status` en macOS: servicio de usuario que arranca al iniciar sesión, se reinicia si cae y solicita sus propios permisos.
+- Motivo de rechazo `Unavailable`: el visor autenticado sabe que el agente no puede capturar la pantalla o controlar el equipo, y lo muestra con una indicación en vez de un fallo genérico de conexión.
 - `scripts/macos-sign.sh`: firma el binario con una identidad estable para que macOS conserve los permisos entre versiones.
 
 ### Cambiado
