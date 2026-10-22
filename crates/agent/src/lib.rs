@@ -10,6 +10,7 @@ mod mode;
 mod pacer;
 mod platform;
 mod server;
+#[cfg(unix)]
 pub mod service;
 mod session;
 pub mod state;
