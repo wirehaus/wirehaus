@@ -3,7 +3,7 @@ use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
@@ -19,7 +19,7 @@ const LOG_ROTATED: &str = "access.log.1";
 const MAX_LOG_BYTES: u64 = 1 << 20;
 const MAX_LOG_DETAIL: usize = 200;
 const LOCK_WAIT: Duration = Duration::from_secs(5);
-const LOCK_STALE: Duration = Duration::from_secs(10);
+const LOCK_STALE: Duration = Duration::from_secs(30);
 const LOCK_POLL: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Error)]
@@ -237,7 +237,7 @@ struct Lock {
 impl Lock {
     fn acquire(dir: &Path) -> Result<Self, StoreError> {
         let path = dir.join(LOCK_FILE);
-        let mut waited = Duration::ZERO;
+        let started = Instant::now();
         loop {
             match private_options().write(true).create_new(true).open(&path) {
                 Ok(file) => {
@@ -249,11 +249,10 @@ impl Lock {
                         let _ = fs::remove_file(&path);
                         continue;
                     }
-                    if waited >= LOCK_WAIT {
+                    if started.elapsed() >= LOCK_WAIT {
                         return Err(StoreError::LockTimeout);
                     }
                     thread::sleep(LOCK_POLL);
-                    waited += LOCK_POLL;
                 }
                 Err(error) => return Err(error.into()),
             }
