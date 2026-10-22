@@ -11,10 +11,46 @@
     <header>
       <span class="brand">Wirehaus</span>
       <span id="status" role="status"></span>
+      <button id="forget" type="button" hidden></button>
       <button id="reconnect" type="button" hidden></button>
     </header>
     <main>
-      <canvas id="screen" tabindex="0"></canvas>
+      <section id="pair" class="panel" hidden>
+        <form id="pair-form" autocomplete="off">
+          <h1 id="pair-title"></h1>
+          <p id="pair-intro"></p>
+          <label>
+            <span id="pair-code-label"></span>
+            <input id="pair-code" name="code" required autocomplete="off" spellcheck="false" />
+          </label>
+          <label>
+            <span id="pair-name-label"></span>
+            <input id="pair-name" name="name" required maxlength="64" autocomplete="off" />
+          </label>
+          <p id="pair-error" class="error" role="alert"></p>
+          <button id="pair-submit" type="submit"></button>
+        </form>
+      </section>
+      <section id="code" class="panel" hidden>
+        <form id="code-form" autocomplete="off">
+          <h1 id="code-title"></h1>
+          <label>
+            <span id="code-label"></span>
+            <input
+              id="code-input"
+              name="otp"
+              inputmode="numeric"
+              pattern="[0-9]{6}"
+              maxlength="6"
+              autocomplete="one-time-code"
+              required
+            />
+          </label>
+          <p id="code-error" class="error" role="alert"></p>
+          <button id="code-submit" type="submit"></button>
+        </form>
+      </section>
+      <canvas id="screen" tabindex="0" hidden></canvas>
     </main>
   </body>
 </html>

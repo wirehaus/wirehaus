@@ -41,6 +41,7 @@ fn content_type(name: &str) -> Option<&'static str> {
         "html" => Some("text/html; charset=utf-8"),
         "js" => Some("text/javascript; charset=utf-8"),
         "css" => Some("text/css; charset=utf-8"),
+        "wasm" => Some("application/wasm"),
         _ => None,
     }
 }
@@ -83,6 +84,7 @@ mod tests {
         assert!(content_type("a.html").is_some());
         assert!(content_type("a.js").is_some());
         assert!(content_type("a.css").is_some());
+        assert_eq!(content_type("a.wasm"), Some("application/wasm"));
         assert!(content_type("a.map").is_none());
         assert!(content_type("a").is_none());
     }

@@ -80,7 +80,7 @@ pub fn response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
          X-Content-Type-Options: nosniff\r\n\
          Referrer-Policy: no-referrer\r\n\
          Cross-Origin-Opener-Policy: same-origin\r\n\
-         Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; \
+         Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; \
          connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n\
          Connection: close\r\n\r\n",
         body.len()

@@ -7,3 +7,4 @@ build-test
 *.pem
 *.key
 .DS_Store
+viewer/src/wirehaus_crypto_wasm*

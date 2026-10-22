@@ -4,11 +4,13 @@ import { test } from 'node:test';
 import {
   DESKTOP_CHANNEL,
   ProtocolError,
+  decodeControl,
   decodeDesktop,
   decodeFrame,
   encodeFrame,
   encodeFrameAck,
   encodeInput,
+  encodeTotp,
 } from './protocol.js';
 
 test('encodes the frame layout the agent expects', () => {
@@ -78,4 +80,39 @@ test('decodes the frame end marker the agent sends', () => {
 test('encodes the acknowledgement layout the agent expects', () => {
   assert.deepEqual([...encodeFrameAck(0x01020304)], [4, 1, 2, 3, 4]);
   assert.deepEqual([...encodeFrameAck(0xfffffffe)], [4, 0xff, 0xff, 0xff, 0xfe]);
+});
+
+test('decodes the control messages the agent sends', () => {
+  assert.deepEqual(decodeControl(Uint8Array.of(0)), { kind: 'authRequired' });
+  assert.deepEqual(decodeControl(Uint8Array.of(2)), { kind: 'authOk' });
+  assert.deepEqual(decodeControl(Uint8Array.of(3, 1, 1, 2, 3, 4)), {
+    kind: 'authFailed',
+    reason: 'locked',
+    retryAfter: 0x01020304,
+  });
+  assert.deepEqual(decodeControl(Uint8Array.of(3, 3, 0xff, 0xff, 0xff, 0xff)), {
+    kind: 'authFailed',
+    reason: 'busy',
+    retryAfter: 0xffffffff,
+  });
+});
+
+test('rejects malformed control messages', () => {
+  assert.throws(() => decodeControl(new Uint8Array(0)), ProtocolError);
+  assert.throws(() => decodeControl(Uint8Array.of(9)), ProtocolError);
+  assert.throws(() => decodeControl(Uint8Array.of(0, 1)), ProtocolError);
+  assert.throws(() => decodeControl(Uint8Array.of(2, 0)), ProtocolError);
+  assert.throws(() => decodeControl(Uint8Array.of(3, 1, 0, 0, 0)), ProtocolError);
+  assert.throws(() => decodeControl(Uint8Array.of(3, 9, 0, 0, 0, 0)), ProtocolError);
+});
+
+test('encodes the second factor code with the agent layout', () => {
+  assert.deepEqual([...encodeTotp('123456')], [1, 49, 50, 51, 52, 53, 54]);
+  assert.deepEqual([...encodeTotp('000000')], [1, 48, 48, 48, 48, 48, 48]);
+});
+
+test('refuses codes that are not six ASCII digits', () => {
+  for (const code of ['', '12345', '1234567', '12345a', ' 12345', '１２３４５６']) {
+    assert.throws(() => encodeTotp(code), ProtocolError, code);
+  }
 });

@@ -1,6 +1,8 @@
 export const HEADER_LEN = 9;
 export const MAX_PAYLOAD_LEN = 1 << 20;
 export const DESKTOP_CHANNEL = 0;
+export const CONTROL_CHANNEL = 6;
+export const CODE_LEN = 6;
 
 const RESIZE = 0;
 const TILE = 1;
@@ -35,6 +37,13 @@ export type InputEvent =
   | { kind: 'button'; button: MouseButton; pressed: boolean }
   | { kind: 'wheel'; horizontal: number; vertical: number }
   | { kind: 'key'; code: number; pressed: boolean };
+
+export type AuthFailure = 'wrongCode' | 'locked' | 'suspended' | 'busy';
+
+export type ControlMessage =
+  | { kind: 'authRequired' }
+  | { kind: 'authOk' }
+  | { kind: 'authFailed'; reason: AuthFailure; retryAfter: number };
 
 export class ProtocolError extends Error {}
 
@@ -156,5 +165,51 @@ function buttonTag(button: MouseButton): number {
       return 1;
     case 'right':
       return 2;
+  }
+}
+
+const FAILURES: AuthFailure[] = ['wrongCode', 'locked', 'suspended', 'busy'];
+
+export function decodeControl(payload: Uint8Array): ControlMessage {
+  const tag = payload[0];
+  if (tag === undefined) {
+    throw new ProtocolError('empty control message');
+  }
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  switch (tag) {
+    case 0:
+      expectLength(payload, 1);
+      return { kind: 'authRequired' };
+    case 2:
+      expectLength(payload, 1);
+      return { kind: 'authOk' };
+    case 3: {
+      expectLength(payload, 6);
+      const reason = FAILURES[view.getUint8(1)];
+      if (reason === undefined) {
+        throw new ProtocolError('unknown failure reason');
+      }
+      return { kind: 'authFailed', reason, retryAfter: view.getUint32(2) };
+    }
+    default:
+      throw new ProtocolError(`unknown control message ${tag}`);
+  }
+}
+
+export function encodeTotp(code: string): Uint8Array {
+  if (!/^[0-9]{6}$/.test(code)) {
+    throw new ProtocolError('the code must be six digits');
+  }
+  const out = new Uint8Array(1 + CODE_LEN);
+  out[0] = 1;
+  for (let index = 0; index < CODE_LEN; index += 1) {
+    out[1 + index] = code.charCodeAt(index);
+  }
+  return out;
+}
+
+function expectLength(payload: Uint8Array, length: number): void {
+  if (payload.length !== length) {
+    throw new ProtocolError('bad control message length');
   }
 }
