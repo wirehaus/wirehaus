@@ -7,6 +7,7 @@ use crate::error::CaptureError;
 use crate::polling::Grabber;
 
 const BYTES_PER_PIXEL: usize = 4;
+const COMPONENT_BITS: usize = 8;
 
 #[must_use]
 pub fn screen_capture_allowed() -> bool {
@@ -19,25 +20,20 @@ pub fn request_screen_capture() -> bool {
 }
 
 #[derive(Debug)]
-pub struct MacDisplay {
-    display: CGDisplay,
-}
+pub struct MacDisplay;
 
 impl MacDisplay {
     pub fn connect() -> Result<Self, CaptureError> {
         if !screen_capture_allowed() {
             return Err(CaptureError::PermissionDenied);
         }
-        Ok(Self {
-            display: CGDisplay::main(),
-        })
+        Ok(Self)
     }
 }
 
 impl Grabber for MacDisplay {
     fn grab(&mut self) -> Result<Bitmap, CaptureError> {
-        let image = self
-            .display
+        let image = CGDisplay::main()
             .image()
             .ok_or_else(|| CaptureError::Request("the display returned no image".to_owned()))?;
         to_bitmap(&image)
@@ -46,7 +42,7 @@ impl Grabber for MacDisplay {
 
 fn to_bitmap(image: &CGImage) -> Result<Bitmap, CaptureError> {
     let bits = image.bits_per_pixel();
-    if bits != BYTES_PER_PIXEL * 8 {
+    if bits != BYTES_PER_PIXEL * 8 || image.bits_per_component() != COMPONENT_BITS {
         return Err(CaptureError::UnsupportedFormat {
             depth: 24,
             bits_per_pixel: u8::try_from(bits).unwrap_or(u8::MAX),
