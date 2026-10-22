@@ -19,6 +19,11 @@ pub enum Command {
     Pairing,
     #[cfg(target_os = "macos")]
     Permissions,
+    #[cfg(target_os = "macos")]
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
     Devices {
         #[command(subcommand)]
         action: Option<DeviceAction>,
@@ -65,6 +70,19 @@ pub enum Command {
         #[arg(long = "viewer-origin", value_name = "URL")]
         viewer_origins: Vec<String>,
     },
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Subcommand)]
+pub enum ServiceAction {
+    Install {
+        #[arg(long, default_value = "viewer/dist")]
+        viewer_dir: PathBuf,
+        #[arg(long, default_value = "127.0.0.1:7878")]
+        listen: SocketAddr,
+    },
+    Uninstall,
+    Status,
 }
 
 #[derive(Debug, Subcommand)]

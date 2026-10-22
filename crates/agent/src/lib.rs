@@ -10,6 +10,7 @@ mod mode;
 mod pacer;
 mod platform;
 mod server;
+pub mod service;
 mod session;
 pub mod state;
 pub mod static_files;

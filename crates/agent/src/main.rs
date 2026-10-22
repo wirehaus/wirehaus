@@ -43,6 +43,14 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Init => commands::init(&dir, system_clock(), &mut out)?,
         Command::Pairing => commands::pairing(&open()?, &mut out)?,
         #[cfg(target_os = "macos")]
+        Command::Service { action } => match action {
+            crate::cli::ServiceAction::Install { viewer_dir, listen } => {
+                wirehaus_agent::service::install(&dir, &viewer_dir, listen, &mut out)?;
+            }
+            crate::cli::ServiceAction::Uninstall => wirehaus_agent::service::uninstall(&mut out)?,
+            crate::cli::ServiceAction::Status => wirehaus_agent::service::status(&mut out)?,
+        },
+        #[cfg(target_os = "macos")]
         Command::Permissions => {
             let screen = wirehaus_capture::screen_capture_allowed()
                 || wirehaus_capture::request_screen_capture();
@@ -105,22 +113,62 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
             viewer_hash,
             public_hosts,
             viewer_origins,
-        } => {
-            let exposure = wirehaus_agent::Exposure::new(&public_hosts, &viewer_origins)?;
-            let server = Server::bind(ServerConfig {
+        } => serve(
+            dir,
+            ServeOptions {
                 listen,
                 display,
                 viewer_dir,
-                jpeg_quality: quality,
-                state_dir: dir,
-                clock: None,
-                idle_timeout: Duration::from_secs(u64::from(idle_minutes) * 60),
+                quality,
+                idle_minutes,
                 viewer_hash,
-                exposure,
-            })?;
-            println!("listening on http://{}", server.local_addr()?);
-            server.run(&AtomicBool::new(false))?;
-        }
+                public_hosts,
+                viewer_origins,
+            },
+            &mut out,
+        )?,
     }
+    Ok(())
+}
+
+struct ServeOptions {
+    listen: std::net::SocketAddr,
+    display: Option<String>,
+    viewer_dir: std::path::PathBuf,
+    quality: u8,
+    idle_minutes: u32,
+    viewer_hash: Option<String>,
+    public_hosts: Vec<String>,
+    viewer_origins: Vec<String>,
+}
+
+fn serve(
+    dir: std::path::PathBuf,
+    options: ServeOptions,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "macos")]
+    {
+        let screen = wirehaus_capture::screen_capture_allowed()
+            || wirehaus_capture::request_screen_capture();
+        let input = wirehaus_input::input_allowed() || wirehaus_input::request_input();
+        commands::permissions(screen, input, out)?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = out;
+    let exposure = wirehaus_agent::Exposure::new(&options.public_hosts, &options.viewer_origins)?;
+    let server = Server::bind(ServerConfig {
+        listen: options.listen,
+        display: options.display,
+        viewer_dir: options.viewer_dir,
+        jpeg_quality: options.quality,
+        state_dir: dir,
+        clock: None,
+        idle_timeout: Duration::from_secs(u64::from(options.idle_minutes) * 60),
+        viewer_hash: options.viewer_hash,
+        exposure,
+    })?;
+    println!("listening on http://{}", server.local_addr()?);
+    server.run(&AtomicBool::new(false))?;
     Ok(())
 }
