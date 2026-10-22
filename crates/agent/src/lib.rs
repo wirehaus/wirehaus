@@ -10,6 +10,8 @@ mod session;
 pub mod state;
 mod static_files;
 pub mod store;
+#[cfg(test)]
+mod testing;
 
 pub use error::ServerError;
 pub use server::{Server, ServerConfig};

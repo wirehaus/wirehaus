@@ -193,4 +193,24 @@ mod tests {
         assert!(text.contains("X-Content-Type-Options: nosniff"));
         assert!(text.ends_with("\r\n\r\nhi"));
     }
+
+    #[test]
+    fn the_head_parser_never_panics_and_respects_its_limits() {
+        let mut rng = crate::testing::Rng::new(0x5EED_0001_2345_6789);
+        let valid = head("Upgrade: websocket\r\nOrigin: http://127.0.0.1:7878\r\n");
+        let mut parsed = 0;
+        for round in 0..30_000 {
+            let input = if round % 3 == 0 {
+                rng.bytes(400)
+            } else {
+                rng.mutate(&valid)
+            };
+            if let Ok(Some(request)) = parse_head(&input) {
+                parsed += 1;
+                assert_ne!(request.method, "");
+                assert!(request.path.len() <= MAX_HEAD_LEN);
+            }
+        }
+        assert!(parsed > 100);
+    }
 }

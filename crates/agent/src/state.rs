@@ -784,4 +784,29 @@ mod tests {
         assert!(!text.contains(&base32::encode(state.agent_key().private_bytes())));
         assert!(!text.contains(&state.totp().to_base32()));
     }
+
+    #[test]
+    fn parsing_never_panics_and_what_parses_serializes_stably() {
+        let mut rng = crate::testing::Rng::new(0xFEED_FACE_CAFE_BEEF);
+        let (mut state, _device) = state_with_device();
+        state.open_pairing(100).unwrap();
+        state.set_locked(true);
+        let valid = state.serialize().into_bytes();
+        let mut accepted = 0;
+        for round in 0..20_000 {
+            let input = if round % 4 == 0 {
+                rng.bytes(300)
+            } else {
+                rng.mutate(&valid)
+            };
+            let text = String::from_utf8_lossy(&input).into_owned();
+            if let Ok(parsed) = State::parse(&text) {
+                accepted += 1;
+                let again = State::parse(&parsed.serialize()).unwrap();
+                assert_eq!(again.serialize(), parsed.serialize());
+                assert!(parsed.devices().len() <= MAX_DEVICES);
+            }
+        }
+        assert!(accepted > 50);
+    }
 }

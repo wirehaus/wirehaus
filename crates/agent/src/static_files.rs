@@ -100,4 +100,25 @@ mod tests {
         assert!(load(&dir, "/missing.js").is_none());
         fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn no_request_path_can_name_anything_outside_the_viewer_directory() {
+        let mut rng = crate::testing::Rng::new(0xB10C_C0DE_0000_0042);
+        let alphabet: &[u8] = b"/.\\%abcXYZ019_-?#\0 :~";
+        let mut served = 0;
+        for _ in 0..100_000 {
+            let length = rng.below(24);
+            let path: String = (0..length)
+                .map(|_| char::from(alphabet[rng.below(alphabet.len())]))
+                .collect();
+            if let Some(name) = file_name(&path) {
+                served += 1;
+                assert!(!name.contains('/') && !name.contains('\\'));
+                assert!(!name.starts_with('.'));
+                assert_ne!(name, "");
+                assert_ne!(name, "..");
+            }
+        }
+        assert!(served > 100);
+    }
 }
