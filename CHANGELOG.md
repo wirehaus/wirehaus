@@ -18,6 +18,11 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Servidor local del agente (`wirehaus-agent serve`): solo en la interfaz de bucle local, con comprobación de `Host` y `Origin`, un único visor a la vez y entrega de los ficheros del visor.
 - La captura de pantalla pide a X las zonas dañadas (extensión DAMAGE) y solo lee lo que cambia; sin DAMAGE compara teselas.
 - Control de flujo: el visor confirma cada lote de pantalla y el agente limita lo que lleva sin confirmar y adapta la calidad JPEG al enlace.
+- Cifrado de extremo a extremo con Noise: reconexión de dispositivos emparejados (`IK`) y emparejamiento de dispositivos nuevos con un código de un solo uso (`XXpsk3`), sobre una capa de registros cifrados con orden, repetición y tamaño controlados.
+- Segundo factor TOTP verificado por el agente, con bloqueo creciente por dispositivo, suspensión al décimo fallo y pasos de tiempo de un solo uso.
+- Estado del agente en disco con permisos privados, escritura atómica y bloqueo entre procesos, y registro de accesos.
+- Órdenes `init`, `pairing`, `devices`, `lock` y `unlock` del agente; revocar, reactivar, bloquear y desbloquear exigen un código del segundo factor.
+- El servidor exige autenticarse antes de abrir ningún canal, solo admite un visor autenticado a la vez y corta una sesión en cuanto se revoca el dispositivo o se bloquea el agente.
 - Visor web en TypeScript con lienzo, ratón, rueda y teclado.
 
 ### Cambiado

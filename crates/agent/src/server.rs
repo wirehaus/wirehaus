@@ -1,13 +1,15 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use tungstenite::protocol::WebSocketConfig;
 use wirehaus_encode::JpegEncoder;
 
+use crate::auth::{self, INBOUND_LIMIT, Outcome};
 use crate::error::ServerError;
 use crate::http::{
     HeadError, MAX_HEAD_LEN, RequestHead, host_allowed, origin_allowed, parse_head, response,
@@ -16,26 +18,69 @@ use crate::pacer::Pacer;
 use crate::platform;
 use crate::session;
 use crate::static_files;
+use crate::store::{Clock, Store, system_clock};
+use wirehaus_protocol::{AuthFailure, ControlMessage};
 
 const ACCEPT_POLL: Duration = Duration::from_millis(20);
 const HEAD_DEADLINE: Duration = Duration::from_secs(5);
 const HEAD_POLL: Duration = Duration::from_millis(5);
-const MAX_INBOUND_MESSAGE: usize = 4096;
+const MAX_INBOUND_MESSAGE: usize = INBOUND_LIMIT + 64;
+const MAX_CONNECTIONS: usize = 64;
+const MAX_UNAUTHENTICATED: usize = 4;
 const HEAD_END: &[u8] = b"\r\n\r\n";
 const TEXT: &str = "text/plain; charset=utf-8";
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServerConfig {
     pub listen: SocketAddr,
     pub display: Option<String>,
     pub viewer_dir: PathBuf,
     pub jpeg_quality: u8,
+    pub state_dir: PathBuf,
+    pub clock: Option<Clock>,
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for ServerConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerConfig")
+            .field("listen", &self.listen)
+            .field("display", &self.display)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for Server {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Server")
+            .field("listener", &self.listener)
+            .finish_non_exhaustive()
+    }
+}
+
 pub struct Server {
     listener: TcpListener,
     config: ServerConfig,
+    store: Arc<Store>,
+    connections: AtomicUsize,
+    unauthenticated: AtomicUsize,
+}
+
+struct CountGuard<'a>(&'a AtomicUsize);
+
+impl<'a> CountGuard<'a> {
+    fn enter(counter: &'a AtomicUsize, limit: usize) -> Option<Self> {
+        if counter.fetch_add(1, Ordering::SeqCst) >= limit {
+            counter.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(Self(counter))
+    }
+}
+
+impl Drop for CountGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 struct BusyGuard<'a>(&'a AtomicBool);
@@ -56,7 +101,15 @@ impl Server {
             source,
         })?;
         listener.set_nonblocking(true)?;
-        Ok(Self { listener, config })
+        let clock = config.clock.clone().unwrap_or_else(system_clock);
+        let store = Arc::new(Store::open(&config.state_dir, clock)?);
+        Ok(Self {
+            listener,
+            config,
+            store,
+            connections: AtomicUsize::new(0),
+            unauthenticated: AtomicUsize::new(0),
+        })
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, ServerError> {
@@ -71,7 +124,12 @@ impl Server {
                 match self.listener.accept() {
                     Ok((stream, peer)) if peer.ip().is_loopback() => {
                         let busy = &busy;
+                        let Some(guard) = CountGuard::enter(&self.connections, MAX_CONNECTIONS)
+                        else {
+                            continue;
+                        };
                         scope.spawn(move || {
+                            let _guard = guard;
                             if let Err(error) = self.serve_connection(stream, port, busy, stop) {
                                 eprintln!("connection ended: {error}");
                             }
@@ -152,28 +210,14 @@ impl Server {
         if !origin_allowed(head.origin.as_deref(), port) {
             return reply(&mut stream, 0, false, "403 Forbidden", b"forbidden origin");
         }
-        if busy.swap(true, Ordering::SeqCst) {
+        let Some(pending) = CountGuard::enter(&self.unauthenticated, MAX_UNAUTHENTICATED) else {
             return reply(
                 &mut stream,
                 0,
                 false,
                 "503 Service Unavailable",
-                b"another viewer is connected",
+                b"too many connections in progress",
             );
-        }
-        let _guard = BusyGuard(busy);
-        let backend = match platform::connect(self.config.display.as_deref()) {
-            Ok(backend) => backend,
-            Err(error) => {
-                let _ = reply(
-                    &mut stream,
-                    0,
-                    false,
-                    "503 Service Unavailable",
-                    b"no display available",
-                );
-                return Err(error);
-            }
         };
         stream.set_read_timeout(Some(HEAD_DEADLINE))?;
         let config = WebSocketConfig::default()
@@ -181,13 +225,60 @@ impl Server {
             .max_frame_size(Some(MAX_INBOUND_MESSAGE));
         let socket = tungstenite::accept_with_config(stream, Some(config))
             .map_err(|e| ServerError::WebSocket(e.to_string()))?;
-        session::run(
-            socket,
+        let outcome = auth::negotiate(socket, &self.store)?;
+        drop(pending);
+        match outcome {
+            Outcome::Refused => Ok(()),
+            Outcome::Authenticated(link, identity) => {
+                self.serve_authenticated(*link, &identity, busy, stop)
+            }
+        }
+    }
+
+    fn serve_authenticated(
+        &self,
+        mut link: crate::link::Link,
+        identity: &auth::Identity,
+        busy: &AtomicBool,
+        stop: &AtomicBool,
+    ) -> Result<(), ServerError> {
+        let name = identity.name.as_str();
+        if busy.swap(true, Ordering::SeqCst) {
+            self.store.log("busy", name);
+            let _ = link.send_control(ControlMessage::AuthFailed {
+                reason: AuthFailure::Busy,
+                retry_after: 0,
+            });
+            let _ = link.flush();
+            link.close();
+            return Ok(());
+        }
+        let _guard = BusyGuard(busy);
+        let backend = match platform::connect(self.config.display.as_deref()) {
+            Ok(backend) => backend,
+            Err(error) => {
+                self.store.log("no_display", &error.to_string());
+                link.close();
+                return Err(error);
+            }
+        };
+        link.send_control(ControlMessage::AuthOk)?;
+        link.flush()?;
+        self.store.log("session_start", name);
+        let result = session::run(
+            link,
             backend,
             JpegEncoder::new(self.config.jpeg_quality),
             Pacer::new(self.config.jpeg_quality),
             stop,
-        )
+            &|| {
+                self.store
+                    .read(|state, _| state.is_locked() || state.device(&identity.device).is_none())
+                    .unwrap_or(true)
+            },
+        );
+        self.store.log("session_end", name);
+        result
     }
 }
 

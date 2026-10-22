@@ -5,7 +5,7 @@ use wirehaus_crypto::CryptoError;
 use wirehaus_crypto::base32;
 use wirehaus_crypto::handshake::validate_device_name;
 use wirehaus_crypto::keys::{PublicKey, StaticKey};
-use wirehaus_crypto::lockout::{Denied, FailureTracker};
+use wirehaus_crypto::lockout::{Denied, FailureTracker, MAX_LOCK_SECONDS, SUSPEND_AT};
 use wirehaus_crypto::pairing::{PSK_BYTES, PairingCode, PairingGrant};
 use wirehaus_crypto::totp::TotpSecret;
 
@@ -53,6 +53,7 @@ pub struct State {
     totp_last_step: Option<u64>,
     locked: bool,
     pairing: Option<PairingGrant>,
+    local: FailureTracker,
     devices: Vec<Device>,
 }
 
@@ -64,6 +65,7 @@ impl State {
             totp_last_step: None,
             locked: false,
             pairing: None,
+            local: FailureTracker::default(),
             devices: Vec::new(),
         })
     }
@@ -204,6 +206,26 @@ impl State {
         Err(AuthError::WrongCode)
     }
 
+    pub fn verify_local(&mut self, code: &str, now: u64) -> Result<(), AuthError> {
+        if let Err(denied) = self.local.check(now) {
+            return Err(AuthError::Denied(denied));
+        }
+        if let Some(step) = self.totp.verify(code, now, self.totp_last_step) {
+            self.totp_last_step = Some(step);
+            self.local.record_success();
+            return Ok(());
+        }
+        self.local.record_failure(now);
+        if self.local.suspended() {
+            self.local = FailureTracker::from_parts(
+                SUSPEND_AT - 1,
+                now.saturating_add(MAX_LOCK_SECONDS),
+                false,
+            );
+        }
+        Err(AuthError::WrongCode)
+    }
+
     fn device_mut(&mut self, key: Option<&PublicKey>) -> Option<&mut Device> {
         let key = key?;
         self.devices.iter_mut().find(|device| device.key == *key)
@@ -231,6 +253,12 @@ impl State {
                 grant.failures()
             );
         }
+        let _ = writeln!(
+            out,
+            "local {} {}",
+            self.local.consecutive(),
+            self.local.locked_until()
+        );
         for device in &self.devices {
             let _ = writeln!(
                 out,
@@ -271,6 +299,7 @@ struct Parser {
     last_step_seen: bool,
     locked: Option<bool>,
     pairing: Option<PairingGrant>,
+    local: Option<FailureTracker>,
     devices: Vec<Device>,
 }
 
@@ -298,6 +327,7 @@ impl Parser {
             }
             "locked" => once(&mut self.locked, parse_flag(rest)?, key),
             "pairing" => once(&mut self.pairing, parse_pairing(rest)?, key),
+            "local" => once(&mut self.local, parse_local(rest)?, key),
             "device" => {
                 if self.devices.len() >= MAX_DEVICES {
                     return Err(StateError::TooManyDevices);
@@ -329,6 +359,7 @@ impl Parser {
             },
             locked: self.locked.ok_or_else(|| missing("locked"))?,
             pairing: self.pairing,
+            local: self.local.unwrap_or_default(),
             devices: self.devices,
         })
     }
@@ -355,6 +386,22 @@ fn parse_flag(text: &str) -> Result<bool, StateError> {
         "1" => Ok(true),
         _ => Err(invalid("bad flag")),
     }
+}
+
+fn parse_local(text: &str) -> Result<FailureTracker, StateError> {
+    let fields: Vec<&str> = text.split(' ').collect();
+    let [consecutive, locked_until] = fields[..] else {
+        return Err(invalid("bad local entry"));
+    };
+    Ok(FailureTracker::from_parts(
+        consecutive
+            .parse()
+            .map_err(|_| invalid("bad local failures"))?,
+        locked_until
+            .parse()
+            .map_err(|_| invalid("bad local lock"))?,
+        false,
+    ))
 }
 
 fn parse_pairing(text: &str) -> Result<PairingGrant, StateError> {
@@ -583,6 +630,45 @@ mod tests {
         );
         let next = current_code(&state, now + 30);
         assert_eq!(state.verify_totp(Some(&device), &next, now + 30), Ok(()));
+    }
+
+    #[test]
+    fn local_codes_are_rate_limited_and_never_suspend_for_good() {
+        let mut state = State::create().unwrap();
+        let mut now = 10_000;
+        for _ in 0..30 {
+            now += 4000;
+            let _ = state.verify_local("000000", now);
+        }
+        let right = current_code(&state, now + 1);
+        assert!(matches!(
+            state.verify_local(&right, now + 1),
+            Err(AuthError::Denied(Denied::Locked { .. }))
+        ));
+        let later = now + 1 + MAX_LOCK_SECONDS + 31;
+        let right = current_code(&state, later);
+        assert_eq!(state.verify_local(&right, later), Ok(()));
+    }
+
+    #[test]
+    fn a_local_code_cannot_be_reused_and_shares_the_step_with_remote_logins() {
+        let (mut state, device) = state_with_device();
+        let now = 77_000;
+        let code = current_code(&state, now);
+        assert_eq!(state.verify_totp(Some(&device), &code, now), Ok(()));
+        assert_eq!(state.verify_local(&code, now), Err(AuthError::WrongCode));
+    }
+
+    #[test]
+    fn the_local_counter_survives_a_round_trip() {
+        let mut state = State::create().unwrap();
+        for _ in 0..4 {
+            let _ = state.verify_local("000000", 500);
+        }
+        let restored = State::parse(&state.serialize()).unwrap();
+        assert_eq!(restored.local.consecutive(), 3);
+        assert!(restored.local.check(501).is_err());
+        assert!(restored.local.check(531).is_ok());
     }
 
     #[test]

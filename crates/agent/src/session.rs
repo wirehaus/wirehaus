@@ -1,64 +1,69 @@
-use std::io::ErrorKind;
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use tungstenite::{Error as WsError, Message, WebSocket};
 use wirehaus_capture::{Rect, Region, Update, all_tiles, coalesce};
 use wirehaus_encode::{JpegEncoder, TileEncoder};
 use wirehaus_input::{InputError, InputSink};
 use wirehaus_protocol::{Channel, DesktopMessage, Frame, ProtocolError, ViewerMessage};
 
 use crate::error::ServerError;
+use crate::link::{Incoming, Link};
 use crate::pacer::Pacer;
 use crate::platform::Backend;
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
-const MIN_READ_WAIT: Duration = Duration::from_millis(1);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MESSAGES_PER_TICK: usize = 256;
+const REVOCATION_CHECK_TICKS: u32 = 30;
 
 pub fn run(
-    mut socket: WebSocket<TcpStream>,
+    mut link: Link,
     mut backend: Backend,
     mut encoder: JpegEncoder,
     mut pacer: Pacer,
     stop: &AtomicBool,
+    revoked: &dyn Fn() -> bool,
 ) -> Result<(), ServerError> {
-    socket.get_ref().set_write_timeout(Some(WRITE_TIMEOUT))?;
+    link.set_write_timeout(WRITE_TIMEOUT)?;
+    let mut ticks: u32 = 0;
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
+        ticks = ticks.wrapping_add(1);
+        if ticks.is_multiple_of(REVOCATION_CHECK_TICKS) && revoked() {
+            link.close();
+            return Err(ServerError::AccessRevoked);
+        }
         pacer.tick();
         if pacer.may_send() {
             encoder.set_quality(pacer.quality());
             let update = backend.screen.next_update()?;
             let sent_at = Instant::now();
-            if let Some(bytes) = send_update(&mut socket, &mut encoder, &update)? {
+            if let Some(bytes) = send_update(&mut link, &mut encoder, &update)? {
                 let sequence = pacer.sent(sent_at, bytes);
-                send_message(&mut socket, &DesktopMessage::FrameEnd { sequence })?;
+                send_message(&mut link, &DesktopMessage::FrameEnd { sequence })?;
             }
-            socket.flush().or_else(ignore_would_block)?;
+            link.flush()?;
         }
         if pacer.stalled(Instant::now()) {
             return Err(ServerError::ViewerStalled);
         }
-        if !receive(&mut socket, backend.input.as_mut(), &mut pacer, deadline)? {
+        if !receive(&mut link, backend.input.as_mut(), &mut pacer, deadline)? {
             return Ok(());
         }
     }
-    let _ = socket.close(None);
+    link.close();
     Ok(())
 }
 
 fn send_update(
-    socket: &mut WebSocket<TcpStream>,
+    link: &mut Link,
     encoder: &mut JpegEncoder,
     update: &Update,
 ) -> Result<Option<usize>, ServerError> {
     let mut bytes = 0;
     if update.resized {
         bytes += send_message(
-            socket,
+            link,
             &DesktopMessage::Resize {
                 width: update.width,
                 height: update.height,
@@ -66,25 +71,25 @@ fn send_update(
         )?;
     }
     for region in &update.regions {
-        bytes += send_region(socket, encoder, region)?;
+        bytes += send_region(link, encoder, region)?;
     }
     Ok((update.resized || !update.regions.is_empty()).then_some(bytes))
 }
 
 fn send_region(
-    socket: &mut WebSocket<TcpStream>,
+    link: &mut Link,
     encoder: &mut JpegEncoder,
     region: &Region,
 ) -> Result<usize, ServerError> {
     coalesce(&all_tiles(&region.bitmap))
         .into_iter()
         .try_fold(0, |total, local| {
-            Ok(total + send_rect(socket, encoder, region, local)?)
+            Ok(total + send_rect(link, encoder, region, local)?)
         })
 }
 
 fn send_rect(
-    socket: &mut WebSocket<TcpStream>,
+    link: &mut Link,
     encoder: &mut JpegEncoder,
     region: &Region,
     local: Rect,
@@ -98,10 +103,10 @@ fn send_rect(
         data: encoder.encode(&region.bitmap, local)?,
     };
     match Frame::new(Channel::Desktop, 0, message.encode()) {
-        Ok(frame) => send_frame(socket, &frame),
+        Ok(frame) => link.send_frame(&frame),
         Err(ProtocolError::PayloadTooLarge { .. }) => match split(local) {
             Some(halves) => halves.into_iter().try_fold(0, |total, half| {
-                Ok(total + send_rect(socket, encoder, region, half)?)
+                Ok(total + send_rect(link, encoder, region, half)?)
             }),
             None => Err(ProtocolError::PayloadTooLarge {
                 len: usize::MAX,
@@ -145,22 +150,12 @@ fn split(rect: Rect) -> Option<[Rect; 2]> {
     }
 }
 
-fn send_message(
-    socket: &mut WebSocket<TcpStream>,
-    message: &DesktopMessage,
-) -> Result<usize, ServerError> {
-    send_frame(socket, &Frame::new(Channel::Desktop, 0, message.encode())?)
-}
-
-fn send_frame(socket: &mut WebSocket<TcpStream>, frame: &Frame) -> Result<usize, ServerError> {
-    let bytes = frame.encode()?;
-    let len = bytes.len();
-    socket.write(Message::Binary(bytes.into()))?;
-    Ok(len)
+fn send_message(link: &mut Link, message: &DesktopMessage) -> Result<usize, ServerError> {
+    link.send_frame(&Frame::new(Channel::Desktop, 0, message.encode())?)
 }
 
 fn receive(
-    socket: &mut WebSocket<TcpStream>,
+    link: &mut Link,
     input: &mut dyn InputSink,
     pacer: &mut Pacer,
     deadline: Instant,
@@ -171,32 +166,23 @@ fn receive(
         if wait.is_zero() {
             break;
         }
-        socket
-            .get_ref()
-            .set_read_timeout(Some(wait.max(MIN_READ_WAIT)))?;
-        match socket.read() {
-            Ok(Message::Binary(bytes)) => {
-                handle_binary(&bytes, input, pacer)?;
+        match link.receive(wait)? {
+            Incoming::Frame(frame) => {
+                handle_frame(&frame, input, pacer)?;
                 handled += 1;
             }
-            Ok(Message::Close(_)) | Err(WsError::ConnectionClosed | WsError::AlreadyClosed) => {
-                return Ok(false);
-            }
-            Ok(Message::Ping(_) | Message::Pong(_)) => {}
-            Ok(_) => return Err(ServerError::UnexpectedMessage),
-            Err(WsError::Io(e)) if is_timeout(e.kind()) => {}
-            Err(e) => return Err(e.into()),
+            Incoming::Idle => {}
+            Incoming::Closed => return Ok(false),
         }
     }
     Ok(true)
 }
 
-fn handle_binary(
-    bytes: &[u8],
+fn handle_frame(
+    frame: &Frame,
     input: &mut dyn InputSink,
     pacer: &mut Pacer,
 ) -> Result<(), ServerError> {
-    let frame = Frame::decode(bytes)?;
     if frame.channel != Channel::Desktop {
         return Err(ServerError::UnexpectedChannel(frame.channel));
     }
@@ -211,17 +197,6 @@ fn handle_binary(
             pacer.acknowledged(sequence);
             Ok(())
         }
-    }
-}
-
-fn is_timeout(kind: ErrorKind) -> bool {
-    matches!(kind, ErrorKind::WouldBlock | ErrorKind::TimedOut)
-}
-
-fn ignore_would_block(error: WsError) -> Result<(), WsError> {
-    match error {
-        WsError::Io(e) if is_timeout(e.kind()) => Ok(()),
-        other => Err(other),
     }
 }
 
@@ -246,22 +221,17 @@ mod tests {
         }
     }
 
-    fn ack_frame(sequence: u32) -> Vec<u8> {
+    fn ack_frame(sequence: u32) -> Frame {
         Frame::new(
             Channel::Desktop,
             0,
             ViewerMessage::FrameAck { sequence }.encode(),
         )
         .unwrap()
-        .encode()
-        .unwrap()
     }
 
-    fn input_frame(channel: Channel, event: InputEvent) -> Vec<u8> {
-        Frame::new(channel, 0, event.encode())
-            .unwrap()
-            .encode()
-            .unwrap()
+    fn input_frame(channel: Channel, event: InputEvent) -> Frame {
+        Frame::new(channel, 0, event.encode()).unwrap()
     }
 
     #[test]
@@ -271,7 +241,7 @@ mod tests {
             button: Button::Left,
             pressed: true,
         };
-        handle_binary(
+        handle_frame(
             &input_frame(Channel::Desktop, event),
             &mut sink,
             &mut Pacer::new(70),
@@ -287,7 +257,7 @@ mod tests {
         let now = Instant::now();
         let first = pacer.sent(now, crate::pacer::MAX_IN_FLIGHT_BYTES);
         assert!(!pacer.may_send());
-        handle_binary(&ack_frame(first), &mut sink, &mut pacer).unwrap();
+        handle_frame(&ack_frame(first), &mut sink, &mut pacer).unwrap();
         assert!(pacer.may_send());
         assert_eq!(sink.events, []);
     }
@@ -295,49 +265,57 @@ mod tests {
     #[test]
     fn a_malformed_acknowledgement_is_an_error() {
         let mut sink = Recorder::default();
-        let short = Frame::new(Channel::Desktop, 0, vec![4, 1, 2])
-            .unwrap()
-            .encode()
-            .unwrap();
-        assert!(handle_binary(&short, &mut sink, &mut Pacer::new(70)).is_err());
+        let short = Frame::new(Channel::Desktop, 0, vec![4, 1, 2]).unwrap();
+        assert!(handle_frame(&short, &mut sink, &mut Pacer::new(70)).is_err());
     }
 
     #[test]
     fn rejects_input_on_another_channel() {
         let mut sink = Recorder::default();
-        let bytes = input_frame(Channel::Terminal, InputEvent::PointerMove { x: 1, y: 1 });
+        let frame = input_frame(Channel::Terminal, InputEvent::PointerMove { x: 1, y: 1 });
         assert!(matches!(
-            handle_binary(&bytes, &mut sink, &mut Pacer::new(70)),
+            handle_frame(&frame, &mut sink, &mut Pacer::new(70)),
             Err(ServerError::UnexpectedChannel(Channel::Terminal))
         ));
         assert_eq!(sink.events, []);
     }
 
     #[test]
-    fn rejects_malformed_frames_and_events() {
+    fn control_messages_are_not_accepted_after_authentication() {
         let mut sink = Recorder::default();
-        assert!(handle_binary(&[1, 2, 3], &mut sink, &mut Pacer::new(70)).is_err());
-        let bad_event = Frame::new(Channel::Desktop, 0, vec![99])
-            .unwrap()
-            .encode()
-            .unwrap();
-        assert!(handle_binary(&bad_event, &mut sink, &mut Pacer::new(70)).is_err());
+        let frame = Frame::new(
+            Channel::Control,
+            0,
+            wirehaus_protocol::ControlMessage::AuthOk.encode(),
+        )
+        .unwrap();
+        assert!(matches!(
+            handle_frame(&frame, &mut sink, &mut Pacer::new(70)),
+            Err(ServerError::UnexpectedChannel(Channel::Control))
+        ));
+    }
+
+    #[test]
+    fn rejects_malformed_events() {
+        let mut sink = Recorder::default();
+        let bad_event = Frame::new(Channel::Desktop, 0, vec![99]).unwrap();
+        assert!(handle_frame(&bad_event, &mut sink, &mut Pacer::new(70)).is_err());
         assert_eq!(sink.events, []);
     }
 
     #[test]
     fn ignores_out_of_range_events_but_not_other_failures() {
-        let bytes = input_frame(Channel::Desktop, InputEvent::PointerMove { x: 9, y: 9 });
+        let frame = input_frame(Channel::Desktop, InputEvent::PointerMove { x: 9, y: 9 });
         let mut out_of_range = Recorder {
             fail_with: Some(|| InputError::PointerOutOfRange { x: 9, y: 9 }),
             ..Recorder::default()
         };
-        assert!(handle_binary(&bytes, &mut out_of_range, &mut Pacer::new(70)).is_ok());
+        assert!(handle_frame(&frame, &mut out_of_range, &mut Pacer::new(70)).is_ok());
         let mut broken = Recorder {
             fail_with: Some(|| InputError::Request("gone".into())),
             ..Recorder::default()
         };
-        assert!(handle_binary(&bytes, &mut broken, &mut Pacer::new(70)).is_err());
+        assert!(handle_frame(&frame, &mut broken, &mut Pacer::new(70)).is_err());
     }
 
     #[test]

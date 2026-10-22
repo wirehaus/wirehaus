@@ -17,12 +17,18 @@ pub enum ServerError {
     Capture(#[from] wirehaus_capture::CaptureError),
     #[error("input injection is not available: {0}")]
     Input(#[from] wirehaus_input::InputError),
+    #[error(transparent)]
+    Store(#[from] crate::store::StoreError),
+    #[error("encryption failed: {0}")]
+    Crypto(#[from] wirehaus_crypto::CryptoError),
     #[error("encoding failed: {0}")]
     Encode(#[from] wirehaus_encode::EncodeError),
     #[error("invalid message from the viewer: {0}")]
     Protocol(#[from] wirehaus_protocol::ProtocolError),
     #[error("unexpected message on the {0:?} channel")]
     UnexpectedChannel(wirehaus_protocol::Channel),
+    #[error("access was revoked or the agent was locked")]
+    AccessRevoked,
     #[error("the viewer stopped acknowledging frames")]
     ViewerStalled,
     #[error("the viewer sent a message that is not binary")]
