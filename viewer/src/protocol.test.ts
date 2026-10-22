@@ -7,6 +7,7 @@ import {
   decodeControl,
   decodeDesktop,
   decodeFrame,
+  encodeCapabilities,
   encodeFrame,
   encodeFrameAck,
   encodeInput,
@@ -115,4 +116,25 @@ test('refuses codes that are not six ASCII digits', () => {
   for (const code of ['', '12345', '1234567', '12345a', ' 12345', '１２３４５６']) {
     assert.throws(() => encodeTotp(code), ProtocolError, code);
   }
+});
+
+test('decodes the video messages the agent sends', () => {
+  const message = decodeDesktop(Uint8Array.of(3, 1, 2, 3, 4, 1, 9, 8));
+  assert.equal(message.kind, 'video');
+  if (message.kind === 'video') {
+    assert.deepEqual([message.width, message.height, message.keyframe], [0x0102, 0x0304, true]);
+    assert.deepEqual([...message.data], [9, 8]);
+  }
+  const delta = decodeDesktop(Uint8Array.of(3, 0, 8, 0, 8, 0));
+  assert.equal(delta.kind === 'video' && delta.keyframe, false);
+});
+
+test('rejects malformed video messages', () => {
+  assert.throws(() => decodeDesktop(Uint8Array.of(3, 0, 8, 0, 8)), ProtocolError);
+  assert.throws(() => decodeDesktop(Uint8Array.of(3, 0, 8, 0, 8, 2, 1)), ProtocolError);
+});
+
+test('encodes the capabilities layout the agent expects', () => {
+  assert.deepEqual([...encodeCapabilities(true)], [5, 1]);
+  assert.deepEqual([...encodeCapabilities(false)], [5, 0]);
 });

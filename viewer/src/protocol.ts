@@ -7,6 +7,8 @@ export const CODE_LEN = 6;
 const RESIZE = 0;
 const TILE = 1;
 const FRAME_END = 2;
+const VIDEO = 3;
+const VIDEO_HEADER_LEN = 5;
 const TILE_HEADER_LEN = 9;
 
 export const CODEC_JPEG = 0;
@@ -28,7 +30,8 @@ export type DesktopMessage =
       codec: number;
       data: Uint8Array;
     }
-  | { kind: 'frameEnd'; sequence: number };
+  | { kind: 'frameEnd'; sequence: number }
+  | { kind: 'video'; width: number; height: number; keyframe: boolean; data: Uint8Array };
 
 export type MouseButton = 'left' | 'middle' | 'right';
 
@@ -115,6 +118,22 @@ export function decodeDesktop(payload: Uint8Array): DesktopMessage {
     }
     return { kind: 'frameEnd', sequence: view.getUint32(1) };
   }
+  if (tag === VIDEO) {
+    if (payload.length < 1 + VIDEO_HEADER_LEN) {
+      throw new ProtocolError('bad video length');
+    }
+    const flag = view.getUint8(5);
+    if (flag > 1) {
+      throw new ProtocolError('bad video flag');
+    }
+    return {
+      kind: 'video',
+      width: view.getUint16(1),
+      height: view.getUint16(3),
+      keyframe: flag === 1,
+      data: payload.subarray(1 + VIDEO_HEADER_LEN),
+    };
+  }
   throw new ProtocolError(`unknown desktop message ${tag}`);
 }
 
@@ -147,6 +166,10 @@ export function encodeInput(event: InputEvent): Uint8Array {
       return out;
     }
   }
+}
+
+export function encodeCapabilities(video: boolean): Uint8Array {
+  return Uint8Array.of(5, video ? 1 : 0);
 }
 
 export function encodeFrameAck(sequence: number): Uint8Array {

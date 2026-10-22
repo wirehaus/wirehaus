@@ -10,6 +10,7 @@ import {
   decodeControl,
   decodeDesktop,
   decodeFrame,
+  encodeCapabilities,
   encodeFrame,
   encodeFrameAck,
   encodeInput,
@@ -17,6 +18,7 @@ import {
 } from './protocol.js';
 import { Handshake, type Session, generateDeviceKey, loadCrypto } from './secure.js';
 import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './storage.js';
+import { VideoPlayer, videoSupported } from './video.js';
 
 export type RefusalReason = Exclude<AuthFailure, 'wrongCode'> | 'unknown' | 'failed';
 
@@ -37,6 +39,7 @@ const MAX_NOTCHES = 10;
 
 export class Viewer {
   private readonly context: CanvasRenderingContext2D;
+  private readonly player: VideoPlayer;
   private socket: WebSocket | null = null;
   private session: Session | null = null;
   private handshake: Handshake | null = null;
@@ -58,6 +61,10 @@ export class Viewer {
       throw new Error('canvas 2d context is not available');
     }
     this.context = context;
+    this.player = new VideoPlayer(
+      (frame) => this.context.drawImage(frame, 0, 0),
+      () => this.videoFailed(),
+    );
     this.listen();
     new ResizeObserver(() => this.fit()).observe(canvas.parentElement ?? canvas);
   }
@@ -146,7 +153,19 @@ export class Viewer {
     this.handshake?.free();
     this.handshake = null;
     this.agentToPin = null;
+    this.player.reset();
     this.releaseAll();
+  }
+
+  private videoFailed(): void {
+    const socket = this.socket;
+    if (socket !== null) {
+      this.fail(socket);
+    }
+  }
+
+  private async announceCapabilities(): Promise<void> {
+    this.send(DESKTOP_CHANNEL, encodeCapabilities(await videoSupported()));
   }
 
   private closed(socket: WebSocket): void {
@@ -224,6 +243,7 @@ export class Viewer {
         this.phase = 'streaming';
         this.report({ kind: 'connecting' });
         void this.pinAgent();
+        void this.announceCapabilities();
         return;
       case 'authFailed':
         if (message.reason === 'wrongCode') {
@@ -249,11 +269,19 @@ export class Viewer {
 
   private apply(message: DesktopMessage): void {
     if (message.kind === 'resize') {
+      this.player.reset();
       this.canvas.width = message.width;
       this.canvas.height = message.height;
       this.fit();
       this.report({ kind: 'connected', width: message.width, height: message.height });
       this.canvas.focus();
+      return;
+    }
+    if (message.kind === 'video') {
+      const { width, height, keyframe, data } = message;
+      this.drawing = this.drawing
+        .then(() => this.player.play(width, height, keyframe, data))
+        .catch(() => undefined);
       return;
     }
     if (message.kind === 'frameEnd') {
