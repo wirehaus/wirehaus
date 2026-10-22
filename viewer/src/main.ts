@@ -9,6 +9,7 @@ import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
 import { type Messages, messagesFor } from './strings.js';
 import { Terminals } from './terminals.js';
+import { resolveTarget } from './target.js';
 import { Viewer, type ViewerState } from './viewer.js';
 
 function element<T extends HTMLElement>(id: string): T {
@@ -23,6 +24,7 @@ const messages = messagesFor(navigator.language);
 document.documentElement.lang = navigator.language.split('-')[0] ?? 'es';
 
 const status = element<HTMLSpanElement>('status');
+const agentLabel = element<HTMLSpanElement>('agent');
 const forget = element<HTMLButtonElement>('forget');
 const reconnect = element<HTMLButtonElement>('reconnect');
 const pairPanel = element<HTMLElement>('pair');
@@ -115,7 +117,7 @@ function show(state: ViewerState): void {
     toolsNotice.textContent = '';
   }
   showView();
-  forget.hidden = state.kind === 'loading' || state.kind === 'needsPairing';
+  forget.hidden = state.kind === 'loading' || state.kind === 'needsPairing' || state.kind === 'noAgent';
   reconnect.hidden = state.kind !== 'closed' && state.kind !== 'refused' && state.kind !== 'ended';
   pairError.textContent = state.kind === 'needsPairing' && state.error !== undefined ? messages.pairInvalid : '';
   codeError.textContent =
@@ -127,6 +129,9 @@ function show(state: ViewerState): void {
   switch (state.kind) {
     case 'loading':
       status.textContent = messages.loading;
+      break;
+    case 'noAgent':
+      status.textContent = state.error === 'missing' ? messages.agentMissing : messages.agentInvalid;
       break;
     case 'needsPairing':
       status.textContent = '';
@@ -170,7 +175,15 @@ function show(state: ViewerState): void {
   }
 }
 
-const viewer = new Viewer(screen, show);
+const configurable =
+  document.querySelector('meta[name="wirehaus-agent-address"]')?.getAttribute('content') === 'configurable';
+const target = resolveTarget(location, configurable);
+if (typeof target === 'object' && target.foreign) {
+  agentLabel.textContent = target.authority;
+  agentLabel.hidden = false;
+}
+
+const viewer = new Viewer(screen, show, target);
 
 function refusedText(reason: 'notAllowed' | 'tooManySessions' | 'spawnFailed'): string {
   switch (reason) {

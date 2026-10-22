@@ -40,6 +40,12 @@ header {
   font-weight: 600;
 }
 
+#agent {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
 #status {
   flex: 1;
   color: var(--muted);

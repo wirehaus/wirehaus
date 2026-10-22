@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+import { parseAgentAddress, resolveTarget } from './target.js';
+
+const page = { protocol: 'https:', host: 'viewer.example.com', hash: '' };
+
+test('accepts plain hosts, hosts with a port and a leading secure scheme', () => {
+  assert.equal(parseAgentAddress('user.wirehaus.dev'), 'user.wirehaus.dev');
+  assert.equal(parseAgentAddress('  User.Wirehaus.DEV '), 'user.wirehaus.dev');
+  assert.equal(parseAgentAddress('agent.example.com:8443'), 'agent.example.com:8443');
+  assert.equal(parseAgentAddress('https://agent.example.com'), 'agent.example.com');
+  assert.equal(parseAgentAddress('wss://agent.example.com/'), 'agent.example.com');
+  assert.equal(parseAgentAddress('127.0.0.1:7878'), '127.0.0.1:7878');
+  assert.equal(parseAgentAddress('agent.example.com\n'), 'agent.example.com');
+});
+
+test('rejects anything that is not a bare host and optional port', () => {
+  const bad = [
+    '',
+    ' ',
+    'http://agent.example.com',
+    'ws://agent.example.com',
+    'agent.example.com/path',
+    'agent.example.com/ws',
+    'agent.example.com?x=1',
+    'agent.example.com#x',
+    'user@agent.example.com',
+    'user:pass@agent.example.com',
+    'agent example.com',
+    'agent.example.com:',
+    'agent.example.com:0',
+    'agent.example.com:65536',
+    'agent.example.com:80:80',
+    'agent.example.com:http',
+    '[::1]:7878',
+    '.example.com',
+    'example..com',
+    'example.com.',
+    '-example.com',
+    'example-.com',
+    'exam_ple.com',
+    'exämple.com',
+    `${'a'.repeat(64)}.com`,
+    `${'a.'.repeat(130)}com`,
+    'https://https://agent.example.com',
+    'agent.example\n.com',
+    '//agent.example.com',
+  ];
+  for (const input of bad) {
+    assert.equal(parseAgentAddress(input), undefined, JSON.stringify(input));
+  }
+});
+
+test('a viewer served by the agent connects to its own origin', () => {
+  const target = resolveTarget({ protocol: 'http:', host: '127.0.0.1:7878', hash: '#agent=evil.example.com' }, false);
+  assert.deepEqual(target, {
+    authority: '127.0.0.1:7878',
+    origin: 'http://127.0.0.1:7878',
+    socketUrl: 'ws://127.0.0.1:7878/ws',
+    foreign: false,
+  });
+});
+
+test('a configurable viewer takes the agent from the fragment and always uses a secure socket for remote hosts', () => {
+  const target = resolveTarget({ ...page, hash: '#agent=user.wirehaus.dev' }, true);
+  assert.deepEqual(target, {
+    authority: 'user.wirehaus.dev',
+    origin: 'https://user.wirehaus.dev',
+    socketUrl: 'wss://user.wirehaus.dev/ws',
+    foreign: true,
+  });
+  const plain = resolveTarget({ protocol: 'http:', host: 'viewer.example.com', hash: '#agent=user.wirehaus.dev' }, true);
+  assert.equal(typeof plain === 'object' && plain.socketUrl, 'wss://user.wirehaus.dev/ws');
+});
+
+test('only loopback addresses get an unencrypted socket', () => {
+  const local = resolveTarget({ ...page, hash: '#agent=localhost:7878' }, true);
+  assert.equal(typeof local === 'object' && local.socketUrl, 'ws://localhost:7878/ws');
+  const lookalike = resolveTarget({ ...page, hash: '#agent=localhost.evil.example' }, true);
+  assert.equal(typeof lookalike === 'object' && lookalike.socketUrl, 'wss://localhost.evil.example/ws');
+  const numeric = resolveTarget({ ...page, hash: '#agent=127.0.0.1.evil.example' }, true);
+  assert.equal(typeof numeric === 'object' && numeric.socketUrl, 'wss://127.0.0.1.evil.example/ws');
+});
+
+test('a configurable viewer without a usable address reports why', () => {
+  assert.equal(resolveTarget(page, true), 'missing');
+  assert.equal(resolveTarget({ ...page, hash: '#other=1' }, true), 'missing');
+  assert.equal(resolveTarget({ ...page, hash: '#agent=' }, true), 'invalid');
+  assert.equal(resolveTarget({ ...page, hash: '#agent=a.example.com&agent=b.example.com' }, true), 'invalid');
+  assert.equal(resolveTarget({ ...page, hash: '#agent=http://a.example.com' }, true), 'invalid');
+  assert.equal(resolveTarget({ ...page, hash: '#agent=a.example.com/x' }, true), 'invalid');
+});

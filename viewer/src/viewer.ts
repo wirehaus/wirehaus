@@ -26,6 +26,7 @@ import {
 } from './protocol.js';
 import { Handshake, type Session, generateDeviceKey, loadCrypto } from './secure.js';
 import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './storage.js';
+import type { Target, TargetError } from './target.js';
 import { VideoPlayer, videoSupported } from './video.js';
 
 export type ClipboardListener = (message: ClipboardMessage) => void;
@@ -38,6 +39,7 @@ export type RefusalReason = Exclude<AuthFailure, 'wrongCode'> | 'unknown' | 'fai
 
 export type ViewerState =
   | { kind: 'loading' }
+  | { kind: 'noAgent'; error: TargetError }
   | { kind: 'needsPairing'; error?: 'invalid' }
   | { kind: 'connecting' }
   | { kind: 'needsCode'; error?: 'wrong' | 'invalid' }
@@ -81,6 +83,7 @@ export class Viewer {
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly report: (state: ViewerState) => void,
+    private readonly target: Target | TargetError,
   ) {
     const context = canvas.getContext('2d', { alpha: false });
     if (context === null) {
@@ -96,6 +99,10 @@ export class Viewer {
   }
 
   async start(): Promise<void> {
+    if (typeof this.target === 'string') {
+      this.report({ kind: 'noAgent', error: this.target });
+      return;
+    }
     this.report({ kind: 'loading' });
     try {
       await loadCrypto();
@@ -104,7 +111,7 @@ export class Viewer {
       this.report({ kind: 'refused', reason: 'failed', retryAfter: 0 });
       return;
     }
-    const pinned = this.identity?.agents[location.origin];
+    const pinned = this.identity?.agents[this.target.origin];
     if (this.identity !== undefined && pinned !== undefined) {
       const key = this.identity.deviceKey;
       this.open(() => Handshake.reconnect(key, pinned), false);
@@ -114,6 +121,9 @@ export class Viewer {
   }
 
   async pair(code: string, name: string): Promise<void> {
+    if (typeof this.target === 'string') {
+      return;
+    }
     const deviceKey = this.identity?.deviceKey ?? generateDeviceKey();
     if (this.identity === undefined) {
       this.identity = { deviceKey, agents: {} };
@@ -152,6 +162,10 @@ export class Viewer {
   }
 
   private open(make: () => Handshake, pairing: boolean): void {
+    const target = this.target;
+    if (typeof target === 'string') {
+      return;
+    }
     this.close();
     let handshake: Handshake;
     try {
@@ -166,8 +180,7 @@ export class Viewer {
     this.resumeSent = false;
     this.endedBy = null;
     this.phase = 'handshake';
-    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+    const socket = new WebSocket(target.socketUrl);
     socket.binaryType = 'arraybuffer';
     socket.addEventListener('open', () => socket.send(owned(handshake.firstMessage)));
     socket.addEventListener('message', (event) => this.receive(socket, event.data));
@@ -358,11 +371,12 @@ export class Viewer {
   private async pinAgent(): Promise<void> {
     const agent = this.agentToPin;
     const identity = this.identity;
+    const target = this.target;
     this.agentToPin = null;
-    if (agent === null || identity === undefined) {
+    if (agent === null || identity === undefined || typeof target === 'string') {
       return;
     }
-    identity.agents[location.origin] = agent;
+    identity.agents[target.origin] = agent;
     await saveIdentity(identity).catch(() => undefined);
   }
 

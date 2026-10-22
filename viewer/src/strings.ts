@@ -29,6 +29,8 @@ export type Messages = {
   busy: string;
   refused: string;
   failed: string;
+  agentMissing: string;
+  agentInvalid: string;
   tabDesktop: string;
   newTerminal: string;
   terminalTitle: (number: number) => string;
@@ -112,6 +114,8 @@ const catalog: Record<string, Messages> = {
     refused:
       'El agente no ha aceptado la conexión. Puede estar apagado, bloqueado, o no reconocer este equipo. Si lo revocaste o cambió el agente, olvida este equipo y empareja de nuevo.',
     failed: 'La conexión segura ha fallado.',
+    agentMissing: 'Falta la dirección del agente. Abre el enlace completo, que termina en #agent=dirección.',
+    agentInvalid: 'La dirección del agente no es válida. Debe ser un nombre de equipo con puerto opcional.',
     tabDesktop: 'Escritorio',
     newTerminal: 'Nueva terminal',
     terminalTitle: (number) => `Terminal ${number}`,
@@ -214,6 +218,8 @@ const catalog: Record<string, Messages> = {
     refused:
       'The agent did not accept the connection. It may be off, locked, or not recognise this device. If you revoked it or the agent changed, forget this device and pair again.',
     failed: 'The secure connection failed.',
+    agentMissing: 'The agent address is missing. Open the full link, which ends in #agent=address.',
+    agentInvalid: 'The agent address is not valid. It must be a host name with an optional port.',
     tabDesktop: 'Desktop',
     newTerminal: 'New terminal',
     terminalTitle: (number) => `Terminal ${number}`,
