@@ -133,7 +133,7 @@ impl Stream {
         let bitrate = u32::from(quality) * KBPS_PER_QUALITY_POINT;
         let stale = self.video.as_ref().is_none_or(|encoder| {
             encoder.dimensions() != (width & !1, height & !1)
-                || encoder.bitrate_kbps().abs_diff(bitrate) * 4 > encoder.bitrate_kbps()
+                || encoder.bitrate_kbps().abs_diff(bitrate) * 2 > encoder.bitrate_kbps()
         });
         if stale {
             match VideoEncoder::new(width, height, bitrate, VIDEO_FRAME_RATE) {

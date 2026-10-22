@@ -140,6 +140,7 @@ impl VideoEncoder {
             .bitrate(BitRate::from_bps(bitrate_kbps.saturating_mul(1000)))
             .max_frame_rate(FrameRate::from_hz(frame_rate))
             .skip_frames(false)
+            .scene_change_detect(false)
             .profile(Profile::Baseline)
             .complexity(Complexity::Low)
             .vui(VuiConfig::bt709());
