@@ -52,6 +52,7 @@ pub struct State {
     totp: TotpSecret,
     totp_last_step: Option<u64>,
     locked: bool,
+    terminal_allowed: bool,
     pairing: Option<PairingGrant>,
     local: FailureTracker,
     devices: Vec<Device>,
@@ -64,6 +65,7 @@ impl State {
             totp: TotpSecret::generate()?,
             totp_last_step: None,
             locked: false,
+            terminal_allowed: false,
             pairing: None,
             local: FailureTracker::default(),
             devices: Vec::new(),
@@ -87,6 +89,15 @@ impl State {
 
     pub fn set_locked(&mut self, locked: bool) {
         self.locked = locked;
+    }
+
+    #[must_use]
+    pub fn terminal_allowed(&self) -> bool {
+        self.terminal_allowed
+    }
+
+    pub fn set_terminal_allowed(&mut self, allowed: bool) {
+        self.terminal_allowed = allowed;
     }
 
     pub fn open_pairing(&mut self, now: u64) -> Result<PairingCode, StateError> {
@@ -244,6 +255,7 @@ impl State {
             .map_or_else(|| "-".to_owned(), |step| step.to_string());
         let _ = writeln!(out, "totp_last_step {step}");
         let _ = writeln!(out, "locked {}", u8::from(self.locked));
+        let _ = writeln!(out, "terminal {}", u8::from(self.terminal_allowed));
         if let Some(grant) = &self.pairing {
             let _ = writeln!(
                 out,
@@ -298,6 +310,7 @@ struct Parser {
     last_step: Option<u64>,
     last_step_seen: bool,
     locked: Option<bool>,
+    terminal: Option<bool>,
     pairing: Option<PairingGrant>,
     local: Option<FailureTracker>,
     devices: Vec<Device>,
@@ -326,6 +339,7 @@ impl Parser {
                 Ok(())
             }
             "locked" => once(&mut self.locked, parse_flag(rest)?, key),
+            "terminal" => once(&mut self.terminal, parse_flag(rest)?, key),
             "pairing" => once(&mut self.pairing, parse_pairing(rest)?, key),
             "local" => once(&mut self.local, parse_local(rest)?, key),
             "device" => {
@@ -358,6 +372,7 @@ impl Parser {
                 return Err(missing("totp_last_step"));
             },
             locked: self.locked.ok_or_else(|| missing("locked"))?,
+            terminal_allowed: self.terminal.unwrap_or(false),
             pairing: self.pairing,
             local: self.local.unwrap_or_default(),
             devices: self.devices,
@@ -495,6 +510,18 @@ mod tests {
         assert_eq!(restored.device(&second).unwrap().name, "Portátil de clase");
         assert_eq!(restored.pairing_psk(5001), state.pairing_psk(5001));
         assert!(restored.check_device(&device, 5000).is_err());
+    }
+
+    #[test]
+    fn the_terminal_permission_is_off_by_default_and_persists() {
+        let mut state = State::create().unwrap();
+        assert!(!state.terminal_allowed());
+        state.set_terminal_allowed(true);
+        assert!(State::parse(&state.serialize()).unwrap().terminal_allowed());
+        state.set_terminal_allowed(false);
+        assert!(!State::parse(&state.serialize()).unwrap().terminal_allowed());
+        let older = state.serialize().replace("terminal 0\n", "");
+        assert!(!State::parse(&older).unwrap().terminal_allowed());
     }
 
     #[test]

@@ -22,7 +22,7 @@ use wirehaus_crypto::session::{Limits, Session};
 use wirehaus_crypto::totp::TotpSecret;
 use wirehaus_protocol::{
     AuthFailure, Channel, Codec, ControlMessage, DesktopMessage, Frame, HEADER_LEN, InputEvent,
-    MAX_PAYLOAD_LEN, ViewerMessage,
+    MAX_PAYLOAD_LEN, RefusalReason, TerminalMessage, ViewerMessage,
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt, CreateGCAux, Rectangle};
@@ -1091,6 +1091,159 @@ fn a_viewer_that_does_not_declare_video_support_keeps_getting_tiles_under_heavy_
         }
     }
     assert!(tiles > 10);
+}
+
+fn send_terminal(client: &mut Client, stream: u32, message: &TerminalMessage) {
+    client.send(&Frame::new(Channel::Terminal, stream, message.encode()).unwrap());
+}
+
+fn next_terminal(client: &mut Client) -> (u32, TerminalMessage) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        match client.read_frame() {
+            Received::Got(frame) if frame.channel == Channel::Terminal => {
+                return (
+                    frame.stream,
+                    TerminalMessage::decode(&frame.payload).unwrap(),
+                );
+            }
+            Received::Got(frame) => {
+                if let Ok(DesktopMessage::FrameEnd { sequence }) =
+                    DesktopMessage::decode(&frame.payload)
+                {
+                    client.send_viewer(ViewerMessage::FrameAck { sequence });
+                }
+            }
+            Received::Timeout => {}
+            Received::Closed => panic!("the connection closed"),
+        }
+    }
+    panic!("no terminal message arrived");
+}
+
+fn terminal_text_until(client: &mut Client, stream: u32, wanted: &str) -> String {
+    let mut seen = String::new();
+    while !seen.contains(wanted) {
+        match next_terminal(client) {
+            (id, TerminalMessage::Output(data)) if id == stream => {
+                seen.push_str(&String::from_utf8_lossy(&data));
+            }
+            (_, TerminalMessage::Exited { .. }) => break,
+            _ => {}
+        }
+    }
+    seen
+}
+
+#[test]
+fn a_terminal_is_refused_until_the_owner_allows_it_and_then_runs_commands() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+
+    send_terminal(
+        &mut client,
+        5,
+        &TerminalMessage::Open {
+            columns: 80,
+            rows: 24,
+        },
+    );
+    assert_eq!(
+        next_terminal(&mut client),
+        (5, TerminalMessage::Refused(RefusalReason::NotAllowed))
+    );
+
+    server
+        .store
+        .update(|state, _| state.set_terminal_allowed(true))
+        .unwrap();
+    send_terminal(
+        &mut client,
+        5,
+        &TerminalMessage::Open {
+            columns: 80,
+            rows: 24,
+        },
+    );
+    send_terminal(
+        &mut client,
+        5,
+        &TerminalMessage::Input(b"echo remote-$((6*7))\n".to_vec()),
+    );
+    let seen = terminal_text_until(&mut client, 5, "remote-42");
+    assert!(seen.contains("remote-42"), "{seen}");
+
+    send_terminal(
+        &mut client,
+        5,
+        &TerminalMessage::Input(b"exit 7\n".to_vec()),
+    );
+    loop {
+        if let (5, TerminalMessage::Exited { code }) = next_terminal(&mut client) {
+            assert_eq!(code, 7);
+            break;
+        }
+    }
+}
+
+#[test]
+fn terminal_sessions_are_independent_and_limited() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    server
+        .store
+        .update(|state, _| state.set_terminal_allowed(true))
+        .unwrap();
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    for stream in 1..=4 {
+        send_terminal(
+            &mut client,
+            stream,
+            &TerminalMessage::Open {
+                columns: 80,
+                rows: 24,
+            },
+        );
+    }
+    send_terminal(
+        &mut client,
+        9,
+        &TerminalMessage::Open {
+            columns: 80,
+            rows: 24,
+        },
+    );
+    assert_eq!(
+        next_terminal(&mut client),
+        (9, TerminalMessage::Refused(RefusalReason::TooManySessions))
+    );
+    send_terminal(
+        &mut client,
+        1,
+        &TerminalMessage::Input(b"echo one-$((1))\n".to_vec()),
+    );
+    send_terminal(
+        &mut client,
+        2,
+        &TerminalMessage::Input(b"echo two-$((2))\n".to_vec()),
+    );
+    let first = terminal_text_until(&mut client, 1, "one-1");
+    assert!(first.contains("one-1"));
+    assert!(!first.contains("two-2"));
+    let second = terminal_text_until(&mut client, 2, "two-2");
+    assert!(second.contains("two-2"));
+}
+
+#[test]
+fn a_malformed_terminal_message_ends_the_session() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.send(&Frame::new(Channel::Terminal, 1, vec![99, 1, 2]).unwrap());
+    assert!(client.wait_closed(Duration::from_secs(5)));
 }
 
 #[test]

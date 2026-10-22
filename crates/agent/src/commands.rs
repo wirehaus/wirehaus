@@ -146,6 +146,36 @@ pub fn lock(
     Ok(())
 }
 
+pub fn terminal(
+    store: &Store,
+    allow: bool,
+    code: Option<&str>,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    if allow {
+        verify(store, code.unwrap_or_default())?;
+    }
+    store.update(|state, _| state.set_terminal_allowed(allow))?;
+    store.log(
+        if allow {
+            "terminal_allowed"
+        } else {
+            "terminal_denied"
+        },
+        "by the local administrator",
+    );
+    writeln!(
+        out,
+        "{}",
+        if allow {
+            "Terminal remota permitida."
+        } else {
+            "Terminal remota desactivada."
+        }
+    )?;
+    Ok(())
+}
+
 fn verify(store: &Store, code: &str) -> Result<(), CommandError> {
     match store.update(|state, now| state.verify_local(code, now))? {
         Ok(()) => Ok(()),
@@ -368,6 +398,25 @@ mod tests {
         let next = code(&store, &time);
         lock(&store, false, &next, &mut Vec::new()).unwrap();
         assert!(!store.read(|state, _| state.is_locked()).unwrap());
+    }
+
+    #[test]
+    fn allowing_the_terminal_needs_a_code_and_denying_it_does_not() {
+        let (_dir, store, time) = setup();
+        assert!(matches!(
+            terminal(&store, true, Some("000000"), &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        assert!(matches!(
+            terminal(&store, true, None, &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        assert!(!store.read(|state, _| state.terminal_allowed()).unwrap());
+        let right = code(&store, &time);
+        terminal(&store, true, Some(&right), &mut Vec::new()).unwrap();
+        assert!(store.read(|state, _| state.terminal_allowed()).unwrap());
+        terminal(&store, false, None, &mut Vec::new()).unwrap();
+        assert!(!store.read(|state, _| state.terminal_allowed()).unwrap());
     }
 
     #[test]

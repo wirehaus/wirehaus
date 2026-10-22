@@ -2,13 +2,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use wirehaus_input::{InputError, InputSink};
-use wirehaus_protocol::{Channel, DesktopMessage, Frame, ViewerMessage};
+use wirehaus_protocol::{Channel, DesktopMessage, Frame, TerminalMessage, ViewerMessage};
 
 use crate::error::ServerError;
 use crate::link::{Incoming, Link};
 use crate::pacer::Pacer;
 use crate::platform::Backend;
 use crate::stream::{Stream, send_message};
+use crate::terminal::{Event, Terminals, default_shell};
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -22,7 +23,9 @@ pub fn run(
     mut pacer: Pacer,
     stop: &AtomicBool,
     revoked: &dyn Fn() -> bool,
+    terminal_allowed: &dyn Fn() -> bool,
 ) -> Result<(), ServerError> {
+    let mut terminals = Terminals::new(default_shell());
     link.set_write_timeout(WRITE_TIMEOUT)?;
     let mut ticks: u32 = 0;
     let mut viewer_decodes_video = false;
@@ -47,11 +50,13 @@ pub fn run(
         if pacer.stalled(Instant::now()) {
             return Err(ServerError::ViewerStalled);
         }
+        pump_terminals(&mut link, &mut terminals)?;
         if !receive(
             &mut link,
             backend.input.as_mut(),
             &mut pacer,
             &mut viewer_decodes_video,
+            (&mut terminals, terminal_allowed),
             deadline,
         )? {
             return Ok(());
@@ -66,8 +71,10 @@ fn receive(
     input: &mut dyn InputSink,
     pacer: &mut Pacer,
     video: &mut bool,
+    terminal: (&mut Terminals, &dyn Fn() -> bool),
     deadline: Instant,
 ) -> Result<bool, ServerError> {
+    let (terminals, allowed) = terminal;
     let mut handled = 0;
     while handled < MAX_MESSAGES_PER_TICK {
         let wait = deadline.saturating_duration_since(Instant::now());
@@ -75,6 +82,10 @@ fn receive(
             break;
         }
         match link.receive(wait)? {
+            Incoming::Frame(frame) if frame.channel == Channel::Terminal => {
+                terminal_frame(&frame, terminals, allowed(), link)?;
+                handled += 1;
+            }
             Incoming::Frame(frame) => {
                 handle_frame(&frame, input, pacer, video)?;
                 handled += 1;
@@ -84,6 +95,54 @@ fn receive(
         }
     }
     Ok(true)
+}
+
+const TERMINAL_EVENTS_PER_TICK: usize = 32;
+
+fn pump_terminals(link: &mut Link, terminals: &mut Terminals) -> Result<(), ServerError> {
+    for event in terminals.drain(TERMINAL_EVENTS_PER_TICK) {
+        let (stream, message) = match event {
+            Event::Output { stream, data } => (stream, TerminalMessage::Output(data)),
+            Event::Exited { stream, code } => (stream, TerminalMessage::Exited { code }),
+        };
+        link.send_frame(&Frame::new(Channel::Terminal, stream, message.encode())?)?;
+    }
+    Ok(())
+}
+
+fn terminal_frame(
+    frame: &Frame,
+    terminals: &mut Terminals,
+    allowed: bool,
+    link: &mut Link,
+) -> Result<(), ServerError> {
+    let stream = frame.stream;
+    match TerminalMessage::decode(&frame.payload)? {
+        TerminalMessage::Open { columns, rows } => {
+            let outcome = if allowed {
+                terminals.open(stream, columns, rows)
+            } else {
+                Err(wirehaus_protocol::RefusalReason::NotAllowed)
+            };
+            if let Err(reason) = outcome {
+                let refusal = TerminalMessage::Refused(reason);
+                link.send_frame(&Frame::new(Channel::Terminal, stream, refusal.encode())?)?;
+            }
+        }
+        TerminalMessage::Input(data) => {
+            terminals.input(stream, &data);
+        }
+        TerminalMessage::Resize { columns, rows } => {
+            terminals.resize(stream, columns, rows);
+        }
+        TerminalMessage::Close => terminals.close(stream),
+        TerminalMessage::Output(_)
+        | TerminalMessage::Exited { .. }
+        | TerminalMessage::Refused(_) => {
+            return Err(ServerError::UnexpectedMessage);
+        }
+    }
+    Ok(())
 }
 
 fn handle_frame(

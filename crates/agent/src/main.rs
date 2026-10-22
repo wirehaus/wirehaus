@@ -9,7 +9,7 @@ use wirehaus_agent::commands;
 use wirehaus_agent::{Server, ServerConfig, Store, default_dir, system_clock};
 use wirehaus_protocol::PROTOCOL_VERSION;
 
-use crate::cli::{Cli, Command, DeviceAction};
+use crate::cli::{Cli, Command, DeviceAction, TerminalAction};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -43,6 +43,12 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Devices {
             action: Some(DeviceAction::Reactivate { device, code }),
         } => commands::reactivate(&open()?, &device, &code, &mut out)?,
+        Command::Terminal {
+            action: TerminalAction::Allow { code },
+        } => commands::terminal(&open()?, true, Some(&code), &mut out)?,
+        Command::Terminal {
+            action: TerminalAction::Deny,
+        } => commands::terminal(&open()?, false, None, &mut out)?,
         Command::Lock { code } => commands::lock(&open()?, true, &code, &mut out)?,
         Command::Unlock { code } => commands::lock(&open()?, false, &code, &mut out)?,
         Command::Serve {

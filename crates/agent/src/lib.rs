@@ -12,6 +12,7 @@ pub mod state;
 mod static_files;
 pub mod store;
 mod stream;
+pub mod terminal;
 #[cfg(test)]
 mod testing;
 

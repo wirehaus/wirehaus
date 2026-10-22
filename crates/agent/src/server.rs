@@ -276,6 +276,11 @@ impl Server {
                     .read(|state, _| state.is_locked() || state.device(&identity.device).is_none())
                     .unwrap_or(true)
             },
+            &|| {
+                self.store
+                    .read(|state, _| state.terminal_allowed())
+                    .unwrap_or(false)
+            },
         );
         self.store.log("session_end", name);
         result

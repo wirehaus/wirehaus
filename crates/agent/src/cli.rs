@@ -21,6 +21,10 @@ pub enum Command {
         #[command(subcommand)]
         action: Option<DeviceAction>,
     },
+    Terminal {
+        #[command(subcommand)]
+        action: TerminalAction,
+    },
     Lock {
         #[arg(long)]
         code: String,
@@ -39,6 +43,15 @@ pub enum Command {
         #[arg(long, default_value_t = 70, value_parser = clap::value_parser!(u8).range(1..=100))]
         quality: u8,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TerminalAction {
+    Allow {
+        #[arg(long)]
+        code: String,
+    },
+    Deny,
 }
 
 #[derive(Debug, Subcommand)]
