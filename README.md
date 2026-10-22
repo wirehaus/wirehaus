@@ -6,7 +6,9 @@ Dejas el ordenador de casa encendido con el agente de Wirehaus y te conectas des
 
 ## Estado
 
-Desarrollo temprano. Todavía no hay nada que instalar. Este repositorio contiene el protocolo y el esqueleto del agente.
+Desarrollo temprano. Todavía no hay nada que instalar.
+
+El agente ya muestra y controla un escritorio Linux con X11 desde un navegador de la misma máquina. Todavía no hay cifrado de extremo a extremo, segundo factor ni emparejamiento, así que el servidor solo escucha en `127.0.0.1`, rechaza cualquier otra dirección y comprueba `Host` y `Origin` en cada petición. No lo expongas por un túnel ni por la red.
 
 ## Qué busca ser
 
@@ -25,7 +27,11 @@ Windows 10 y 11, macOS y Linux (X11).
 | Ruta | Contenido |
 |---|---|
 | `crates/protocol` | Mensajes y codificación del protocolo |
+| `crates/capture` | Captura de pantalla y detección de zonas cambiadas |
+| `crates/encode` | Codificación de las zonas cambiadas |
+| `crates/input` | Inyección de ratón y teclado |
 | `crates/agent` | Agente que se ejecuta en el ordenador de casa |
+| `web` | Visor que corre en el navegador |
 
 ## Compilar
 
@@ -35,6 +41,17 @@ Hace falta Rust estable.
 cargo build --workspace
 cargo test --workspace
 ```
+
+## Probar en local
+
+Hace falta una sesión de escritorio con X11, Rust estable y Node.js.
+
+```
+cd web && npm ci && npm run build && cd ..
+cargo run -p wirehaus-agent -- serve --viewer-dir web/dist
+```
+
+Abre `http://127.0.0.1:7878` en el navegador. Con `--display` eliges otra pantalla de X11 y con `--listen` otro puerto de la máquina local.
 
 ## Licencia
 
