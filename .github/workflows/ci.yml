@@ -29,6 +29,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y nasm
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
@@ -42,7 +43,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb nasm
+      - if: runner.os == 'macOS'
+        run: brew install nasm
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install nasm -y --no-progress
+          echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
       - run: cargo test --workspace --locked
 
   viewer:
