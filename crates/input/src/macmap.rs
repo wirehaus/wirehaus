@@ -62,7 +62,7 @@ const KEYCODES: [(u16, u16); 113] = [
     (53, 44),
     (54, 60),
     (55, 67),
-    (56, 58),
+    (56, 55),
     (57, 49),
     (58, 57),
     (59, 122),
@@ -96,7 +96,7 @@ const KEYCODES: [(u16, u16); 113] = [
     (96, 76),
     (97, 62),
     (98, 75),
-    (100, 61),
+    (100, 54),
     (102, 115),
     (103, 126),
     (104, 116),
@@ -110,8 +110,8 @@ const KEYCODES: [(u16, u16); 113] = [
     (113, 74),
     (114, 73),
     (115, 72),
-    (125, 55),
-    (126, 54),
+    (125, 58),
+    (126, 61),
     (183, 105),
     (184, 107),
     (185, 113),
@@ -221,8 +221,21 @@ mod tests {
         assert_eq!(mac_keycode(57), Some(49));
         assert_eq!(mac_keycode(14), Some(51));
         assert_eq!(mac_keycode(111), Some(117));
-        assert_eq!(mac_keycode(125), Some(55));
         assert_eq!(mac_keycode(103), Some(126));
+    }
+
+    #[test]
+    fn pc_modifiers_follow_the_physical_positions_of_the_mac_ones() {
+        assert_eq!(mac_keycode(29), Some(59));
+        assert_eq!(mac_keycode(97), Some(62));
+        assert_eq!(mac_keycode(125), Some(58));
+        assert_eq!(mac_keycode(126), Some(61));
+        assert_eq!(mac_keycode(56), Some(55));
+        assert_eq!(mac_keycode(100), Some(54));
+        assert_eq!(mac_keycode(42), Some(56));
+        assert_eq!(mac_keycode(54), Some(60));
+        assert_eq!(modifier_of(58), Some(Modifier::Option));
+        assert_eq!(modifier_of(55), Some(Modifier::Command));
     }
 
     #[test]
