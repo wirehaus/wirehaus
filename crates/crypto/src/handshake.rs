@@ -4,7 +4,7 @@ use snow::{Builder, HandshakeState};
 use crate::error::CryptoError;
 use crate::keys::{PublicKey, StaticKey};
 use crate::pairing::{PSK_BYTES, PairingCode};
-use crate::session::Session;
+use crate::session::{Limits, Session};
 
 pub const MAX_HANDSHAKE_MESSAGE: usize = 1024;
 pub const MAX_DEVICE_NAME: usize = 64;
@@ -67,7 +67,7 @@ pub struct ViewerHandshake {
     state: HandshakeState,
     mode: Mode,
     device_name: String,
-    max_message: usize,
+    limits: Limits,
 }
 
 pub struct ViewerOutcome {
@@ -79,7 +79,7 @@ impl ViewerHandshake {
     pub fn reconnect(
         device: &StaticKey,
         agent: &PublicKey,
-        max_message: usize,
+        limits: Limits,
     ) -> Result<(Self, Vec<u8>), CryptoError> {
         let mode = Mode::Reconnect;
         let state = Builder::new(mode.params()?)
@@ -87,14 +87,14 @@ impl ViewerHandshake {
             .local_private_key(device.private_bytes())?
             .remote_public_key(agent.as_bytes())?
             .build_initiator()?;
-        Self::start(state, mode, String::new(), max_message)
+        Self::start(state, mode, String::new(), limits)
     }
 
     pub fn pairing(
         device: &StaticKey,
         code: &PairingCode,
         device_name: &str,
-        max_message: usize,
+        limits: Limits,
     ) -> Result<(Self, Vec<u8>), CryptoError> {
         let name = validate_device_name(device_name)?;
         let mode = Mode::Pairing;
@@ -104,14 +104,14 @@ impl ViewerHandshake {
             .local_private_key(device.private_bytes())?
             .psk(PSK_POSITION, &psk)?
             .build_initiator()?;
-        Self::start(state, mode, name, max_message)
+        Self::start(state, mode, name, limits)
     }
 
     fn start(
         mut state: HandshakeState,
         mode: Mode,
         device_name: String,
-        max_message: usize,
+        limits: Limits,
     ) -> Result<(Self, Vec<u8>), CryptoError> {
         let mut buffer = vec![0_u8; WORK_BUFFER];
         let length = state.write_message(&[], &mut buffer)?;
@@ -123,7 +123,7 @@ impl ViewerHandshake {
                 state,
                 mode,
                 device_name,
-                max_message,
+                limits,
             },
             first,
         ))
@@ -147,7 +147,7 @@ impl ViewerHandshake {
         let remote = remote_static(&self.state)?;
         let transport = self.state.into_transport_mode()?;
         Ok(ViewerOutcome {
-            session: Session::new(transport, remote, self.max_message),
+            session: Session::new(transport, remote, self.limits),
             last_message,
         })
     }
@@ -157,7 +157,7 @@ pub struct Accepted {
     state: HandshakeState,
     mode: Mode,
     device: Option<PublicKey>,
-    max_message: usize,
+    limits: Limits,
 }
 
 pub struct Established {
@@ -179,7 +179,7 @@ pub enum Replied {
 
 pub struct AwaitingFinal {
     state: HandshakeState,
-    max_message: usize,
+    limits: Limits,
 }
 
 impl Accepted {
@@ -187,7 +187,7 @@ impl Accepted {
         first: &[u8],
         agent: &StaticKey,
         pairing_psk: Option<&[u8; PSK_BYTES]>,
-        max_message: usize,
+        limits: Limits,
     ) -> Result<Self, CryptoError> {
         check_size(first)?;
         let (&mode_byte, message) = first
@@ -217,7 +217,7 @@ impl Accepted {
             state,
             mode,
             device,
-            max_message,
+            limits,
         })
     }
 
@@ -241,7 +241,7 @@ impl Accepted {
                 Ok(Replied::Established {
                     message: buffer,
                     established: Box::new(Established {
-                        session: Session::new(transport, device, self.max_message),
+                        session: Session::new(transport, device, self.limits),
                         device,
                         device_name: None,
                     }),
@@ -251,7 +251,7 @@ impl Accepted {
                 message: buffer,
                 pending: Box::new(AwaitingFinal {
                     state: self.state,
-                    max_message: self.max_message,
+                    limits: self.limits,
                 }),
             }),
         }
@@ -269,7 +269,7 @@ impl AwaitingFinal {
         let device = remote_static(&self.state)?;
         let transport = self.state.into_transport_mode()?;
         Ok(Established {
-            session: Session::new(transport, device, self.max_message),
+            session: Session::new(transport, device, self.limits),
             device,
             device_name: Some(name),
         })
@@ -325,7 +325,10 @@ impl std::fmt::Debug for Replied {
 mod tests {
     use super::*;
 
-    const LIMIT: usize = 1 << 20;
+    const LIMIT: Limits = Limits {
+        send: 1 << 20,
+        receive: 1 << 20,
+    };
 
     fn keys() -> (StaticKey, StaticKey) {
         (

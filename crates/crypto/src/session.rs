@@ -11,11 +11,17 @@ pub const REKEY_INTERVAL: u64 = 1 << 20;
 const MORE: u8 = 0;
 const LAST: u8 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub send: usize,
+    pub receive: usize,
+}
+
 pub struct Session {
     transport: TransportState,
     remote: PublicKey,
     pending: Vec<u8>,
-    max_message: usize,
+    limits: Limits,
     sent: u64,
     received: u64,
     rekey_interval: u64,
@@ -31,12 +37,12 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
-    pub(crate) fn new(transport: TransportState, remote: PublicKey, max_message: usize) -> Self {
+    pub(crate) fn new(transport: TransportState, remote: PublicKey, limits: Limits) -> Self {
         Self {
             transport,
             remote,
             pending: Vec::new(),
-            max_message,
+            limits,
             sent: 0,
             received: 0,
             rekey_interval: REKEY_INTERVAL,
@@ -57,10 +63,10 @@ impl Session {
 
     pub fn seal(&mut self, message: &[u8]) -> Result<Vec<Vec<u8>>, CryptoError> {
         self.ensure_open()?;
-        if message.len() > self.max_message {
+        if message.len() > self.limits.send {
             return Err(CryptoError::MessageTooLarge {
                 len: message.len(),
-                max: self.max_message,
+                max: self.limits.send,
             });
         }
         let chunks: Vec<&[u8]> = if message.is_empty() {
@@ -129,10 +135,10 @@ impl Session {
         let (flag, chunk) = plain[..length]
             .split_first()
             .ok_or(CryptoError::InvalidRecord("record is empty"))?;
-        if self.pending.len() + chunk.len() > self.max_message {
+        if self.pending.len() + chunk.len() > self.limits.receive {
             return Err(CryptoError::MessageTooLarge {
                 len: self.pending.len() + chunk.len(),
-                max: self.max_message,
+                max: self.limits.receive,
             });
         }
         self.pending.extend_from_slice(chunk);
@@ -152,7 +158,14 @@ mod tests {
 
     const LIMIT: usize = 1 << 20;
 
-    fn sessions(viewer_max: usize, agent_max: usize) -> (Session, Session) {
+    fn both(limit: usize) -> Limits {
+        Limits {
+            send: limit,
+            receive: limit,
+        }
+    }
+
+    fn sessions(viewer_max: Limits, agent_max: Limits) -> (Session, Session) {
         let agent = StaticKey::generate().unwrap();
         let device = StaticKey::generate().unwrap();
         let (handshake, first) =
@@ -185,7 +198,7 @@ mod tests {
 
     #[test]
     fn a_small_message_travels_in_one_record_both_ways() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let records = viewer.seal(b"hello agent").unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(open_all(&mut agent, &records), b"hello agent");
@@ -195,7 +208,7 @@ mod tests {
 
     #[test]
     fn an_empty_message_is_a_valid_message() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let records = viewer.seal(b"").unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(open_all(&mut agent, &records), b"");
@@ -203,7 +216,7 @@ mod tests {
 
     #[test]
     fn a_large_message_is_split_and_reassembled() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let message = pattern(LIMIT);
         let records = viewer.seal(&message).unwrap();
         assert_eq!(records.len(), LIMIT.div_ceil(MAX_CHUNK));
@@ -213,7 +226,7 @@ mod tests {
 
     #[test]
     fn a_message_exactly_at_the_chunk_size_uses_one_record() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let message = pattern(MAX_CHUNK);
         let records = viewer.seal(&message).unwrap();
         assert_eq!(records.len(), 1);
@@ -225,7 +238,7 @@ mod tests {
 
     #[test]
     fn many_messages_in_a_row_keep_their_boundaries() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         for length in [0, 1, 100, MAX_CHUNK, MAX_CHUNK + 5, 3 * MAX_CHUNK] {
             let message = pattern(length);
             let records = viewer.seal(&message).unwrap();
@@ -235,7 +248,7 @@ mod tests {
 
     #[test]
     fn sealing_refuses_a_message_over_the_limit() {
-        let (mut viewer, _agent) = sessions(100, LIMIT);
+        let (mut viewer, _agent) = sessions(both(100), both(LIMIT));
         assert_eq!(
             viewer.seal(&pattern(101)),
             Err(CryptoError::MessageTooLarge { len: 101, max: 100 })
@@ -245,7 +258,7 @@ mod tests {
 
     #[test]
     fn the_receiver_enforces_its_own_limit_while_reassembling() {
-        let (mut viewer, mut agent) = sessions(LIMIT, 100_000);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(100_000));
         let records = viewer.seal(&pattern(3 * MAX_CHUNK)).unwrap();
         assert!(agent.open(&records[0]).unwrap().is_none());
         assert!(matches!(
@@ -255,8 +268,27 @@ mod tests {
     }
 
     #[test]
+    fn each_direction_can_have_its_own_limit() {
+        let viewer_limits = Limits {
+            send: 4096,
+            receive: LIMIT,
+        };
+        let agent_limits = Limits {
+            send: LIMIT,
+            receive: 4096,
+        };
+        let (mut viewer, mut agent) = sessions(viewer_limits, agent_limits);
+        let large = pattern(500_000);
+        let records = agent.seal(&large).unwrap();
+        assert_eq!(open_all(&mut viewer, &records), large);
+        assert!(viewer.seal(&pattern(5000)).is_err());
+        let small = viewer.seal(&pattern(4096)).unwrap();
+        assert_eq!(open_all(&mut agent, &small), pattern(4096));
+    }
+
+    #[test]
     fn a_tampered_record_is_rejected_and_ends_the_session() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let mut records = viewer.seal(b"transfer money").unwrap();
         records[0][3] ^= 1;
         assert!(matches!(
@@ -270,7 +302,7 @@ mod tests {
 
     #[test]
     fn a_replayed_record_is_rejected() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let records = viewer.seal(b"once").unwrap();
         assert_eq!(agent.open(&records[0]).unwrap().unwrap(), b"once");
         assert!(agent.open(&records[0]).is_err());
@@ -278,7 +310,7 @@ mod tests {
 
     #[test]
     fn reordered_records_are_rejected() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let first = viewer.seal(b"first").unwrap();
         let second = viewer.seal(b"second").unwrap();
         assert!(agent.open(&second[0]).is_err());
@@ -287,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_dropped_record_is_detected() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let _lost = viewer.seal(b"lost").unwrap();
         let next = viewer.seal(b"next").unwrap();
         assert!(agent.open(&next[0]).is_err());
@@ -295,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_record_from_the_other_direction_is_rejected() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let records = viewer.seal(b"mine").unwrap();
         assert!(viewer.open(&records[0]).is_err());
         let other = agent.seal(b"theirs").unwrap();
@@ -304,25 +336,25 @@ mod tests {
 
     #[test]
     fn a_record_from_another_session_is_rejected() {
-        let (mut viewer_a, _agent_a) = sessions(LIMIT, LIMIT);
-        let (_viewer_b, mut agent_b) = sessions(LIMIT, LIMIT);
+        let (mut viewer_a, _agent_a) = sessions(both(LIMIT), both(LIMIT));
+        let (_viewer_b, mut agent_b) = sessions(both(LIMIT), both(LIMIT));
         let records = viewer_a.seal(b"cross").unwrap();
         assert!(agent_b.open(&records[0]).is_err());
     }
 
     #[test]
     fn malformed_record_sizes_are_rejected() {
-        let (_viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (_viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         assert!(matches!(
             agent.open(&[]),
             Err(CryptoError::InvalidRecord("record is too short"))
         ));
-        let (_viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (_viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         assert!(matches!(
             agent.open(&[0; TAG_LEN]),
             Err(CryptoError::InvalidRecord("record is too short"))
         ));
-        let (_viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (_viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         assert!(matches!(
             agent.open(&vec![0; MAX_RECORD + 1]),
             Err(CryptoError::InvalidRecord("record is too large"))
@@ -331,7 +363,7 @@ mod tests {
 
     #[test]
     fn an_unknown_record_flag_is_rejected() {
-        let (mut viewer, mut agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, mut agent) = sessions(both(LIMIT), both(LIMIT));
         let record = viewer.seal_record(7, b"payload").unwrap();
         assert_eq!(
             agent.open(&record),
@@ -341,17 +373,17 @@ mod tests {
 
     #[test]
     fn the_same_plaintext_never_produces_the_same_ciphertext_twice() {
-        let (mut viewer, _agent) = sessions(LIMIT, LIMIT);
+        let (mut viewer, _agent) = sessions(both(LIMIT), both(LIMIT));
         let first = viewer.seal(b"same").unwrap();
         let second = viewer.seal(b"same").unwrap();
         assert_ne!(first, second);
-        let (mut other, _agent) = sessions(LIMIT, LIMIT);
+        let (mut other, _agent) = sessions(both(LIMIT), both(LIMIT));
         assert_ne!(other.seal(b"same").unwrap(), first);
     }
 
     #[test]
     fn keys_are_rotated_in_step_on_both_sides() {
-        let (viewer, agent) = sessions(LIMIT, LIMIT);
+        let (viewer, agent) = sessions(both(LIMIT), both(LIMIT));
         let (mut viewer, mut agent) = (viewer.with_rekey_interval(3), agent.with_rekey_interval(3));
         for round in 0..20_u8 {
             let outbound = viewer.seal(&[round; 10]).unwrap();
@@ -363,7 +395,7 @@ mod tests {
 
     #[test]
     fn a_side_that_does_not_rotate_cannot_read_after_the_rotation() {
-        let (viewer, agent) = sessions(LIMIT, LIMIT);
+        let (viewer, agent) = sessions(both(LIMIT), both(LIMIT));
         let mut viewer = viewer.with_rekey_interval(2);
         let mut agent = agent.with_rekey_interval(1000);
         for _ in 0..2 {
