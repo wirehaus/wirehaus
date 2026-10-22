@@ -201,3 +201,153 @@ body {
   padding: 8px;
   background: #0d1117;
 }
+
+#files {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+.files-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-path {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.files-path .crumb {
+  padding: 2px 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.files-path .crumb:last-child {
+  color: var(--text);
+}
+
+.files-path .crumb + .crumb::before {
+  content: '/';
+  margin-right: 8px;
+  color: var(--border);
+}
+
+#files select,
+#files input[type='text'] {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+}
+
+#files button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.files-folder {
+  display: flex;
+  gap: 8px;
+}
+
+.files-folder input {
+  flex: 1;
+  max-width: 320px;
+}
+
+.files-notice {
+  min-height: 1.2em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.files-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.files-progress .transfer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.files-list table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.files-list th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+}
+
+.files-list td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--surface);
+}
+
+.files-list tr:hover td {
+  background: var(--surface);
+}
+
+.files-list .number {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.files-list .muted {
+  color: var(--muted);
+}
+
+.files-list .entry-name {
+  overflow-wrap: anywhere;
+}
+
+.files-list .directory {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
+}
+
+.files-list .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.files-empty {
+  color: var(--muted);
+  font-size: 14px;
+}

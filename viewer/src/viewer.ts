@@ -1,3 +1,4 @@
+import { FILES_CHANNEL, type FilesMessage, decodeFiles } from './filesprotocol.js';
 import { evdevCode } from './keymap.js';
 import {
   CODEC_JPEG,
@@ -22,6 +23,8 @@ import {
 import { Handshake, type Session, generateDeviceKey, loadCrypto } from './secure.js';
 import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './storage.js';
 import { VideoPlayer, videoSupported } from './video.js';
+
+export type FilesListener = (stream: number, message: FilesMessage) => void;
 
 export type TerminalListener = (stream: number, message: TerminalMessage) => void;
 
@@ -57,6 +60,7 @@ export class Viewer {
   private readonly pressedButtons = new Set<MouseButton>();
   private pendingMove: { x: number; y: number } | null = null;
   terminalListener: TerminalListener | null = null;
+  filesListener: FilesListener | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -236,6 +240,8 @@ export class Viewer {
       this.apply(decodeDesktop(frame.payload));
     } else if (this.phase === 'streaming' && frame.channel === TERMINAL_CHANNEL) {
       this.terminalListener?.(frame.stream, decodeTerminal(frame.payload));
+    } else if (this.phase === 'streaming' && frame.channel === FILES_CHANNEL) {
+      this.filesListener?.(frame.stream, decodeFiles(frame.payload));
     } else {
       this.fail(socket);
     }
@@ -327,6 +333,14 @@ export class Viewer {
 
   sendTerminal(stream: number, payload: Uint8Array): void {
     this.send(TERMINAL_CHANNEL, payload, stream);
+  }
+
+  sendFiles(stream: number, payload: Uint8Array): void {
+    this.send(FILES_CHANNEL, payload, stream);
+  }
+
+  bufferedBytes(): number {
+    return this.socket?.bufferedAmount ?? 0;
   }
 
   private send(channel: number, payload: Uint8Array, stream = 0): void {

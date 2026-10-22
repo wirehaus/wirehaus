@@ -1,3 +1,5 @@
+import type { FileFailure } from './filesprotocol.js';
+
 export type Messages = {
   loading: string;
   connecting: string;
@@ -30,6 +32,29 @@ export type Messages = {
   terminalNotAllowed: string;
   terminalTooMany: string;
   terminalSpawnFailed: string;
+  tabFiles: string;
+  filesNoRoots: string;
+  filesEmpty: string;
+  filesTruncated: string;
+  filesUp: string;
+  filesRefresh: string;
+  filesNewFolder: string;
+  filesFolderName: string;
+  filesCreate: string;
+  filesUpload: string;
+  filesDownload: string;
+  filesRemove: string;
+  filesConfirmRemove: string;
+  filesCancel: string;
+  filesColumnName: string;
+  filesColumnSize: string;
+  filesColumnModified: string;
+  filesDownloading: (name: string, percent: number) => string;
+  filesUploading: (name: string, percent: number) => string;
+  filesFinished: (name: string) => string;
+  filesTooBig: (name: string) => string;
+  filesFailure: Record<FileFailure, string>;
+  filesClosed: string;
 };
 
 const catalog: Record<string, Messages> = {
@@ -68,6 +93,42 @@ const catalog: Record<string, Messages> = {
       'La terminal está desactivada en el agente. Actívala en el ordenador de casa con "wirehaus-agent terminal allow --code".',
     terminalTooMany: 'Hay demasiadas terminales abiertas.',
     terminalSpawnFailed: 'No se pudo iniciar la terminal.',
+    tabFiles: 'Archivos',
+    filesNoRoots:
+      'No hay carpetas compartidas. Comparte una en el ordenador de casa con "wirehaus-agent files add <carpeta> --code".',
+    filesEmpty: 'Carpeta vacía.',
+    filesTruncated: 'Solo se muestran los primeros 1000 elementos.',
+    filesUp: 'Subir un nivel',
+    filesRefresh: 'Actualizar',
+    filesNewFolder: 'Nueva carpeta',
+    filesFolderName: 'Nombre de la carpeta',
+    filesCreate: 'Crear',
+    filesUpload: 'Subir archivos',
+    filesDownload: 'Descargar',
+    filesRemove: 'Borrar',
+    filesConfirmRemove: '¿Seguro?',
+    filesCancel: 'Cancelar',
+    filesColumnName: 'Nombre',
+    filesColumnSize: 'Tamaño',
+    filesColumnModified: 'Modificado',
+    filesDownloading: (name, percent) => `Descargando ${name}: ${percent} %`,
+    filesUploading: (name, percent) => `Subiendo ${name}: ${percent} %`,
+    filesFinished: (name) => `${name}: terminado.`,
+    filesTooBig: (name) => `${name} es demasiado grande para descargarlo en el navegador (máximo 1 GiB).`,
+    filesFailure: {
+      notAllowed: 'El agente no permite esta operación.',
+      noSuchRoot: 'La carpeta compartida ya no existe.',
+      invalidPath: 'La ruta no es válida.',
+      notFound: 'No existe.',
+      alreadyExists: 'Ya existe.',
+      notADirectory: 'No es una carpeta.',
+      notAFile: 'No es un archivo.',
+      notEmpty: 'La carpeta no está vacía.',
+      tooLarge: 'El archivo es demasiado grande.',
+      busy: 'Hay demasiadas transferencias a la vez.',
+      io: 'Ha ocurrido un error en el disco del agente.',
+    },
+    filesClosed: 'Desconectado.',
   },
   en: {
     loading: 'Loading',
@@ -104,6 +165,42 @@ const catalog: Record<string, Messages> = {
       'The terminal is disabled on the agent. Enable it on the home computer with "wirehaus-agent terminal allow --code".',
     terminalTooMany: 'Too many terminals are open.',
     terminalSpawnFailed: 'The terminal could not be started.',
+    tabFiles: 'Files',
+    filesNoRoots:
+      'No folders are shared. Share one on the home computer with "wirehaus-agent files add <folder> --code".',
+    filesEmpty: 'Empty folder.',
+    filesTruncated: 'Only the first 1000 items are shown.',
+    filesUp: 'Up one level',
+    filesRefresh: 'Refresh',
+    filesNewFolder: 'New folder',
+    filesFolderName: 'Folder name',
+    filesCreate: 'Create',
+    filesUpload: 'Upload files',
+    filesDownload: 'Download',
+    filesRemove: 'Delete',
+    filesConfirmRemove: 'Sure?',
+    filesCancel: 'Cancel',
+    filesColumnName: 'Name',
+    filesColumnSize: 'Size',
+    filesColumnModified: 'Modified',
+    filesDownloading: (name, percent) => `Downloading ${name}: ${percent}%`,
+    filesUploading: (name, percent) => `Uploading ${name}: ${percent}%`,
+    filesFinished: (name) => `${name}: done.`,
+    filesTooBig: (name) => `${name} is too large to download in the browser (1 GiB maximum).`,
+    filesFailure: {
+      notAllowed: 'The agent does not allow this operation.',
+      noSuchRoot: 'The shared folder no longer exists.',
+      invalidPath: 'The path is not valid.',
+      notFound: 'It does not exist.',
+      alreadyExists: 'It already exists.',
+      notADirectory: 'It is not a folder.',
+      notAFile: 'It is not a file.',
+      notEmpty: 'The folder is not empty.',
+      tooLarge: 'The file is too large.',
+      busy: 'Too many transfers at once.',
+      io: 'A disk error occurred on the agent.',
+    },
+    filesClosed: 'Disconnected.',
   },
 };
 

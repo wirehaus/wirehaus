@@ -4,6 +4,7 @@ import {
   encodeTerminalOpen,
   encodeTerminalResize,
 } from './protocol.js';
+import { FilesPanel } from './files.js';
 import { type Messages, messagesFor } from './strings.js';
 import { Terminals } from './terminals.js';
 import { Viewer, type ViewerState } from './viewer.js';
@@ -27,6 +28,7 @@ const codePanel = element<HTMLElement>('code');
 const screen = element<HTMLCanvasElement>('screen');
 const tabs = element<HTMLElement>('tabs');
 const terminalHost = element<HTMLElement>('terminals');
+const filesHost = element<HTMLElement>('files');
 const pairForm = element<HTMLFormElement>('pair-form');
 const pairCode = element<HTMLInputElement>('pair-code');
 const pairName = element<HTMLInputElement>('pair-name');
@@ -105,10 +107,12 @@ function show(state: ViewerState): void {
       break;
     case 'refused':
       terminals.endAll();
+      files.reset();
       status.textContent = refusal(state, messages);
       break;
     case 'closed':
       terminals.endAll();
+      files.reset();
       status.textContent = messages.closed;
       break;
   }
@@ -140,11 +144,61 @@ const terminals = new Terminals(
 );
 viewer.terminalListener = (stream, message) => terminals.receive(stream, message);
 
+const filesTexts = messages;
+const files = new FilesPanel(
+  filesHost,
+  { send: (stream, payload) => viewer.sendFiles(stream, payload), buffered: () => viewer.bufferedBytes() },
+  {
+    noRoots: filesTexts.filesNoRoots,
+    empty: filesTexts.filesEmpty,
+    truncated: filesTexts.filesTruncated,
+    up: filesTexts.filesUp,
+    refresh: filesTexts.filesRefresh,
+    newFolder: filesTexts.filesNewFolder,
+    folderName: filesTexts.filesFolderName,
+    create: filesTexts.filesCreate,
+    upload: filesTexts.filesUpload,
+    download: filesTexts.filesDownload,
+    remove: filesTexts.filesRemove,
+    confirmRemove: filesTexts.filesConfirmRemove,
+    cancel: filesTexts.filesCancel,
+    columnName: filesTexts.filesColumnName,
+    columnSize: filesTexts.filesColumnSize,
+    columnModified: filesTexts.filesColumnModified,
+    downloading: filesTexts.filesDownloading,
+    uploading: filesTexts.filesUploading,
+    finished: filesTexts.filesFinished,
+    tooBig: filesTexts.filesTooBig,
+    failure: (reason) => filesTexts.filesFailure[reason],
+    closed: filesTexts.filesClosed,
+  },
+);
+viewer.filesListener = (stream, message) => files.receive(stream, message);
+
+let filesOpen = false;
+
 function showView(): void {
   const connected = lastKind === 'connected';
   const onTerminal = terminals.activeStream() !== null;
-  screen.hidden = !connected || onTerminal;
+  screen.hidden = !connected || onTerminal || filesOpen;
   terminalHost.hidden = !connected || !onTerminal;
+  filesHost.hidden = !connected || onTerminal || !filesOpen;
+}
+
+function selectDesktop(): void {
+  filesOpen = false;
+  terminals.activate(null);
+}
+
+function selectFiles(): void {
+  filesOpen = true;
+  terminals.activate(null);
+  files.show();
+}
+
+function selectTerminal(stream: number): void {
+  filesOpen = false;
+  terminals.activate(stream);
 }
 
 function tabButton(label: string, selected: boolean, onSelect: () => void): HTMLButtonElement {
@@ -161,10 +215,11 @@ function tabButton(label: string, selected: boolean, onSelect: () => void): HTML
 function renderTabs(): void {
   const active = terminals.activeStream();
   const items: HTMLElement[] = [
-    tabButton(messages.tabDesktop, active === null, () => terminals.activate(null)),
+    tabButton(messages.tabDesktop, active === null && !filesOpen, selectDesktop),
+    tabButton(messages.tabFiles, active === null && filesOpen, selectFiles),
   ];
   for (const stream of terminals.streams()) {
-    const wrapper = tabButton(messages.terminalTitle(stream), active === stream, () => terminals.activate(stream));
+    const wrapper = tabButton(messages.terminalTitle(stream), active === stream, () => selectTerminal(stream));
     const close = document.createElement('span');
     close.className = 'close';
     close.setAttribute('role', 'button');
@@ -174,7 +229,7 @@ function renderTabs(): void {
       event.stopPropagation();
       terminals.close(stream);
       if (terminals.activeStream() === null) {
-        terminals.activate(null);
+        selectDesktop();
       }
     });
     wrapper.append(close);
@@ -186,7 +241,10 @@ function renderTabs(): void {
   add.setAttribute('aria-label', messages.newTerminal);
   add.title = messages.newTerminal;
   add.textContent = '+';
-  add.addEventListener('click', () => terminals.create());
+  add.addEventListener('click', () => {
+    filesOpen = false;
+    terminals.create();
+  });
   items.push(add);
   tabs.replaceChildren(...items);
   showView();
