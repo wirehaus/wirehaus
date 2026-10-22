@@ -6,6 +6,7 @@ pub mod lockout;
 pub mod pairing;
 mod random;
 pub mod session;
+pub mod ticket;
 pub mod totp;
 
 pub use error::CryptoError;
