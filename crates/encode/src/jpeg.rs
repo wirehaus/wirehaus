@@ -32,6 +32,10 @@ impl TileEncoder for JpegEncoder {
         Codec::Jpeg
     }
 
+    fn set_quality(&mut self, quality: u8) {
+        self.quality = quality.clamp(1, 100);
+    }
+
     fn encode(&mut self, bitmap: &Bitmap, rect: Rect) -> Result<Vec<u8>, EncodeError> {
         ensure_inside(bitmap, rect)?;
         let pixels = bitmap.crop(rect);
@@ -149,6 +153,45 @@ mod tests {
             JpegEncoder::default().encode(&bitmap, rect),
             Err(EncodeError::OutOfBounds { .. })
         ));
+    }
+
+    #[test]
+    fn changes_the_quality_in_range() {
+        let mut encoder = JpegEncoder::new(70);
+        encoder.set_quality(30);
+        assert_eq!(encoder.quality, 30);
+        encoder.set_quality(0);
+        assert_eq!(encoder.quality, 1);
+        encoder.set_quality(200);
+        assert_eq!(encoder.quality, 100);
+    }
+
+    #[test]
+    fn lower_quality_gives_smaller_output() {
+        let width = 64;
+        let height = 64;
+        let mut data = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                let noise = u8::try_from((x * 37 + y * 91 + x * y) % 256).unwrap();
+                data.extend_from_slice(&[
+                    noise,
+                    noise.wrapping_mul(3),
+                    noise.wrapping_add(80),
+                    255,
+                ]);
+            }
+        }
+        let bitmap = Bitmap::new(width, height, data).unwrap();
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
+        let high = JpegEncoder::new(90).encode(&bitmap, rect).unwrap().len();
+        let low = JpegEncoder::new(30).encode(&bitmap, rect).unwrap().len();
+        assert!(low < high, "{low} >= {high}");
     }
 
     #[test]
