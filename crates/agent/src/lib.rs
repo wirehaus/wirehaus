@@ -6,6 +6,7 @@ mod server;
 mod session;
 pub mod state;
 mod static_files;
+pub mod store;
 
 pub use error::ServerError;
 pub use server::{Server, ServerConfig};
