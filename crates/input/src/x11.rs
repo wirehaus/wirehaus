@@ -6,6 +6,7 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::protocol::xtest::ConnectionExt;
 use x11rb::rust_connection::RustConnection;
+use x11rb::wrapper::ConnectionExt as _;
 
 use crate::InputSink;
 use crate::error::InputError;
@@ -119,7 +120,7 @@ impl InputSink for X11Input {
         for button in buttons {
             self.fake(BUTTON_RELEASE_EVENT, button_number(button), 0, 0)?;
         }
-        self.connection.flush().map_err(request_error)
+        self.connection.sync().map_err(request_error)
     }
 }
 

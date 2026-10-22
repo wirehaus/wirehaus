@@ -580,7 +580,8 @@ fn a_dropped_viewer_leaves_no_key_or_button_held_down() {
     while held_input(&xvfb.display) != (false, false) {
         assert!(
             Instant::now() < deadline,
-            "the agent left input held down after the viewer vanished"
+            "the agent left input held down after the viewer vanished: {:?}",
+            held_input(&xvfb.display)
         );
         sleep(Duration::from_millis(20));
     }
