@@ -61,7 +61,7 @@ impl EndReason {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ControlMessage {
     AuthRequired,
     Totp {
@@ -81,6 +81,30 @@ pub enum ControlMessage {
     SessionEnded {
         reason: EndReason,
     },
+}
+
+impl std::fmt::Debug for ControlMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ControlMessage::AuthRequired => f.write_str("AuthRequired"),
+            ControlMessage::Totp { .. } => f.write_str("Totp { .. }"),
+            ControlMessage::AuthOk => f.write_str("AuthOk"),
+            ControlMessage::AuthFailed {
+                reason,
+                retry_after,
+            } => f
+                .debug_struct("AuthFailed")
+                .field("reason", reason)
+                .field("retry_after", retry_after)
+                .finish(),
+            ControlMessage::Resume { .. } => f.write_str("Resume { .. }"),
+            ControlMessage::Ticket { .. } => f.write_str("Ticket { .. }"),
+            ControlMessage::SessionEnded { reason } => f
+                .debug_struct("SessionEnded")
+                .field("reason", reason)
+                .finish(),
+        }
+    }
 }
 
 const AUTH_REQUIRED: u8 = 0;
@@ -369,6 +393,34 @@ mod tests {
         assert_eq!(
             ControlMessage::decode(&[3, 9, 0, 0, 0, 0]),
             Err(ProtocolError::InvalidControl(9))
+        );
+    }
+
+    #[test]
+    fn debug_output_never_shows_a_code_or_a_ticket() {
+        let code = ControlMessage::Totp { code: *b"482913" };
+        assert_eq!(format!("{code:?}"), "Totp { .. }");
+        for message in [
+            ControlMessage::Resume {
+                ticket: [0xAB; TICKET_LEN],
+            },
+            ControlMessage::Ticket {
+                ticket: [0xCD; TICKET_LEN],
+            },
+        ] {
+            let text = format!("{message:?}");
+            assert!(text.ends_with("{ .. }"), "{text}");
+            assert!(!text.contains("171") && !text.contains("205"), "{text}");
+        }
+        assert_eq!(
+            format!(
+                "{:?}",
+                ControlMessage::AuthFailed {
+                    reason: AuthFailure::Locked,
+                    retry_after: 30
+                }
+            ),
+            "AuthFailed { reason: Locked, retry_after: 30 }"
         );
     }
 }
