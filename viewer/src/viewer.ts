@@ -349,7 +349,6 @@ export class Viewer {
         this.ticket = null;
         this.stopRetrying();
         this.report({ kind: 'refused', reason: message.reason, retryAfter: message.retryAfter });
-        void socket;
         return;
       case 'ticket':
       case 'sessionEnded':
@@ -400,7 +399,7 @@ export class Viewer {
     }
     if (message.kind === 'frameEnd') {
       const sequence = message.sequence;
-      this.drawing = this.drawing.then(() => this.acknowledge(sequence));
+      this.drawing = this.drawing.then(() => this.acknowledge(sequence)).catch(() => undefined);
       return;
     }
     if (message.codec !== CODEC_JPEG) {
