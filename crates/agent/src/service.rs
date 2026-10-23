@@ -196,6 +196,7 @@ mod launchd {
         LABEL, ServiceConfig, ServiceError, bootout_arguments, bootstrap_arguments, log_dir, plist,
         plist_path, print_arguments, running,
     };
+    use crate::i18n::tr;
     use crate::static_files::Viewer;
     use crate::store::{Store, system_clock};
 
