@@ -73,11 +73,12 @@ fn serve(
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
         ticks = ticks.wrapping_add(1);
-        if ticks.is_multiple_of(REVOCATION_CHECK_TICKS)
-            && let Some(reason) = (policy.revoked)()
-        {
-            end_session(&mut link, reason);
-            return Err(ServerError::AccessRevoked);
+        if ticks.is_multiple_of(REVOCATION_CHECK_TICKS) {
+            if let Some(reason) = (policy.revoked)() {
+                end_session(&mut link, reason);
+                return Err(ServerError::AccessRevoked);
+            }
+            withdraw_terminals(&mut link, &mut terminals, policy)?;
         }
         if files.active() == 0 && last_activity.elapsed() >= policy.idle_timeout {
             end_session(&mut link, EndReason::Idle);
@@ -123,6 +124,25 @@ fn serve(
         }
     }
     link.close();
+    Ok(())
+}
+
+fn withdraw_terminals(
+    link: &mut Link,
+    terminals: &mut Terminals,
+    policy: &Policy,
+) -> Result<(), ServerError> {
+    if terminals.count() == 0 || (policy.terminal_allowed)() {
+        return Ok(());
+    }
+    (policy.audit)(
+        "terminal_withdrawn",
+        "the permission was removed during the session",
+    );
+    for stream in terminals.close_all() {
+        let ended = TerminalMessage::Exited { code: -1 };
+        link.send_frame(&Frame::new(Channel::Terminal, stream, ended.encode())?)?;
+    }
     Ok(())
 }
 

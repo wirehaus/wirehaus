@@ -2,12 +2,15 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 use std::thread;
+use std::time::{Duration, Instant};
 
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
 use wirehaus_protocol::{MAX_OUTPUT_CHUNK, RefusalReason};
 
 pub const MAX_SESSIONS: usize = 4;
 const QUEUE_CHUNKS: usize = 64;
+const EXIT_GRACE: Duration = Duration::from_millis(500);
+const EXIT_POLL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Event {
@@ -15,7 +18,10 @@ pub enum Event {
     Exited { stream: u32, code: i32 },
 }
 
+type Tagged = (u64, Event);
+
 struct Session {
+    generation: u64,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
@@ -23,9 +29,10 @@ struct Session {
 
 pub struct Terminals {
     sessions: HashMap<u32, Session>,
-    sender: SyncSender<Event>,
-    events: Receiver<Event>,
+    sender: SyncSender<Tagged>,
+    events: Receiver<Tagged>,
     program: String,
+    next_generation: u64,
 }
 
 impl std::fmt::Debug for Terminals {
@@ -56,6 +63,7 @@ impl Terminals {
             sender,
             events,
             program,
+            next_generation: 0,
         }
     }
 
@@ -87,6 +95,8 @@ impl Terminals {
             .take_writer()
             .map_err(|_| RefusalReason::SpawnFailed)?;
         let sender = self.sender.clone();
+        let generation = self.next_generation;
+        self.next_generation += 1;
         thread::spawn(move || {
             let mut buffer = vec![0_u8; MAX_OUTPUT_CHUNK];
             while let Ok(count) = reader.read(&mut buffer) {
@@ -94,15 +104,19 @@ impl Terminals {
                     break;
                 }
                 let data = buffer[..count].to_vec();
-                if sender.send(Event::Output { stream, data }).is_err() {
+                if sender
+                    .send((generation, Event::Output { stream, data }))
+                    .is_err()
+                {
                     return;
                 }
             }
-            let _ = sender.send(Event::Exited { stream, code: 0 });
+            let _ = sender.send((generation, Event::Exited { stream, code: 0 }));
         });
         self.sessions.insert(
             stream,
             Session {
+                generation,
                 master: pair.master,
                 writer,
                 child,
@@ -134,39 +148,67 @@ impl Terminals {
         }
     }
 
-    pub fn close_all(&mut self) {
-        let open: Vec<u32> = self.sessions.keys().copied().collect();
-        for stream in open {
+    pub fn close_all(&mut self) -> Vec<u32> {
+        let mut open: Vec<u32> = self.sessions.keys().copied().collect();
+        open.sort_unstable();
+        for &stream in &open {
             self.close(stream);
         }
+        open
     }
 
     pub fn drain(&mut self, limit: usize) -> Vec<Event> {
         let mut out = Vec::new();
         while out.len() < limit {
             match self.events.try_recv() {
-                Ok(Event::Exited { stream, .. }) => {
-                    let code = self.finish(stream);
-                    out.push(Event::Exited { stream, code });
-                }
-                Ok(event) => out.push(event),
+                Ok((generation, event)) => out.extend(self.accept(generation, event)),
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
         }
         out
     }
 
-    fn finish(&mut self, stream: u32) -> i32 {
-        let Some(mut session) = self.sessions.remove(&stream) else {
-            return 0;
-        };
-        session
-            .child
-            .wait()
-            .ok()
-            .and_then(|status| i32::try_from(status.exit_code()).ok())
-            .unwrap_or(-1)
+    fn accept(&mut self, generation: u64, event: Event) -> Option<Event> {
+        let (Event::Output { stream, .. } | Event::Exited { stream, .. }) = &event;
+        let stream = *stream;
+        if self
+            .sessions
+            .get(&stream)
+            .is_none_or(|session| session.generation != generation)
+        {
+            return None;
+        }
+        match event {
+            Event::Exited { .. } => Some(Event::Exited {
+                stream,
+                code: self.finish(stream),
+            }),
+            output @ Event::Output { .. } => Some(output),
+        }
     }
+
+    fn finish(&mut self, stream: u32) -> i32 {
+        self.sessions
+            .remove(&stream)
+            .map_or(0, |mut session| reap(session.child.as_mut()))
+    }
+}
+
+fn reap(child: &mut dyn Child) -> i32 {
+    let deadline = Instant::now() + EXIT_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return exit_code(&status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(EXIT_POLL),
+            _ => break,
+        }
+    }
+    let _ = child.kill();
+    child.wait().map_or(-1, |status| exit_code(&status))
+}
+
+fn exit_code(status: &ExitStatus) -> i32 {
+    i32::try_from(status.exit_code()).unwrap_or(-1)
 }
 
 impl Drop for Terminals {
@@ -321,6 +363,54 @@ mod tests {
         assert!(contains(&seen, "line-0"));
         assert!(contains(&seen, "line-2999"));
         assert!(contains(&seen, "finished-2marker"));
+    }
+
+    #[test]
+    fn a_stream_number_can_be_reused_after_closing_it() {
+        let mut terminals = shell();
+        terminals.open(1, 80, 24).unwrap();
+        terminals.close(1);
+        terminals.open(1, 80, 24).unwrap();
+        thread::sleep(Duration::from_millis(300));
+        assert!(
+            terminals
+                .drain(64)
+                .iter()
+                .all(|event| !matches!(event, Event::Exited { .. }))
+        );
+        assert_eq!(terminals.count(), 1);
+        assert!(terminals.input(1, b"echo again-$((20+22))\n"));
+        let seen = collect_until(&mut terminals, |seen| contains(seen, "again-42"));
+        assert!(contains(&seen, "again-42"));
+    }
+
+    #[test]
+    fn a_shell_that_drops_its_terminal_without_exiting_does_not_block_the_agent() {
+        let mut terminals = shell();
+        terminals.open(1, 80, 24).unwrap();
+        terminals.input(1, b"exec sleep 30 <&- >&- 2>&-\n");
+        let started = Instant::now();
+        let mut exited = false;
+        while !exited && started.elapsed() < Duration::from_secs(10) {
+            exited = terminals
+                .drain(64)
+                .iter()
+                .any(|event| matches!(event, Event::Exited { .. }));
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(exited);
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(terminals.count(), 0);
+    }
+
+    #[test]
+    fn closing_everything_reports_which_streams_were_open() {
+        let mut terminals = shell();
+        terminals.open(5, 80, 24).unwrap();
+        terminals.open(2, 80, 24).unwrap();
+        assert_eq!(terminals.close_all(), [2, 5]);
+        assert_eq!(terminals.count(), 0);
+        assert_eq!(terminals.close_all(), Vec::<u32>::new());
     }
 
     #[test]

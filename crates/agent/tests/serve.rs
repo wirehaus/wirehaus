@@ -1307,6 +1307,65 @@ fn a_terminal_is_refused_until_the_owner_allows_it_and_then_runs_commands() {
 }
 
 #[test]
+fn removing_the_terminal_permission_closes_the_terminals_that_are_open() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    server
+        .store
+        .update(|state, _| state.set_terminal_allowed(true))
+        .unwrap();
+    for stream in [3, 4] {
+        send_terminal(
+            &mut client,
+            stream,
+            &TerminalMessage::Open {
+                columns: 80,
+                rows: 24,
+            },
+        );
+    }
+    send_terminal(
+        &mut client,
+        3,
+        &TerminalMessage::Input(b"echo alive-$((6*7))\n".to_vec()),
+    );
+    let seen = terminal_text_until(&mut client, 3, "alive-42");
+    assert!(seen.contains("alive-42"), "{seen}");
+
+    server
+        .store
+        .update(|state, _| state.set_terminal_allowed(false))
+        .unwrap();
+    let mut ended = std::collections::BTreeSet::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while ended.len() < 2 && Instant::now() < deadline {
+        if let (stream, TerminalMessage::Exited { .. }) = next_terminal(&mut client) {
+            ended.insert(stream);
+        }
+    }
+    assert_eq!(ended.into_iter().collect::<Vec<_>>(), [3, 4]);
+    send_terminal(
+        &mut client,
+        3,
+        &TerminalMessage::Input(b"echo still-here\n".to_vec()),
+    );
+    send_terminal(
+        &mut client,
+        6,
+        &TerminalMessage::Open {
+            columns: 80,
+            rows: 24,
+        },
+    );
+    assert_eq!(
+        next_terminal(&mut client),
+        (6, TerminalMessage::Refused(RefusalReason::NotAllowed))
+    );
+}
+
+#[test]
 fn terminal_sessions_are_independent_and_limited() {
     let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
