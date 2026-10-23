@@ -384,6 +384,7 @@ mod tests {
         assert!(contains(&seen, "again-42"));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_shell_that_drops_its_terminal_without_exiting_does_not_block_the_agent() {
         let mut terminals = shell();
