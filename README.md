@@ -41,6 +41,7 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 - Cifrado de extremo a extremo con Noise (`snow`, ChaCha20-Poly1305), con la clave del agente fijada en el emparejamiento. El túnel y quien lo opere ven solo bytes opacos.
 - Dispositivo emparejado con un código de un solo uso de 160 bits y segundo factor TOTP que verifica el agente. Ninguna de las dos cosas basta por sí sola.
 - Bloqueo creciente por dispositivo, suspensión tras diez fallos y registro de accesos sin secretos.
+- Clave y secreto del segundo factor opcionalmente en el almacén de claves del sistema, fuera del fichero de estado.
 - Terminal, archivos y portapapeles desactivados por defecto. Activarlos exige un código del segundo factor en el propio ordenador.
 - Cierre automático por inactividad (30 minutos por defecto).
 - Sin `unsafe` en el código propio, entradas validadas antes de reservar memoria y pruebas con datos hostiles en cada canal.
@@ -92,6 +93,8 @@ cargo run -p wirehaus-agent -- serve --viewer-dir viewer/dist
 
 El agente guarda su estado en `~/.config/wirehaus` (o en `--state-dir`), solo legible por su dueño. `devices` lista los dispositivos emparejados; `devices revoke`, `devices reactivate`, `lock` y `unlock` exigen un código del segundo factor con `--code`. Con `--display` eliges otra pantalla de X11 y con `--listen` otro puerto de la máquina local. Los mensajes salen en español o en inglés según `LANG`.
 
+Los secretos del agente (su clave privada y el secreto del segundo factor) viven por defecto en el fichero de estado, con permisos privados. Puedes moverlos al almacén de claves del sistema con `wirehaus-agent secrets use system` y volver con `secrets use file --code 123456`; `secrets status` dice dónde están. En Linux hace falta `secret-tool` (paquete `libsecret-tools`) y un servicio de secretos desbloqueado, normalmente el de tu sesión de escritorio. Es opcional a propósito: si el almacén está bloqueado tras un reinicio, el agente no arranca hasta que lo desbloqueas, y si lo pierdes hay que volver a ejecutar `init` y emparejar de nuevo.
+
 Para activar los demás canales, siempre en el ordenador y con un código del segundo factor:
 
 ```
@@ -113,6 +116,7 @@ Quitarlos no exige código: `terminal deny`, `files remove <carpeta>` y `clipboa
 | `crates/encode` | Codificación de las zonas cambiadas en JPEG y H.264 |
 | `crates/input` | Inyección de ratón y teclado |
 | `crates/clipboard` | Acceso al portapapeles del sistema |
+| `crates/vault` | Acceso al almacén de claves del sistema (Llavero, Administrador de credenciales, servicio de secretos) |
 | `crates/agent` | Agente que se ejecuta en el ordenador de casa |
 | `viewer` | Visor que corre en el navegador |
 

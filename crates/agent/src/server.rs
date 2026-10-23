@@ -16,7 +16,7 @@ use crate::pacer::Pacer;
 use crate::platform;
 use crate::session::{self, Policy};
 use crate::static_files::Viewer;
-use crate::store::{Clock, Store, system_clock};
+use crate::store::{Clock, Store, VaultSource, system_clock, system_vault};
 use crate::stream::Stream;
 use wirehaus_crypto::keys::PublicKey;
 use wirehaus_crypto::ticket::Tickets;
@@ -41,6 +41,7 @@ pub struct ServerConfig {
     pub jpeg_quality: u8,
     pub state_dir: PathBuf,
     pub clock: Option<Clock>,
+    pub vault: Option<VaultSource>,
     pub idle_timeout: Duration,
     pub viewer_hash: Option<String>,
     pub exposure: Exposure,
@@ -125,7 +126,8 @@ impl Server {
         })?;
         listener.set_nonblocking(true)?;
         let clock = config.clock.clone().unwrap_or_else(system_clock);
-        let store = Arc::new(Store::open(&config.state_dir, clock)?);
+        let vault = config.vault.clone().unwrap_or_else(system_vault);
+        let store = Arc::new(Store::open_with(&config.state_dir, clock, vault)?);
         let viewer = Viewer::open(&config.viewer_dir, config.viewer_hash.as_deref())?;
         let clipboard = Arc::new(Hub::new(platform::clipboard_factory(
             config.display.clone(),

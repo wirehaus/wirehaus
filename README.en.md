@@ -41,6 +41,7 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 - End-to-end encryption with Noise (`snow`, ChaCha20-Poly1305), with the agent key pinned at pairing. The tunnel and whoever runs it see only opaque bytes.
 - A device paired with a one-time 160-bit code, plus a TOTP second factor verified by the agent. Neither is enough on its own.
 - Escalating lockout per device, suspension after ten failures and an access log with no secrets.
+- The key and the second factor secret can optionally live in the system secret store, outside the state file.
 - Terminal, files and clipboard are off by default. Enabling them needs a second factor code on the computer itself.
 - Automatic close on inactivity (30 minutes by default).
 - No `unsafe` in our own code, inputs validated before allocating memory and tests with hostile data on every channel.
@@ -92,6 +93,8 @@ cargo run -p wirehaus-agent -- serve --viewer-dir viewer/dist
 
 The agent keeps its state in `~/.config/wirehaus` (or `--state-dir`), readable only by its owner. `devices` lists the paired devices; `devices revoke`, `devices reactivate`, `lock` and `unlock` need a second factor code with `--code`. `--display` picks another X11 display and `--listen` another port on the local machine. Messages come out in Spanish or English according to `LANG`.
 
+The agent secrets (its private key and the second factor secret) live by default in the state file, with private permissions. You can move them to the system secret store with `wirehaus-agent secrets use system` and back with `secrets use file --code 123456`; `secrets status` tells you where they are. On Linux you need `secret-tool` (package `libsecret-tools`) and an unlocked secret service, normally the one of your desktop session. It is optional on purpose: if the store is locked after a reboot the agent will not start until you unlock it, and if you lose it you must run `init` again and pair again.
+
 To enable the other channels, always on the computer and with a second factor code:
 
 ```
@@ -113,6 +116,7 @@ Removing them needs no code: `terminal deny`, `files remove <folder>` and `clipb
 | `crates/encode` | JPEG and H.264 encoding of the changed regions |
 | `crates/input` | Mouse and keyboard injection |
 | `crates/clipboard` | System clipboard access |
+| `crates/vault` | Access to the system secret store (Keychain, Credential Manager, secret service) |
 | `crates/agent` | The agent that runs on the home computer |
 | `viewer` | The viewer that runs in the browser |
 

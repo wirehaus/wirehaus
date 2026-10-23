@@ -44,6 +44,10 @@ pub enum Command {
         #[command(subcommand)]
         action: FilesAction,
     },
+    Secrets {
+        #[command(subcommand)]
+        action: SecretsAction,
+    },
     Lock {
         #[arg(long)]
         code: String,
@@ -148,5 +152,22 @@ pub enum DeviceAction {
         device: String,
         #[arg(long)]
         code: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum SecretsTarget {
+    System,
+    File,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SecretsAction {
+    Status,
+    Use {
+        #[arg(value_enum)]
+        target: SecretsTarget,
+        #[arg(long)]
+        code: Option<String>,
     },
 }

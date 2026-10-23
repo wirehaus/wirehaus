@@ -34,6 +34,10 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Motivo de rechazo `Unavailable`: el visor autenticado sabe que el agente no puede capturar la pantalla o controlar el equipo, y lo muestra con una indicación en vez de un fallo genérico de conexión.
 - `scripts/macos-sign.sh`: firma el binario con una identidad estable para que macOS conserve los permisos entre versiones.
 
+### Añadido
+
+- Los secretos del agente (clave privada y secreto del segundo factor) pueden guardarse en el almacén de claves del sistema en lugar del fichero de estado: `wirehaus-agent secrets status`, `secrets use system` y `secrets use file --code`. En Linux usa `secret-tool`; en macOS y Windows, el Llavero y el Administrador de credenciales. Es opcional y el fichero sigue siendo el valor por defecto.
+
 ### Cambiado
 
 - Las tramas usan una cabecera fija de nueve bytes (canal, flujo y longitud) en lugar de una librería de serialización, lo que deja el protocolo sin dependencias de serialización.

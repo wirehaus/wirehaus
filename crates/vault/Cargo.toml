@@ -1,0 +1,24 @@
+[package]
+name = "wirehaus-vault"
+description = "Access to the secret store of the operating system for the Wirehaus agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../LICENSE"
+publish.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", default-features = false, features = ["keychain"] }
+keyring-core = "1"
+
+[target.'cfg(windows)'.dependencies]
+keyring-core = "1"
+windows-native-keyring-store = { version = "1", default-features = false }
+
+[lints]
+workspace = true

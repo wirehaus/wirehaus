@@ -6,7 +6,7 @@ use wirehaus_crypto::lockout::Denied;
 use wirehaus_crypto::pairing::VALIDITY_SECONDS;
 
 use crate::i18n::tr;
-use crate::state::{AuthError, ClipboardMode, State, StateError};
+use crate::state::{AuthError, ClipboardMode, SecretStorage, State, StateError};
 use crate::store::{Clock, Store, StoreError};
 
 const ISSUER: &str = "Wirehaus";
@@ -434,6 +434,69 @@ pub fn terminal(
     Ok(())
 }
 
+pub fn secrets_status(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
+    let storage = store.storage()?;
+    writeln!(
+        out,
+        "{}",
+        match storage {
+            SecretStorage::File => tr!(
+                "Los secretos del agente están en el fichero de estado (solo legible por su dueño).",
+                "The agent secrets are in the state file (readable only by its owner)."
+            ),
+            SecretStorage::System => tr!(
+                "Los secretos del agente están en el almacén de claves del sistema.",
+                "The agent secrets are in the system vault."
+            ),
+        }
+    )?;
+    Ok(())
+}
+
+pub fn secrets_use(
+    store: &Store,
+    target: SecretStorage,
+    code: Option<&str>,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    if target == SecretStorage::File {
+        verify(store, code.unwrap_or_default())?;
+    }
+    let moved = store.move_secrets(target)?;
+    if moved {
+        store.log(
+            match target {
+                SecretStorage::File => "secrets_to_file",
+                SecretStorage::System => "secrets_to_system",
+            },
+            "by the local administrator",
+        );
+    }
+    writeln!(
+        out,
+        "{}",
+        match (target, moved) {
+            (SecretStorage::System, true) => tr!(
+                "Los secretos se han movido al almacén de claves del sistema. Reinicia el agente si está en marcha para que lo compruebe al arrancar.",
+                "The secrets were moved to the system vault. Restart the agent if it is running so it checks the vault at startup."
+            ),
+            (SecretStorage::File, true) => tr!(
+                "Los secretos vuelven a estar en el fichero de estado y se han borrado del almacén del sistema.",
+                "The secrets are back in the state file and were removed from the system vault."
+            ),
+            (SecretStorage::System, false) => tr!(
+                "Los secretos ya estaban en el almacén de claves del sistema.",
+                "The secrets were already in the system vault."
+            ),
+            (SecretStorage::File, false) => tr!(
+                "Los secretos ya estaban en el fichero de estado.",
+                "The secrets were already in the state file."
+            ),
+        }
+    )?;
+    Ok(())
+}
+
 fn verify(store: &Store, code: &str) -> Result<(), CommandError> {
     match store.update(|state, now| state.verify_local(code, now))? {
         Ok(()) => Ok(()),
@@ -529,6 +592,72 @@ mod tests {
 
     fn text(out: Vec<u8>) -> String {
         String::from_utf8(out).unwrap()
+    }
+
+    fn with_vault() -> (TempDir, Store, Arc<AtomicU64>, wirehaus_vault::MemoryVault) {
+        let dir = TempDir::new();
+        let time = Arc::new(AtomicU64::new(1_000_000));
+        init(&dir.0, clock(&time), &mut Vec::new()).unwrap();
+        let vault = wirehaus_vault::MemoryVault::new();
+        let source: crate::store::VaultSource = {
+            let vault = vault.clone();
+            Arc::new(move || Ok(Box::new(vault.clone()) as Box<dyn wirehaus_vault::Vault>))
+        };
+        let store = Store::open_with(&dir.0, clock(&time), source).unwrap();
+        (dir, store, time, vault)
+    }
+
+    #[test]
+    fn the_secrets_go_to_the_vault_freely_and_come_back_only_with_a_code() {
+        let (dir, store, time, vault) = with_vault();
+        let mut out = Vec::new();
+        secrets_status(&store, &mut out).unwrap();
+        assert!(text(out).contains("state file"));
+
+        let mut out = Vec::new();
+        secrets_use(&store, SecretStorage::System, None, &mut out).unwrap();
+        assert!(text(out).contains("moved to the system vault"));
+        assert_eq!(vault.len(), 2);
+        let mut out = Vec::new();
+        secrets_status(&store, &mut out).unwrap();
+        assert!(text(out).contains("in the system vault"));
+        let mut out = Vec::new();
+        secrets_use(&store, SecretStorage::System, None, &mut out).unwrap();
+        assert!(text(out).contains("already in the system vault"));
+
+        assert!(matches!(
+            secrets_use(&store, SecretStorage::File, None, &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        assert!(matches!(
+            secrets_use(&store, SecretStorage::File, Some("000000"), &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        assert_eq!(store.storage().unwrap(), SecretStorage::System);
+        assert_eq!(vault.len(), 2);
+
+        next_step(&time);
+        let valid = code(&store, &time);
+        let mut out = Vec::new();
+        secrets_use(&store, SecretStorage::File, Some(&valid), &mut out).unwrap();
+        assert!(text(out).contains("back in the state file"));
+        assert!(vault.is_empty());
+        let log = std::fs::read_to_string(dir.0.join("access.log")).unwrap();
+        assert!(log.contains("secrets_to_system") && log.contains("secrets_to_file"));
+    }
+
+    #[test]
+    fn a_failing_vault_reports_why_and_changes_nothing() {
+        let (dir, _store, time, _vault) = with_vault();
+        let broken: crate::store::VaultSource = Arc::new(|| {
+            Err(wirehaus_vault::VaultError::Unavailable(
+                "no daemon".to_owned(),
+            ))
+        });
+        let store = Store::open_with(&dir.0, clock(&time), broken).unwrap();
+        let error = secrets_use(&store, SecretStorage::System, None, &mut Vec::new()).unwrap_err();
+        assert!(error.to_string().contains("no daemon"), "{error}");
+        assert_eq!(store.storage().unwrap(), SecretStorage::File);
     }
 
     #[test]

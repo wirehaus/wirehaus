@@ -36,6 +36,8 @@ pub enum StateError {
     NoSuchDevice,
     #[error("{}", self.describe())]
     AmbiguousDevice,
+    #[error("{}", self.describe())]
+    SecretsMissing,
     #[error(transparent)]
     Crypto(#[from] CryptoError),
 }
@@ -71,6 +73,10 @@ impl StateError {
             StateError::AmbiguousDevice => tr!(
                 "más de un dispositivo coincide",
                 "more than one device matches"
+            ),
+            StateError::SecretsMissing => tr!(
+                "el estado guarda sus secretos en el almacén del sistema y no se han podido leer",
+                "the state keeps its secrets in the system vault and they could not be read"
             ),
             StateError::Crypto(error) => error.to_string(),
         }
@@ -123,6 +129,53 @@ impl ClipboardMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SecretStorage {
+    #[default]
+    File,
+    System,
+}
+
+impl SecretStorage {
+    fn name(self) -> &'static str {
+        match self {
+            SecretStorage::File => "file",
+            SecretStorage::System => "system",
+        }
+    }
+
+    fn parse(text: &str) -> Result<Self, StateError> {
+        match text {
+            "file" => Ok(SecretStorage::File),
+            "system" => Ok(SecretStorage::System),
+            _ => Err(invalid("bad secret storage")),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secrets {
+    pub agent_private: Vec<u8>,
+    pub totp_secret: Vec<u8>,
+}
+
+impl std::fmt::Debug for Secrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secrets(..)")
+    }
+}
+
+impl Secrets {
+    #[must_use]
+    pub fn names(agent: &PublicKey) -> (String, String) {
+        let identity = agent.to_text();
+        (
+            format!("{identity}/agent_private"),
+            format!("{identity}/totp_secret"),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Device {
     pub key: PublicKey,
@@ -133,6 +186,7 @@ pub struct Device {
 
 #[derive(Debug)]
 pub struct State {
+    storage: SecretStorage,
     agent: StaticKey,
     totp: TotpSecret,
     totp_last_step: Option<u64>,
@@ -148,6 +202,7 @@ pub struct State {
 impl State {
     pub fn create() -> Result<Self, StateError> {
         Ok(Self {
+            storage: SecretStorage::File,
             agent: StaticKey::generate()?,
             totp: TotpSecret::generate()?,
             totp_last_step: None,
@@ -159,6 +214,23 @@ impl State {
             local: FailureTracker::default(),
             devices: Vec::new(),
         })
+    }
+
+    #[must_use]
+    pub fn storage(&self) -> SecretStorage {
+        self.storage
+    }
+
+    pub fn set_storage(&mut self, storage: SecretStorage) {
+        self.storage = storage;
+    }
+
+    #[must_use]
+    pub fn secrets(&self) -> Secrets {
+        Secrets {
+            agent_private: self.agent.private_bytes().to_vec(),
+            totp_secret: self.totp.to_bytes().to_vec(),
+        }
     }
 
     #[must_use]
@@ -368,12 +440,19 @@ impl State {
 
     #[must_use]
     pub fn serialize(&self) -> String {
-        let mut out = format!(
-            "{HEADER}\nagent_private {}\nagent_public {}\ntotp_secret {}\n",
-            base32::encode(self.agent.private_bytes()),
-            self.agent.public().to_text(),
-            self.totp.to_base32()
-        );
+        let mut out = match self.storage {
+            SecretStorage::File => format!(
+                "{HEADER}\nagent_private {}\nagent_public {}\ntotp_secret {}\n",
+                base32::encode(self.agent.private_bytes()),
+                self.agent.public().to_text(),
+                self.totp.to_base32()
+            ),
+            SecretStorage::System => format!(
+                "{HEADER}\nagent_public {}\nsecrets {}\n",
+                self.agent.public().to_text(),
+                self.storage.name()
+            ),
+        };
         let step = self
             .totp_last_step
             .map_or_else(|| "-".to_owned(), |step| step.to_string());
@@ -415,23 +494,46 @@ impl State {
     }
 
     pub fn parse(text: &str) -> Result<Self, StateError> {
-        if text.len() > MAX_STATE_BYTES {
-            return Err(StateError::TooLarge);
-        }
-        let mut lines = text.lines();
-        if lines.next() != Some(HEADER) {
-            return Err(invalid("missing or unknown header"));
-        }
+        Self::parse_with(text, None)
+    }
+
+    pub fn parse_with(text: &str, secrets: Option<&Secrets>) -> Result<Self, StateError> {
         let mut parser = Parser::default();
-        for line in lines {
+        for line in body(text)? {
             parser.line(line)?;
         }
-        parser.finish()
+        parser.finish(secrets)
     }
+
+    pub fn peek(text: &str) -> Result<(SecretStorage, PublicKey), StateError> {
+        let mut storage = SecretStorage::File;
+        let mut public = None;
+        for line in body(text)? {
+            match line.split_once(' ') {
+                Some(("secrets", rest)) => storage = SecretStorage::parse(rest)?,
+                Some(("agent_public", rest)) => public = Some(PublicKey::from_text(rest)?),
+                _ => {}
+            }
+        }
+        let public = public.ok_or_else(|| invalid("missing entry agent_public"))?;
+        Ok((storage, public))
+    }
+}
+
+fn body(text: &str) -> Result<std::str::Lines<'_>, StateError> {
+    if text.len() > MAX_STATE_BYTES {
+        return Err(StateError::TooLarge);
+    }
+    let mut lines = text.lines();
+    if lines.next() != Some(HEADER) {
+        return Err(invalid("missing or unknown header"));
+    }
+    Ok(lines)
 }
 
 #[derive(Default)]
 struct Parser {
+    storage: Option<SecretStorage>,
     private: Option<Vec<u8>>,
     public: Option<Vec<u8>>,
     totp: Option<TotpSecret>,
@@ -453,6 +555,7 @@ impl Parser {
         }
         let (key, rest) = line.split_once(' ').unwrap_or((line, ""));
         match key {
+            "secrets" => once(&mut self.storage, SecretStorage::parse(rest)?, key),
             "agent_private" => once(&mut self.private, base32::decode(rest)?, key),
             "agent_public" => once(&mut self.public, base32::decode(rest)?, key),
             "totp_secret" => once(
@@ -500,15 +603,35 @@ impl Parser {
         }
     }
 
-    fn finish(self) -> Result<State, StateError> {
+    fn finish(self, secrets: Option<&Secrets>) -> Result<State, StateError> {
         let missing = |name: &str| invalid(&format!("missing entry {name}"));
+        let storage = self.storage.unwrap_or_default();
+        let (private, totp) = match storage {
+            SecretStorage::File => (
+                self.private.ok_or_else(|| missing("agent_private"))?,
+                self.totp.ok_or_else(|| missing("totp_secret"))?,
+            ),
+            SecretStorage::System => {
+                if self.private.is_some() || self.totp.is_some() {
+                    return Err(invalid(
+                        "secrets in the file while the system vault is in use",
+                    ));
+                }
+                let secrets = secrets.ok_or(StateError::SecretsMissing)?;
+                (
+                    secrets.agent_private.clone(),
+                    TotpSecret::from_bytes(&secrets.totp_secret)?,
+                )
+            }
+        };
         let agent = StaticKey::from_parts(
-            &self.private.ok_or_else(|| missing("agent_private"))?,
+            &private,
             &self.public.ok_or_else(|| missing("agent_public"))?,
         )?;
         Ok(State {
+            storage,
             agent,
-            totp: self.totp.ok_or_else(|| missing("totp_secret"))?,
+            totp,
             totp_last_step: if self.last_step_seen {
                 self.last_step
             } else {
@@ -667,6 +790,62 @@ mod tests {
         assert_eq!(restored.device(&second).unwrap().name, "Portátil de clase");
         assert_eq!(restored.pairing_psk(5001), state.pairing_psk(5001));
         assert!(restored.check_device(&device, 5000).is_err());
+    }
+
+    #[test]
+    fn a_state_that_keeps_its_secrets_in_the_vault_has_none_of_them_in_its_text() {
+        let (mut state, device) = state_with_device();
+        let secrets = state.secrets();
+        state.set_storage(SecretStorage::System);
+        let text = state.serialize();
+        assert!(!text.contains("agent_private"));
+        assert!(!text.contains("totp_secret"));
+        assert!(!text.contains(&base32::encode(&secrets.agent_private)));
+        assert!(!text.contains(&base32::encode(&secrets.totp_secret)));
+        assert!(text.contains("secrets system"));
+        let restored = State::parse_with(&text, Some(&secrets)).unwrap();
+        assert_eq!(restored.storage(), SecretStorage::System);
+        assert_eq!(restored.serialize(), text);
+        assert_eq!(restored.secrets(), secrets);
+        assert!(restored.device(&device).is_some());
+    }
+
+    #[test]
+    fn a_state_in_the_vault_cannot_be_read_without_the_secrets_or_with_copies_in_the_file() {
+        let (mut state, _) = state_with_device();
+        let secrets = state.secrets();
+        state.set_storage(SecretStorage::System);
+        let text = state.serialize();
+        assert_eq!(State::parse(&text).unwrap_err(), StateError::SecretsMissing);
+        let (_, public) = State::peek(&text).unwrap();
+        assert_eq!(public, state.agent_key().public());
+        let leaked = text.replace(
+            "secrets system\n",
+            &format!(
+                "secrets system\nagent_private {}\n",
+                base32::encode(&secrets.agent_private)
+            ),
+        );
+        assert!(State::parse_with(&leaked, Some(&secrets)).is_err());
+    }
+
+    #[test]
+    fn a_state_without_the_storage_line_is_a_file_state_and_the_line_is_checked() {
+        let state = State::create().unwrap();
+        let text = state.serialize();
+        assert!(!text.contains("secrets"));
+        assert_eq!(State::peek(&text).unwrap().0, SecretStorage::File);
+        assert_eq!(State::parse(&text).unwrap().storage(), SecretStorage::File);
+        let bad = format!("{text}secrets maybe\n");
+        assert!(State::parse(&bad).is_err());
+        let twice = format!("{text}secrets file\nsecrets file\n");
+        assert!(State::parse(&twice).is_err());
+    }
+
+    #[test]
+    fn the_secrets_do_not_show_in_debug_output() {
+        let state = State::create().unwrap();
+        assert_eq!(format!("{:?}", state.secrets()), "Secrets(..)");
     }
 
     #[test]

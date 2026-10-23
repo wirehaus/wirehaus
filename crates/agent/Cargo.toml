@@ -30,6 +30,7 @@ wirehaus-crypto = { path = "../crypto" }
 wirehaus-encode = { path = "../encode", features = ["h264"] }
 wirehaus-input = { path = "../input" }
 wirehaus-protocol = { path = "../protocol" }
+wirehaus-vault = { path = "../vault" }
 
 [dev-dependencies]
 openh264 = "0.9"

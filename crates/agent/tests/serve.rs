@@ -111,6 +111,24 @@ impl Running {
         idle_timeout: Duration,
         exposure: wirehaus_agent::Exposure,
     ) -> Self {
+        Self::start_inner(display, idle_timeout, exposure, None)
+    }
+
+    fn start_with_vault(display: &str, vault: &wirehaus_vault::MemoryVault) -> Self {
+        Self::start_inner(
+            display,
+            Duration::from_secs(3600),
+            wirehaus_agent::Exposure::default(),
+            Some(vault),
+        )
+    }
+
+    fn start_inner(
+        display: &str,
+        idle_timeout: Duration,
+        exposure: wirehaus_agent::Exposure,
+        vault: Option<&wirehaus_vault::MemoryVault>,
+    ) -> Self {
         let root = std::env::temp_dir().join(format!(
             "wirehaus-serve-{}-{}",
             std::process::id(),
@@ -126,7 +144,18 @@ impl Running {
             Arc::new(move || shared.load(Ordering::SeqCst))
         };
         let state_dir = root.join("state");
-        let store = Store::initialize(&state_dir, Arc::clone(&clock)).unwrap();
+        let mut store = Store::initialize(&state_dir, Arc::clone(&clock)).unwrap();
+        let source: Option<wirehaus_agent::VaultSource> = vault.map(|vault| {
+            let vault = vault.clone();
+            Arc::new(move || Ok(Box::new(vault.clone()) as Box<dyn wirehaus_vault::Vault>))
+                as wirehaus_agent::VaultSource
+        });
+        if let Some(source) = &source {
+            store = Store::open_with(&state_dir, Arc::clone(&clock), Arc::clone(source)).unwrap();
+            store
+                .move_secrets(wirehaus_agent::state::SecretStorage::System)
+                .unwrap();
+        }
         let server = Server::bind(ServerConfig {
             listen: "127.0.0.1:0".parse().unwrap(),
             display: Some(display.to_owned()),
@@ -134,6 +163,7 @@ impl Running {
             jpeg_quality: 70,
             state_dir,
             clock: Some(clock),
+            vault: source,
             idle_timeout,
             viewer_hash: None,
             exposure,
@@ -585,6 +615,28 @@ fn a_dropped_viewer_leaves_no_key_or_button_held_down() {
         );
         sleep(Duration::from_millis(20));
     }
+}
+
+#[test]
+fn an_agent_whose_secrets_live_in_the_vault_pairs_and_serves_like_any_other() {
+    let xvfb = Xvfb::start_unique();
+    let vault = wirehaus_vault::MemoryVault::new();
+    let server = Running::start_with_vault(&xvfb.display, &vault);
+    let state_file = std::fs::read_to_string(server.dir.join("state").join("state")).unwrap();
+    assert!(state_file.contains("secrets system"));
+    assert!(!state_file.contains("agent_private"));
+    assert_eq!(vault.len(), 2);
+
+    let (mut client, device) = pair_and_login(&server, "Aula 3");
+    let record = client.read_frame();
+    assert!(matches!(record, Received::Got(_) | Received::Timeout));
+    drop(client);
+    sleep(Duration::from_millis(300));
+    let mut again = reconnect_and_login(&server, &device);
+    assert!(matches!(
+        again.read_frame(),
+        Received::Got(_) | Received::Timeout
+    ));
 }
 
 #[test]
@@ -2060,6 +2112,7 @@ fn viewer_config(dir: &std::path::Path, state: PathBuf, hash: Option<String>) ->
         jpeg_quality: 70,
         state_dir: state,
         clock: None,
+        vault: None,
         idle_timeout: Duration::from_secs(3600),
         viewer_hash: hash,
         exposure: wirehaus_agent::Exposure::default(),
@@ -2446,6 +2499,7 @@ fn refuses_to_bind_outside_the_loopback_interface() {
         jpeg_quality: 70,
         state_dir: PathBuf::from("."),
         clock: None,
+        vault: None,
         idle_timeout: Duration::from_secs(3600),
         viewer_hash: None,
         exposure: wirehaus_agent::Exposure::default(),
@@ -2463,6 +2517,7 @@ fn refuses_to_start_without_an_agent_identity() {
         jpeg_quality: 70,
         state_dir: dir,
         clock: None,
+        vault: None,
         idle_timeout: Duration::from_secs(3600),
         viewer_hash: None,
         exposure: wirehaus_agent::Exposure::default(),

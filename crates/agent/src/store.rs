@@ -7,11 +7,14 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
+use wirehaus_crypto::base32;
+use wirehaus_vault::{Vault, VaultError};
 
 use crate::i18n::tr;
-use crate::state::{State, StateError};
+use crate::state::{SecretStorage, Secrets, State, StateError};
 
 pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
+pub type VaultSource = Arc<dyn Fn() -> Result<Box<dyn Vault>, VaultError> + Send + Sync>;
 
 const STATE_FILE: &str = "state";
 const STATE_TEMP: &str = "state.tmp";
@@ -42,6 +45,10 @@ pub enum StoreError {
     LockTimeout,
     #[error("{}", self.describe())]
     Io(#[from] std::io::Error),
+    #[error("{}", self.describe())]
+    Vault(#[from] VaultError),
+    #[error("{}", self.describe())]
+    SecretsNotInVault,
     #[error(transparent)]
     State(#[from] StateError),
 }
@@ -81,6 +88,14 @@ impl StoreError {
                 format!("no se puede acceder al estado: {error}"),
                 format!("cannot access the state: {error}")
             ),
+            StoreError::Vault(error) => tr!(
+                format!("almacén de claves del sistema: {error}"),
+                format!("system vault: {error}")
+            ),
+            StoreError::SecretsNotInVault => tr!(
+                "los secretos del agente no están en el almacén de claves del sistema; sin ellos hay que volver a ejecutar `wirehaus-agent init` y emparejar de nuevo",
+                "the agent secrets are not in the system vault; without them you must run `wirehaus-agent init` again and pair again"
+            ),
             StoreError::State(error) => error.to_string(),
         }
     }
@@ -99,6 +114,7 @@ struct Quiet {
 pub struct Store {
     dir: PathBuf,
     clock: Clock,
+    vault: VaultSource,
     cached: Mutex<Cached>,
     quiet: Mutex<HashMap<String, Quiet>>,
 }
@@ -109,6 +125,11 @@ impl std::fmt::Debug for Store {
             .field("dir", &self.dir)
             .finish_non_exhaustive()
     }
+}
+
+#[must_use]
+pub fn system_vault() -> VaultSource {
+    Arc::new(wirehaus_vault::system_vault)
 }
 
 #[must_use]
@@ -153,12 +174,17 @@ impl Store {
         Ok(Self {
             dir: dir.to_path_buf(),
             clock,
+            vault: system_vault(),
             cached: Mutex::new(Cached { state, text }),
             quiet: Mutex::new(HashMap::new()),
         })
     }
 
     pub fn open(dir: &Path, clock: Clock) -> Result<Self, StoreError> {
+        Self::open_with(dir, clock, system_vault())
+    }
+
+    pub fn open_with(dir: &Path, clock: Clock, vault: VaultSource) -> Result<Self, StoreError> {
         let state_path = dir.join(STATE_FILE);
         if !state_path.exists() {
             return Err(StoreError::NotInitialized(dir.to_path_buf()));
@@ -166,10 +192,16 @@ impl Store {
         ensure_private(dir)?;
         ensure_private(&state_path)?;
         let text = fs::read_to_string(&state_path)?;
-        let state = State::parse(&text)?;
+        let (storage, public) = State::peek(&text)?;
+        let secrets = match storage {
+            SecretStorage::File => None,
+            SecretStorage::System => Some(read_secrets(&vault, &public)?),
+        };
+        let state = State::parse_with(&text, secrets.as_ref())?;
         Ok(Self {
             dir: dir.to_path_buf(),
             clock,
+            vault,
             cached: Mutex::new(Cached { state, text }),
             quiet: Mutex::new(HashMap::new()),
         })
@@ -195,6 +227,39 @@ impl Store {
         write_text(&self.dir, &text)?;
         cached.text = text;
         Ok(result)
+    }
+
+    pub fn storage(&self) -> Result<SecretStorage, StoreError> {
+        self.read(|state, _| state.storage())
+    }
+
+    pub fn move_secrets(&self, target: SecretStorage) -> Result<bool, StoreError> {
+        let mut cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
+        let _guard = Lock::acquire(&self.dir)?;
+        self.refresh(&mut cached)?;
+        if cached.state.storage() == target {
+            return Ok(false);
+        }
+        let secrets = cached.state.secrets();
+        let public = cached.state.agent_key().public();
+        let vault = (self.vault)()?;
+        if target == SecretStorage::System {
+            wirehaus_vault::check(vault.as_ref())?;
+            write_secrets(vault.as_ref(), &public, &secrets)?;
+            if read_secrets_from(vault.as_ref(), &public)? != secrets {
+                return Err(VaultError::Mismatch.into());
+            }
+        }
+        cached.state.set_storage(target);
+        let text = cached.state.serialize();
+        write_text(&self.dir, &text)?;
+        cached.text = text;
+        if target == SecretStorage::File {
+            let (private, totp) = Secrets::names(&public);
+            vault.delete(&private)?;
+            vault.delete(&totp)?;
+        }
+        Ok(true)
     }
 
     pub fn log(&self, event: &str, detail: &str) {
@@ -225,7 +290,7 @@ impl Store {
         ensure_private(&path)?;
         let text = fs::read_to_string(&path)?;
         if text != cached.text {
-            cached.state = State::parse(&text)?;
+            cached.state = State::parse_with(&text, Some(&cached.state.secrets()))?;
             cached.text = text;
         }
         Ok(())
@@ -250,6 +315,40 @@ impl Store {
         }
         fs::rename(self.dir.join(LOG_FILE), numbered(1))
     }
+}
+
+fn read_secrets(
+    source: &VaultSource,
+    public: &wirehaus_crypto::keys::PublicKey,
+) -> Result<Secrets, StoreError> {
+    let vault = source()?;
+    read_secrets_from(vault.as_ref(), public)
+}
+
+fn read_secrets_from(
+    vault: &dyn Vault,
+    public: &wirehaus_crypto::keys::PublicKey,
+) -> Result<Secrets, StoreError> {
+    let (private, totp) = Secrets::names(public);
+    let decode = |name: &str| -> Result<Vec<u8>, StoreError> {
+        let text = vault.get(name)?.ok_or(StoreError::SecretsNotInVault)?;
+        base32::decode(text.trim()).map_err(|_| StoreError::SecretsNotInVault)
+    };
+    Ok(Secrets {
+        agent_private: decode(&private)?,
+        totp_secret: decode(&totp)?,
+    })
+}
+
+fn write_secrets(
+    vault: &dyn Vault,
+    public: &wirehaus_crypto::keys::PublicKey,
+    secrets: &Secrets,
+) -> Result<(), StoreError> {
+    let (private, totp) = Secrets::names(public);
+    vault.set(&private, &base32::encode(&secrets.agent_private))?;
+    vault.set(&totp, &base32::encode(&secrets.totp_secret))?;
+    Ok(())
 }
 
 fn clean(text: &str, max: usize) -> String {
@@ -508,6 +607,153 @@ mod tests {
             Store::open(&dir.0, clock),
             Err(StoreError::State(_))
         ));
+    }
+
+    fn memory_source(vault: &wirehaus_vault::MemoryVault) -> VaultSource {
+        let vault = vault.clone();
+        Arc::new(move || Ok(Box::new(vault.clone()) as Box<dyn Vault>))
+    }
+
+    #[derive(Debug)]
+    struct Broken;
+
+    impl Vault for Broken {
+        fn get(&self, _name: &str) -> Result<Option<String>, VaultError> {
+            Err(VaultError::Unavailable("locked".to_owned()))
+        }
+
+        fn set(&self, _name: &str, _value: &str) -> Result<(), VaultError> {
+            Err(VaultError::Unavailable("locked".to_owned()))
+        }
+
+        fn delete(&self, _name: &str) -> Result<(), VaultError> {
+            Err(VaultError::Unavailable("locked".to_owned()))
+        }
+    }
+
+    fn private_key_text(store: &Store) -> String {
+        store
+            .read(|state, _| base32::encode(state.agent_key().private_bytes()))
+            .unwrap()
+    }
+
+    #[test]
+    fn moving_the_secrets_to_the_vault_takes_them_out_of_the_file() {
+        let dir = TempDir::new();
+        let (clock, _) = clock(0);
+        let vault = wirehaus_vault::MemoryVault::new();
+        Store::initialize(&dir.0, Arc::clone(&clock)).unwrap();
+        let store = Store::open_with(&dir.0, clock.clone(), memory_source(&vault)).unwrap();
+        let private = private_key_text(&store);
+        let totp = store.read(|state, _| state.totp().to_base32()).unwrap();
+        assert!(store.move_secrets(SecretStorage::System).unwrap());
+        let file = fs::read_to_string(dir.0.join(STATE_FILE)).unwrap();
+        assert!(!file.contains(&private) && !file.contains(&totp), "{file}");
+        assert!(file.contains("secrets system"));
+        assert_eq!(vault.len(), 2);
+        assert_eq!(store.storage().unwrap(), SecretStorage::System);
+
+        let reopened = Store::open_with(&dir.0, clock, memory_source(&vault)).unwrap();
+        assert_eq!(reopened.storage().unwrap(), SecretStorage::System);
+        assert_eq!(private_key_text(&reopened), private);
+        assert_eq!(
+            reopened.read(|state, _| state.totp().to_base32()).unwrap(),
+            totp
+        );
+    }
+
+    #[test]
+    fn moving_them_back_restores_the_file_and_empties_the_vault() {
+        let dir = TempDir::new();
+        let (clock, _) = clock(0);
+        let vault = wirehaus_vault::MemoryVault::new();
+        Store::initialize(&dir.0, Arc::clone(&clock)).unwrap();
+        let store = Store::open_with(&dir.0, clock.clone(), memory_source(&vault)).unwrap();
+        let private = private_key_text(&store);
+        store.move_secrets(SecretStorage::System).unwrap();
+        assert!(store.move_secrets(SecretStorage::File).unwrap());
+        assert!(vault.is_empty());
+        let file = fs::read_to_string(dir.0.join(STATE_FILE)).unwrap();
+        assert!(file.contains(&private));
+        assert!(!file.contains("secrets system"));
+        let plain =
+            Store::open_with(&dir.0, clock, Arc::new(|| Err(VaultError::Unsupported))).unwrap();
+        assert_eq!(private_key_text(&plain), private);
+    }
+
+    #[test]
+    fn moving_to_where_they_already_are_does_nothing() {
+        let dir = TempDir::new();
+        let (clock, _) = clock(0);
+        let vault = wirehaus_vault::MemoryVault::new();
+        Store::initialize(&dir.0, Arc::clone(&clock)).unwrap();
+        let store = Store::open_with(&dir.0, clock, memory_source(&vault)).unwrap();
+        assert!(!store.move_secrets(SecretStorage::File).unwrap());
+        assert!(vault.is_empty());
+        assert!(store.move_secrets(SecretStorage::System).unwrap());
+        assert!(!store.move_secrets(SecretStorage::System).unwrap());
+    }
+
+    #[test]
+    fn a_vault_that_does_not_work_leaves_the_file_untouched() {
+        let dir = TempDir::new();
+        let (clock, _) = clock(0);
+        Store::initialize(&dir.0, Arc::clone(&clock)).unwrap();
+        let store = Store::open_with(
+            &dir.0,
+            clock,
+            Arc::new(|| Ok(Box::new(Broken) as Box<dyn Vault>)),
+        )
+        .unwrap();
+        let before = fs::read_to_string(dir.0.join(STATE_FILE)).unwrap();
+        assert!(matches!(
+            store.move_secrets(SecretStorage::System),
+            Err(StoreError::Vault(_))
+        ));
+        assert_eq!(fs::read_to_string(dir.0.join(STATE_FILE)).unwrap(), before);
+        assert_eq!(store.storage().unwrap(), SecretStorage::File);
+    }
+
+    #[test]
+    fn opening_with_the_secrets_missing_from_the_vault_is_a_clear_error() {
+        let dir = TempDir::new();
+        let (clock, _) = clock(0);
+        let vault = wirehaus_vault::MemoryVault::new();
+        Store::initialize(&dir.0, Arc::clone(&clock)).unwrap();
+        Store::open_with(&dir.0, Arc::clone(&clock), memory_source(&vault))
+            .unwrap()
+            .move_secrets(SecretStorage::System)
+            .unwrap();
+        let empty = wirehaus_vault::MemoryVault::new();
+        assert!(matches!(
+            Store::open_with(&dir.0, Arc::clone(&clock), memory_source(&empty)),
+            Err(StoreError::SecretsNotInVault)
+        ));
+        assert!(matches!(
+            Store::open_with(
+                &dir.0,
+                clock,
+                Arc::new(|| Ok(Box::new(Broken) as Box<dyn Vault>))
+            ),
+            Err(StoreError::Vault(_))
+        ));
+    }
+
+    #[test]
+    fn a_running_store_follows_another_process_that_moves_the_secrets() {
+        let dir = TempDir::new();
+        let (clock, _) = clock(0);
+        let vault = wirehaus_vault::MemoryVault::new();
+        Store::initialize(&dir.0, Arc::clone(&clock)).unwrap();
+        let running = Store::open_with(&dir.0, Arc::clone(&clock), memory_source(&vault)).unwrap();
+        let private = private_key_text(&running);
+        let cli = Store::open_with(&dir.0, clock, memory_source(&vault)).unwrap();
+        cli.move_secrets(SecretStorage::System).unwrap();
+        assert_eq!(running.storage().unwrap(), SecretStorage::System);
+        assert_eq!(private_key_text(&running), private);
+        cli.move_secrets(SecretStorage::File).unwrap();
+        assert_eq!(running.storage().unwrap(), SecretStorage::File);
+        assert_eq!(private_key_text(&running), private);
     }
 
     #[test]

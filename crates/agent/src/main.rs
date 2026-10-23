@@ -10,11 +10,11 @@ use wirehaus_agent::commands;
 use wirehaus_agent::{Server, ServerConfig, Store, default_dir, system_clock};
 use wirehaus_protocol::PROTOCOL_VERSION;
 
-use wirehaus_agent::state::ClipboardMode;
+use wirehaus_agent::state::{ClipboardMode, SecretStorage};
 
 use crate::cli::{
-    Cli, ClipboardAction, Command, DeviceAction, Direction, FilesAction, TerminalAction,
-    ViewerAction,
+    Cli, ClipboardAction, Command, DeviceAction, Direction, FilesAction, SecretsAction,
+    SecretsTarget, TerminalAction, ViewerAction,
 };
 
 fn main() -> ExitCode {
@@ -71,38 +71,10 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Terminal {
             action: TerminalAction::Deny,
         } => commands::terminal(&open()?, false, None, &mut out)?,
-        Command::Viewer { action } => match action {
-            ViewerAction::Manifest { viewer_dir } => {
-                println!(
-                    "{}",
-                    wirehaus_agent::static_files::write_manifest(&viewer_dir)?
-                );
-            }
-            ViewerAction::Hash { viewer_dir } => {
-                let viewer = wirehaus_agent::static_files::Viewer::open(&viewer_dir, None)?;
-                println!("{}", viewer.bundle());
-            }
-        },
-        Command::Clipboard { action } => match action {
-            ClipboardAction::Allow { code, direction } => {
-                let mode = match direction {
-                    Direction::Both => ClipboardMode::Both,
-                    Direction::ToRemote => ClipboardMode::ToRemote,
-                    Direction::FromRemote => ClipboardMode::FromRemote,
-                };
-                commands::clipboard(&open()?, mode, Some(&code), &mut out)?;
-            }
-            ClipboardAction::Deny => {
-                commands::clipboard(&open()?, ClipboardMode::Off, None, &mut out)?;
-            }
-        },
-        Command::Files { action } => match action {
-            FilesAction::Add { folder, code } => {
-                commands::files_add(&open()?, &folder, &code, &mut out)?;
-            }
-            FilesAction::Remove { folder } => commands::files_remove(&open()?, &folder, &mut out)?,
-            FilesAction::List => commands::files_list(&open()?, &mut out)?,
-        },
+        Command::Viewer { action } => run_viewer(action)?,
+        Command::Clipboard { action } => run_clipboard(&open()?, action, &mut out)?,
+        Command::Files { action } => run_files(&open()?, action, &mut out)?,
+        Command::Secrets { action } => run_secrets(&open()?, action, &mut out)?,
         Command::Lock { code } => commands::lock(&open()?, true, &code, &mut out)?,
         Command::Unlock { code } => commands::lock(&open()?, false, &code, &mut out)?,
         Command::Serve {
@@ -128,6 +100,72 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
             },
             &mut out,
         )?,
+    }
+    Ok(())
+}
+
+fn run_viewer(action: ViewerAction) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        ViewerAction::Manifest { viewer_dir } => {
+            println!(
+                "{}",
+                wirehaus_agent::static_files::write_manifest(&viewer_dir)?
+            );
+        }
+        ViewerAction::Hash { viewer_dir } => {
+            let viewer = wirehaus_agent::static_files::Viewer::open(&viewer_dir, None)?;
+            println!("{}", viewer.bundle());
+        }
+    }
+    Ok(())
+}
+
+fn run_clipboard(
+    store: &Store,
+    action: ClipboardAction,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        ClipboardAction::Allow { code, direction } => {
+            let mode = match direction {
+                Direction::Both => ClipboardMode::Both,
+                Direction::ToRemote => ClipboardMode::ToRemote,
+                Direction::FromRemote => ClipboardMode::FromRemote,
+            };
+            commands::clipboard(store, mode, Some(&code), out)?;
+        }
+        ClipboardAction::Deny => commands::clipboard(store, ClipboardMode::Off, None, out)?,
+    }
+    Ok(())
+}
+
+fn run_files(
+    store: &Store,
+    action: FilesAction,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        FilesAction::Add { folder, code } => commands::files_add(store, &folder, &code, out)?,
+        FilesAction::Remove { folder } => commands::files_remove(store, &folder, out)?,
+        FilesAction::List => commands::files_list(store, out)?,
+    }
+    Ok(())
+}
+
+fn run_secrets(
+    store: &Store,
+    action: SecretsAction,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        SecretsAction::Status => commands::secrets_status(store, out)?,
+        SecretsAction::Use { target, code } => {
+            let target = match target {
+                SecretsTarget::System => SecretStorage::System,
+                SecretsTarget::File => SecretStorage::File,
+            };
+            commands::secrets_use(store, target, code.as_deref(), out)?;
+        }
     }
     Ok(())
 }
@@ -165,6 +203,7 @@ fn serve(
         jpeg_quality: options.quality,
         state_dir: dir,
         clock: None,
+        vault: None,
         idle_timeout: Duration::from_secs(u64::from(options.idle_minutes) * 60),
         viewer_hash: options.viewer_hash,
         exposure,
