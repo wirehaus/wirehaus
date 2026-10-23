@@ -2409,6 +2409,8 @@ fn serves_only_the_viewer_files() {
     let reply = server.http(&format!("GET / HTTP/1.1\r\n{host}\r\n"));
     assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
     assert!(reply.contains("Content-Security-Policy: default-src 'none'"));
+    assert!(reply.contains("Cross-Origin-Resource-Policy: same-origin"));
+    assert!(reply.contains("Permissions-Policy: camera=(), microphone=()"));
     assert!(reply.ends_with("<title>viewer</title>"));
 
     for path in [
