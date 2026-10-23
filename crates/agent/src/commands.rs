@@ -116,6 +116,7 @@ pub fn revoke(
     code: &str,
     out: &mut impl Write,
 ) -> Result<(), CommandError> {
+    store.read(|state, _| state.find_by_prefix(prefix))??;
     verify(store, code)?;
     let name = store.update(|state, _| {
         let key = state.find_by_prefix(prefix)?;
@@ -134,6 +135,7 @@ pub fn reactivate(
     code: &str,
     out: &mut impl Write,
 ) -> Result<(), CommandError> {
+    store.read(|state, _| state.find_by_prefix(prefix))??;
     verify(store, code)?;
     let name = store.update(|state, _| {
         let key = state.find_by_prefix(prefix)?;
@@ -180,11 +182,11 @@ pub fn files_add(
     code: &str,
     out: &mut impl Write,
 ) -> Result<(), CommandError> {
-    verify(store, code)?;
     let real = folder.canonicalize().map_err(CommandError::Folder)?;
     if !real.is_dir() {
         return Err(CommandError::NotAFolder(real));
     }
+    verify(store, code)?;
     let added = store.update(|state, _| state.add_file_root(&real))??;
     if added {
         store.log("files_root_added", &real.display().to_string());
@@ -376,6 +378,27 @@ mod tests {
 
     fn text(out: Vec<u8>) -> String {
         String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn a_mistake_in_the_target_does_not_use_up_the_code() {
+        let (_dir, store, time) = setup();
+        add_device(&store, "Aula");
+        let valid = code(&store, &time);
+        let mut out = Vec::new();
+        assert!(matches!(
+            files_add(&store, Path::new("/nonexistent/wirehaus"), &valid, &mut out),
+            Err(CommandError::Folder(_))
+        ));
+        assert!(matches!(
+            revoke(&store, "000", &valid, &mut out),
+            Err(CommandError::State(StateError::NoSuchDevice))
+        ));
+        assert!(matches!(
+            reactivate(&store, "000", &valid, &mut out),
+            Err(CommandError::State(StateError::NoSuchDevice))
+        ));
+        lock(&store, true, &valid, &mut out).unwrap();
     }
 
     #[test]
