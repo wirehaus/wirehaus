@@ -59,7 +59,16 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - El bloqueo del fichero de estado usa el bloqueo del sistema en lugar de un fichero que había que detectar como caducado: si un proceso muere con el bloqueo, se libera al instante y ya no hay una espera de 30 segundos en la que fallaban las autenticaciones.
 - El visor se compila también en rutas con espacios y en Windows.
 
+### Windows
+
+- Captura con DXGI Desktop Duplication (`wirehaus-capture`), con reconexión cuando se pierde el acceso a la salida.
+- Entrada de ratón y teclado por código de escaneo y posición física (`wirehaus-input`), con rueda en los dos ejes y liberación de teclas y botones al cerrar la sesión.
+- Portapapeles de texto con el sistema (`wirehaus-clipboard`).
+- `scripts/build-windows.sh` para compilar desde Linux con mingw, sin dependencias de DLL de mingw en el ejecutable.
+
 ### Seguridad
+
+- En Windows el directorio de estado y sus ficheros solo admiten al usuario actual y al sistema (ACL sin herencia), el equivalente de los permisos 700 y 600 de Unix.
 
 - Los handshakes de emparejamiento fallidos ya no queman el código: con 160 bits no frenaban nada y permitían a cualquiera que conociera la dirección anular un emparejamiento en curso. Los fallos del segundo factor siguen quemándolo.
 - Todas las respuestas del agente llevan `Cross-Origin-Resource-Policy` y una `Permissions-Policy` que niega al visor cámara, micrófono, geolocalización, pagos y USB.

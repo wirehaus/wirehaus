@@ -428,6 +428,7 @@ fn mkdir(
     stream: u32,
 ) -> Result<Vec<Reply>, FailureReason> {
     let (parent, name) = creatable(root_at(roots, root)?, path)?;
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);

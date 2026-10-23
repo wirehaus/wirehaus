@@ -53,7 +53,7 @@ El diseño todavía no ha pasado una revisión externa: no lo expongas a Interne
 
 Desarrollo temprano. Todavía no hay nada que instalar ni versiones publicadas.
 
-Lo que falta: audio, soporte de Windows y de Wayland, el instalador en un comando y el servicio de registro. Se puede publicar detrás de un túnel con `--public-host` y `--viewer-origin`.
+Lo que falta: audio, soporte de Wayland, el instalador en un comando y el servicio de registro. Se puede publicar detrás de un túnel con `--public-host` y `--viewer-origin`.
 
 ## Plataformas
 
@@ -61,10 +61,12 @@ Lo que falta: audio, soporte de Windows y de Wayland, el instalador en un comand
 |---|---|
 | Linux (X11) | Funciona |
 | macOS | Funciona. Necesita los permisos Grabación de pantalla y Accesibilidad |
-| Windows 10 y 11 | Previsto |
+| Windows 10 y 11 | Funciona. Debe ejecutarse dentro de la sesión de escritorio del usuario |
 | Linux con Wayland | Previsto |
 
 En macOS, `wirehaus-agent permissions` comprueba y solicita los permisos y `wirehaus-agent service install` lo deja como servicio de usuario. macOS asocia los permisos a la firma del programa: `scripts/macos-sign.sh <binario>` lo firma con una identidad estable para no tener que volver a concederlos tras cada compilación.
+
+En Windows el agente captura con DXGI Desktop Duplication, inyecta teclas por posición física (código de escaneo, como en Linux y macOS) y usa el portapapeles del sistema. Tiene que arrancar en la sesión interactiva del usuario, por ejemplo con una tarea programada con inicio de sesión interactivo: un servicio o una sesión SSH corren en la sesión 0, que no tiene escritorio. No puede controlar ventanas que se ejecutan con más privilegios que el agente, ni la pantalla de bloqueo ni el aviso de control de cuentas. El estado del agente se protege con una ACL que solo permite al usuario y al sistema. `scripts/build-windows.sh` compila desde Linux con mingw.
 
 ## Compilar
 
@@ -79,7 +81,7 @@ Los tests de integración en Linux arrancan un servidor X virtual y necesitan `x
 
 ## Probar en local
 
-Hace falta una sesión de escritorio con X11 (o macOS), Rust con el objetivo `wasm32-unknown-unknown`, `wasm-bindgen-cli` 0.2.129 y Node.js.
+Hace falta una sesión de escritorio con X11, macOS o Windows, Rust con el objetivo `wasm32-unknown-unknown`, `wasm-bindgen-cli` 0.2.129 y Node.js.
 
 ```
 cargo install wasm-bindgen-cli --version 0.2.129 --locked

@@ -3,12 +3,16 @@ mod error;
 mod macos;
 #[cfg(any(target_os = "macos", all(test, unix)))]
 mod process;
+#[cfg(windows)]
+mod windows;
 #[cfg(target_os = "linux")]
 mod x11;
 
 pub use error::ClipboardError;
 #[cfg(target_os = "macos")]
 pub use macos::MacClipboard;
+#[cfg(windows)]
+pub use windows::WindowsClipboard;
 #[cfg(target_os = "linux")]
 pub use x11::X11Clipboard;
 

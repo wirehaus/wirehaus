@@ -21,6 +21,8 @@ mod stream;
 pub mod terminal;
 #[cfg(test)]
 mod testing;
+#[cfg(windows)]
+mod winacl;
 
 pub use error::ServerError;
 pub use http::{Exposure, ExposureError};

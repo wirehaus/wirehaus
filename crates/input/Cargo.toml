@@ -24,5 +24,8 @@ x11rb = { workspace = true, features = ["randr"] }
 core-graphics.workspace = true
 macos-accessibility-client.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+enigo.workspace = true
+
 [lints]
 workspace = true

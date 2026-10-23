@@ -5,6 +5,8 @@ mod framebuffer;
 #[cfg(target_os = "macos")]
 mod macos;
 mod polling;
+#[cfg(windows)]
+mod windows;
 #[cfg(target_os = "linux")]
 mod x11;
 
@@ -17,6 +19,8 @@ pub use framebuffer::FrameBuffer;
 #[cfg(target_os = "macos")]
 pub use macos::{MacDisplay, request_screen_capture, screen_capture_allowed};
 pub use polling::{Backoff, Grabber, PollingScreen};
+#[cfg(windows)]
+pub use windows::WindowsDisplay;
 #[cfg(target_os = "linux")]
 pub use x11::X11Screen;
 

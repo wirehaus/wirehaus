@@ -375,6 +375,7 @@ fn write_text(dir: &Path, text: &str) -> Result<(), StoreError> {
 }
 
 fn private_options() -> OpenOptions {
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut options = OpenOptions::new();
     #[cfg(unix)]
     {
@@ -406,7 +407,10 @@ fn ensure_private(path: &Path) -> Result<(), StoreError> {
             return Err(StoreError::InsecurePermissions(path.to_path_buf()));
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    crate::winacl::restrict_to_current_user(path)
+        .map_err(|_| StoreError::InsecurePermissions(path.to_path_buf()))?;
+    #[cfg(not(any(unix, windows)))]
     let _ = path;
     Ok(())
 }
@@ -500,6 +504,8 @@ mod tests {
                 0o600
             );
         }
+        #[cfg(windows)]
+        assert_eq!(crate::winacl::entries(&dir.0).unwrap(), 2);
         assert!(!dir.0.join(STATE_TEMP).exists());
     }
 

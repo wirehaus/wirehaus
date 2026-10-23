@@ -53,7 +53,7 @@ The design has not had an external review yet: do not expose it to the Internet 
 
 Early development. There is nothing to install and there are no releases yet.
 
-Still missing: audio, Windows and Wayland support, the one-command installer and the registration service. It can be published behind a tunnel with `--public-host` and `--viewer-origin`.
+Still missing: audio, Wayland support, the one-command installer and the registration service. It can be published behind a tunnel with `--public-host` and `--viewer-origin`.
 
 ## Platforms
 
@@ -61,10 +61,12 @@ Still missing: audio, Windows and Wayland support, the one-command installer and
 |---|---|
 | Linux (X11) | Works |
 | macOS | Works. Needs the Screen Recording and Accessibility permissions |
-| Windows 10 and 11 | Planned |
+| Windows 10 and 11 | Works. Must run inside the user's desktop session |
 | Linux with Wayland | Planned |
 
 On macOS, `wirehaus-agent permissions` checks and requests the permissions and `wirehaus-agent service install` sets it up as a user service. macOS ties permissions to the program's signature: `scripts/macos-sign.sh <binary>` signs it with a stable identity so you do not have to grant them again after every build.
+
+On Windows the agent captures with DXGI Desktop Duplication, injects keys by physical position (scan codes, as on Linux and macOS) and uses the system clipboard. It has to start in the user's interactive session, for example from a scheduled task with an interactive logon: a service or an SSH session runs in session 0, which has no desktop. It cannot control windows that run with more privileges than the agent, nor the lock screen or the account control prompt. The agent state is protected with an ACL that only allows the user and the system. `scripts/build-windows.sh` builds from Linux with mingw.
 
 ## Build
 

@@ -19,5 +19,8 @@ x11rb = { workspace = true, features = ["damage"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+dxgi-capture-rs.workspace = true
+
 [lints]
 workspace = true

@@ -18,6 +18,9 @@ thiserror = "2"
 core-graphics = { version = "0.25", features = ["highsierra"] }
 macos-accessibility-client = "0.0.1"
 x11rb = "0.14"
+enigo = { version = "0.6", default-features = false }
+arboard = { version = "3", default-features = false }
+dxgi-capture-rs = "1.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
