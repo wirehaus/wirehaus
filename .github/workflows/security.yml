@@ -23,8 +23,8 @@ jobs:
       issues: write
       checks: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: rustsec/audit-check@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -32,8 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
 
   codeql:
     if: ${{ !github.event.repository.private }}
@@ -44,9 +44,9 @@ jobs:
       actions: read
       security-events: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: github/codeql-action/init@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
         with:
           languages: rust
           build-mode: none
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
