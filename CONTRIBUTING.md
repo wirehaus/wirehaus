@@ -26,7 +26,9 @@ Un cambio lógico por commit. Mensaje en inglés, en imperativo y en una línea 
 
 ## Seguridad
 
-Las vulnerabilidades no se reportan en issues públicos. Mira [SECURITY.md](SECURITY.md).
+Las vulnerabilidades no se reportan en issues públicos. Escribe a [security@wirehaus.dev](mailto:security@wirehaus.dev) como indica [SECURITY.md](SECURITY.md).
+
+Para dudas antes de enviar un cambio, escribe a [contact@wirehaus.dev](mailto:contact@wirehaus.dev).
 
 ## Licencia
 

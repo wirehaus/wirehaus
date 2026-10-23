@@ -124,6 +124,10 @@ Quitarlos no exige código: `terminal deny`, `files remove <carpeta>` y `clipboa
 
 Lee [CONTRIBUTING.md](CONTRIBUTING.md) antes de proponer cambios y consulta el [registro de cambios](CHANGELOG.md).
 
+## Contacto
+
+Web: [wirehaus.dev](https://wirehaus.dev). Para cualquier consulta, escribe a [contact@wirehaus.dev](mailto:contact@wirehaus.dev). Las vulnerabilidades van a [security@wirehaus.dev](mailto:security@wirehaus.dev), según [SECURITY.md](SECURITY.md).
+
 ## Licencia
 
 Wirehaus se distribuye bajo la licencia [PolyForm Shield 1.0.0](LICENSE). Puedes usarlo para cualquier fin, también en el trabajo, salvo para ofrecer un producto que compita con él. Es código con fuente disponible, no software libre en el sentido de la OSI.

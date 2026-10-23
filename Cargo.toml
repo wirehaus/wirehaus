@@ -9,7 +9,8 @@ rust-version = "1.90"
 license-file = "LICENSE"
 publish = false
 repository = "https://github.com/wirehaus/wirehaus"
-authors = ["Cristóbal Tormo"]
+homepage = "https://wirehaus.dev"
+authors = ["Cristóbal Tormo <contact@wirehaus.dev>"]
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }

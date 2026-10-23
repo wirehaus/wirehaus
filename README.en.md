@@ -124,6 +124,10 @@ Removing them needs no code: `terminal deny`, `files remove <folder>` and `clipb
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing changes and see the [changelog](CHANGELOG.md).
 
+## Contact
+
+Website: [wirehaus.dev](https://wirehaus.dev). For any question, write to [contact@wirehaus.dev](mailto:contact@wirehaus.dev). Report vulnerabilities to [security@wirehaus.dev](mailto:security@wirehaus.dev), as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
 Wirehaus is distributed under the [PolyForm Shield 1.0.0](LICENSE) license. You may use it for any purpose, including at work, except to offer a product that competes with it. It is source-available code, not free software in the OSI sense.

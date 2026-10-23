@@ -2,4 +2,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Vulnerabilidades
     url: https://github.com/wirehaus/wirehaus/blob/main/SECURITY.md
-    about: No las publiques en un issue. Sigue las instrucciones de SECURITY.md.
+    about: No las publiques en un issue. Escribe a security@wirehaus.dev, como indica SECURITY.md.
+  - name: Contacto
+    url: https://wirehaus.dev
+    about: Para dudas generales, escribe a contact@wirehaus.dev.

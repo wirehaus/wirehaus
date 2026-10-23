@@ -2,7 +2,7 @@
 
 ## Cómo informar de una vulnerabilidad
 
-Escribe a info@cristobaltormo.com con el asunto `Wirehaus: vulnerabilidad`. No abras un issue público ni publiques los detalles antes de que haya una corrección.
+Escribe a security@wirehaus.dev con el asunto `Wirehaus: vulnerabilidad`. No abras un issue público ni publiques los detalles antes de que haya una corrección.
 
 Incluye la versión afectada, el sistema operativo, los pasos para reproducirlo y el impacto que crees que tiene.
 
