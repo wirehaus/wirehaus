@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{ErrorKind, Write};
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
@@ -27,7 +27,6 @@ const NOISY_EVENTS: [&str; 4] = [
 ];
 const MAX_LOG_DETAIL: usize = 200;
 const LOCK_WAIT: Duration = Duration::from_secs(5);
-const LOCK_STALE: Duration = Duration::from_secs(30);
 const LOCK_POLL: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Error)]
@@ -273,30 +272,28 @@ fn ensure_private(path: &Path) -> Result<(), StoreError> {
 }
 
 struct Lock {
-    path: PathBuf,
+    file: File,
 }
 
 impl Lock {
     fn acquire(dir: &Path) -> Result<Self, StoreError> {
-        let path = dir.join(LOCK_FILE);
+        let file = private_options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(LOCK_FILE))?;
         let started = Instant::now();
         loop {
-            match private_options().write(true).create_new(true).open(&path) {
-                Ok(file) => {
-                    drop::<File>(file);
-                    return Ok(Self { path });
-                }
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                    if is_stale(&path) {
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { file }),
+                Err(TryLockError::WouldBlock) => {
                     if started.elapsed() >= LOCK_WAIT {
                         return Err(StoreError::LockTimeout);
                     }
                     thread::sleep(LOCK_POLL);
                 }
-                Err(error) => return Err(error.into()),
+                Err(TryLockError::Error(error)) => return Err(error.into()),
             }
         }
     }
@@ -304,16 +301,8 @@ impl Lock {
 
 impl Drop for Lock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        let _ = self.file.unlock();
     }
-}
-
-fn is_stale(path: &Path) -> bool {
-    fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
-        .is_some_and(|age| age > LOCK_STALE)
 }
 
 #[cfg(test)]
@@ -371,7 +360,6 @@ mod tests {
                 0o600
             );
         }
-        assert!(!dir.0.join(LOCK_FILE).exists());
         assert!(!dir.0.join(STATE_TEMP).exists());
     }
 
@@ -496,21 +484,30 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_lock_from_a_dead_process_is_broken() {
+    fn a_lock_is_free_again_as_soon_as_its_holder_lets_go() {
         let dir = TempDir::new();
         let (clock, _) = clock(0);
         let store = Store::initialize(&dir.0, clock).unwrap();
-        let lock = dir.0.join(LOCK_FILE);
-        fs::write(&lock, b"").unwrap();
-        let old = SystemTime::now() - LOCK_STALE - Duration::from_secs(5);
-        File::options()
-            .write(true)
-            .open(&lock)
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
+        drop(Lock::acquire(&dir.0).unwrap());
+        let start = std::time::Instant::now();
         assert!(store.update(|_, _| ()).is_ok());
-        assert!(!lock.exists());
+        assert!(start.elapsed() < LOCK_WAIT);
+    }
+
+    #[test]
+    fn a_leftover_lock_file_does_not_block_anyone() {
+        let dir = TempDir::new();
+        let (clock, _) = clock(0);
+        let store = Store::initialize(&dir.0, clock).unwrap();
+        fs::write(dir.0.join(LOCK_FILE), b"left by a process that died").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir.0.join(LOCK_FILE), fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let start = std::time::Instant::now();
+        assert!(store.update(|_, _| ()).is_ok());
+        assert!(start.elapsed() < LOCK_WAIT);
     }
 
     #[test]

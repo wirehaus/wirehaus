@@ -48,6 +48,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Tras un fallo de decodificación de vídeo, el visor vuelve a reproducir vídeo en la conexión siguiente en lugar de quedarse con la imagen congelada.
 - Las órdenes `files add`, `devices revoke` y `devices reactivate` comprueban el destino antes de gastar el código del segundo factor.
 - La depuración de los mensajes de control no muestra códigos ni billetes, y el generador de claves borra la clave privada que le entrega la librería.
+- El bloqueo del fichero de estado usa el bloqueo del sistema en lugar de un fichero que había que detectar como caducado: si un proceso muere con el bloqueo, se libera al instante y ya no hay una espera de 30 segundos en la que fallaban las autenticaciones.
 - El visor se compila también en rutas con espacios y en Windows.
 
 ### Seguridad
