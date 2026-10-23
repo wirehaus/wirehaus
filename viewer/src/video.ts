@@ -75,6 +75,10 @@ export class VideoPlayer {
     await this.idle();
   }
 
+  rearm(): void {
+    this.failed = false;
+  }
+
   reset(): void {
     const decoder = this.decoder;
     this.decoder = null;

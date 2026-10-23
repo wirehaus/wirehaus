@@ -167,6 +167,7 @@ export class Viewer {
       return;
     }
     this.close();
+    this.player.rearm();
     let handshake: Handshake;
     try {
       handshake = make();
