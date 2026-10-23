@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use wirehaus_input::{InputError, InputSink, X11Input};
 use wirehaus_protocol::{Button, InputEvent};
 use x11rb::connection::Connection;
+use x11rb::protocol::randr::{ConnectionExt as _, Rotation};
 use x11rb::protocol::xproto::ConnectionExt;
 use x11rb::rust_connection::RustConnection;
 
@@ -18,13 +19,17 @@ struct Xvfb {
 
 impl Xvfb {
     fn start(number: u32) -> Self {
+        Self::start_sized(number, "320x200x24")
+    }
+
+    fn start_sized(number: u32, geometry: &str) -> Self {
         let display = format!(":{number}");
         let child = Command::new("Xvfb")
             .args([
                 &display,
                 "-screen",
                 "0",
-                "320x200x24",
+                geometry,
                 "-nolisten",
                 "tcp",
                 "-noreset",
@@ -139,4 +144,53 @@ fn refuses_positions_outside_the_screen_and_unknown_keys() {
         }),
         Err(InputError::KeyOutOfRange(400))
     ));
+}
+
+#[test]
+fn follows_a_screen_that_changes_size_while_connected() {
+    let server = Xvfb::start_sized(60 + std::process::id() % 9, "800x600x24");
+    let (observer, number) = x11rb::connect(Some(&server.display)).unwrap();
+    let root = observer.setup().roots[number].root;
+    let resources = observer
+        .randr_get_screen_resources_current(root)
+        .unwrap()
+        .reply()
+        .unwrap();
+    observer
+        .randr_set_crtc_config(
+            resources.crtcs[0],
+            0,
+            resources.config_timestamp,
+            0,
+            0,
+            0,
+            Rotation::ROTATE0,
+            &[],
+        )
+        .unwrap()
+        .reply()
+        .unwrap();
+    observer
+        .randr_set_screen_size(root, 320, 200, 85, 53)
+        .unwrap()
+        .check()
+        .unwrap();
+    let mut input = X11Input::connect(Some(&server.display)).unwrap();
+    assert!(matches!(
+        input.send(InputEvent::PointerMove { x: 600, y: 300 }),
+        Err(InputError::PointerOutOfRange { .. })
+    ));
+    sleep(Duration::from_millis(300));
+    observer
+        .randr_set_screen_size(root, 640, 400, 169, 106)
+        .unwrap()
+        .check()
+        .unwrap();
+    input
+        .send(InputEvent::PointerMove { x: 600, y: 300 })
+        .unwrap();
+    assert!(eventually(|| {
+        let (x, y, _) = pointer(&observer, root);
+        (x, y) == (600, 300)
+    }));
 }

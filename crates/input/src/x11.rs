@@ -1,8 +1,10 @@
+use std::time::{Duration, Instant};
+
 use wirehaus_protocol::{Button, InputEvent};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
-    BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT, KEY_RELEASE_EVENT,
-    MOTION_NOTIFY_EVENT,
+    BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConnectionExt as _, KEY_PRESS_EVENT,
+    KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT,
 };
 use x11rb::protocol::xtest::ConnectionExt;
 use x11rb::rust_connection::RustConnection;
@@ -19,6 +21,7 @@ const SCROLL_DOWN: u8 = 5;
 const SCROLL_LEFT: u8 = 6;
 const SCROLL_RIGHT: u8 = 7;
 const MAX_WHEEL_NOTCHES: u16 = 32;
+const SIZE_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug)]
 pub struct X11Input {
@@ -26,6 +29,7 @@ pub struct X11Input {
     root: u32,
     width: u16,
     height: u16,
+    last_size_check: Option<Instant>,
     pressed: Pressed,
 }
 
@@ -49,8 +53,32 @@ impl X11Input {
             root,
             width,
             height,
+            last_size_check: None,
             pressed: Pressed::default(),
         })
+    }
+
+    fn refresh_size(&mut self) -> Result<(), InputError> {
+        if self
+            .last_size_check
+            .is_some_and(|checked| checked.elapsed() < SIZE_CHECK_INTERVAL)
+        {
+            return Ok(());
+        }
+        self.last_size_check = Some(Instant::now());
+        let geometry = self
+            .connection
+            .get_geometry(self.root)
+            .map_err(request_error)?
+            .reply()
+            .map_err(request_error)?;
+        self.width = geometry.width;
+        self.height = geometry.height;
+        Ok(())
+    }
+
+    fn outside(&self, x: u16, y: u16) -> bool {
+        x >= self.width || y >= self.height
     }
 
     fn fake(&self, kind: u8, detail: u8, x: i16, y: i16) -> Result<(), InputError> {
@@ -78,7 +106,10 @@ impl InputSink for X11Input {
     fn send(&mut self, event: InputEvent) -> Result<(), InputError> {
         match event {
             InputEvent::PointerMove { x, y } => {
-                if x >= self.width || y >= self.height {
+                if self.outside(x, y) {
+                    self.refresh_size()?;
+                }
+                if self.outside(x, y) {
                     return Err(InputError::PointerOutOfRange { x, y });
                 }
                 self.fake(MOTION_NOTIFY_EVENT, 0, to_coordinate(x), to_coordinate(y))?;
