@@ -23,6 +23,8 @@ use wirehaus_crypto::ticket::Tickets;
 use wirehaus_protocol::{AuthFailure, ControlMessage, EndReason, TICKET_LEN};
 
 const ACCEPT_POLL: Duration = Duration::from_millis(20);
+const ACCEPT_RETRY: Duration = Duration::from_millis(100);
+const MAX_ACCEPT_FAILURES: u32 = 50;
 const HEAD_DEADLINE: Duration = Duration::from_secs(5);
 const HEAD_POLL: Duration = Duration::from_millis(5);
 const MAX_INBOUND_MESSAGE: usize = INBOUND_LIMIT + 64;
@@ -90,6 +92,20 @@ impl Drop for CountGuard<'_> {
     }
 }
 
+#[derive(Debug, Default)]
+struct AcceptFailures(u32);
+
+impl AcceptFailures {
+    fn record(&mut self) -> bool {
+        self.0 += 1;
+        self.0 < MAX_ACCEPT_FAILURES
+    }
+
+    fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
 struct BusyGuard<'a>(&'a AtomicBool);
 
 impl Drop for BusyGuard<'_> {
@@ -133,10 +149,12 @@ impl Server {
     pub fn run(&self, stop: &AtomicBool) -> Result<(), ServerError> {
         let busy = AtomicBool::new(false);
         let port = self.local_addr()?.port();
+        let mut failures = AcceptFailures::default();
         thread::scope(|scope| {
             while !stop.load(Ordering::Relaxed) {
                 match self.listener.accept() {
                     Ok((stream, peer)) if peer.ip().is_loopback() => {
+                        failures.reset();
                         let busy = &busy;
                         let Some(guard) = CountGuard::enter(&self.connections, MAX_CONNECTIONS)
                         else {
@@ -149,9 +167,18 @@ impl Server {
                             }
                         });
                     }
-                    Ok(_) => {}
-                    Err(e) if e.kind() == ErrorKind::WouldBlock => thread::sleep(ACCEPT_POLL),
-                    Err(e) => return Err(ServerError::from(e)),
+                    Ok(_) => failures.reset(),
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                        failures.reset();
+                        thread::sleep(ACCEPT_POLL);
+                    }
+                    Err(e) => {
+                        if !failures.record() {
+                            return Err(ServerError::from(e));
+                        }
+                        eprintln!("accept failed: {e}");
+                        thread::sleep(ACCEPT_RETRY);
+                    }
                 }
             }
             Ok(())
@@ -429,4 +456,28 @@ fn finish(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), ServerError> {
     stream.flush()?;
     let _ = stream.shutdown(Shutdown::Write);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_few_failed_accepts_are_tolerated_and_a_stuck_listener_is_not() {
+        let mut failures = AcceptFailures::default();
+        for _ in 1..MAX_ACCEPT_FAILURES {
+            assert!(failures.record());
+        }
+        assert!(!failures.record());
+    }
+
+    #[test]
+    fn a_successful_accept_clears_the_count() {
+        let mut failures = AcceptFailures::default();
+        for _ in 1..MAX_ACCEPT_FAILURES {
+            assert!(failures.record());
+        }
+        failures.reset();
+        assert!(failures.record());
+    }
 }
