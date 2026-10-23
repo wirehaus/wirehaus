@@ -62,9 +62,6 @@ pub fn negotiate(
     let accepted = match Accepted::begin(&first, &agent, psk.as_ref(), limits) {
         Ok(accepted) => accepted,
         Err(error) => {
-            if first.first() == Some(&Mode::Pairing.byte()) {
-                let _ = store.update(|state, _| state.record_pairing_failure());
-            }
             store.log("handshake_failed", &error.to_string());
             close(&mut socket);
             return Ok(Outcome::Refused);
@@ -121,7 +118,6 @@ fn pair(
     };
     socket.send(Message::Binary(message.into()))?;
     let Some(last) = read_binary(&mut socket, Instant::now() + HANDSHAKE_TIMEOUT)? else {
-        let _ = store.update(|state, _| state.record_pairing_failure());
         store.log("pairing_failed", "no final handshake message");
         return Ok(Outcome::Refused);
     };
@@ -132,7 +128,6 @@ fn pair(
     } = match pending.finish(&last) {
         Ok(established) => established,
         Err(error) => {
-            let _ = store.update(|state, _| state.record_pairing_failure());
             store.log("pairing_failed", &error.to_string());
             close(&mut socket);
             return Ok(Outcome::Refused);

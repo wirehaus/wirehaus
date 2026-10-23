@@ -666,20 +666,27 @@ fn pairing_is_refused_when_no_code_is_open() {
 }
 
 #[test]
-fn a_wrong_pairing_code_is_refused_and_five_failures_burn_the_real_one() {
+fn wrong_pairing_codes_are_refused_and_cannot_burn_the_real_one() {
     let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let real = server.open_pairing();
     let device = StaticKey::generate().unwrap();
-    for _ in 0..5 {
+    for _ in 0..8 {
         let wrong = PairingCode::generate().unwrap();
         let mut client = start_pairing(&server, &device, &wrong, "Intruso")
             .expect("the handshake only fails at the last message");
         assert!(client.wait_closed(Duration::from_secs(3)));
     }
-    assert!(start_pairing(&server, &device, &real, "Dueno").is_none());
     let count = server.store.read(|state, _| state.devices().len()).unwrap();
     assert_eq!(count, 0);
+    let mut owner = start_pairing(&server, &device, &real, "Dueno")
+        .expect("a stranger must not be able to burn the pairing code");
+    owner.expect_auth_required();
+    let right = server.fresh_totp();
+    assert!(matches!(
+        owner.login(&right),
+        Received::Got(ControlMessage::AuthOk)
+    ));
 }
 
 #[test]
