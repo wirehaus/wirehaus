@@ -37,3 +37,19 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 ### Cambiado
 
 - Las tramas usan una cabecera fija de nueve bytes (canal, flujo y longitud) en lugar de una librería de serialización, lo que deja el protocolo sin dependencias de serialización.
+
+### Corregido
+
+- Un error transitorio al aceptar una conexión ya no detiene el servidor del agente: se registra y se reintenta, y solo cincuenta fallos seguidos lo paran.
+- Retirar el permiso de terminal cierra las terminales abiertas en un segundo y el visor recibe el aviso; antes solo impedía abrir otras nuevas.
+- Un número de flujo de terminal reutilizado ya no hereda la salida ni el cierre del anterior, y el agente deja de esperar sin límite a un intérprete que ha soltado su terminal sin terminar.
+- Descargar una tubería con nombre u otro archivo especial de una carpeta compartida se rechaza en vez de bloquear la sesión.
+- El puntero sigue el tamaño real de la pantalla cuando cambia la resolución durante la sesión.
+- Tras un fallo de decodificación de vídeo, el visor vuelve a reproducir vídeo en la conexión siguiente en lugar de quedarse con la imagen congelada.
+- Las órdenes `files add`, `devices revoke` y `devices reactivate` comprueban el destino antes de gastar el código del segundo factor.
+- La depuración de los mensajes de control no muestra códigos ni billetes, y el generador de claves borra la clave privada que le entrega la librería.
+- El visor se compila también en rutas con espacios y en Windows.
+
+### Seguridad
+
+- Todas las respuestas del agente llevan `Cross-Origin-Resource-Policy` y una `Permissions-Policy` que niega al visor cámara, micrófono, geolocalización, pagos y USB.
