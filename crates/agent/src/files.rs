@@ -146,6 +146,12 @@ impl Files {
         if self.parts().contains(&real) {
             return Err(FailureReason::InvalidPath);
         }
+        if !fs::metadata(&real)
+            .map_err(|error| map_io(&error))?
+            .is_file()
+        {
+            return Err(FailureReason::NotAFile);
+        }
         let file = File::open(&real).map_err(|error| map_io(&error))?;
         let metadata = file.metadata().map_err(|error| map_io(&error))?;
         if !metadata.is_file() {
@@ -830,6 +836,26 @@ mod tests {
         let roots = sandbox.roots();
         files.handle(1, path_message(download_message, "empty"), &roots);
         assert_eq!(files.pump(&roots, 4), [(1, FilesMessage::Done)]);
+        assert_eq!(files.active(), 0);
+    }
+
+    #[test]
+    fn downloading_a_named_pipe_fails_instead_of_blocking() {
+        let sandbox = Sandbox::new("fifo");
+        let pipe = sandbox.root().join("pipe");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&pipe)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let mut files = Files::new();
+        let roots = sandbox.roots();
+        assert_eq!(
+            only(files.handle(1, path_message(download_message, "pipe"), &roots)),
+            FilesMessage::Failed(FailureReason::NotAFile)
+        );
         assert_eq!(files.active(), 0);
     }
 
