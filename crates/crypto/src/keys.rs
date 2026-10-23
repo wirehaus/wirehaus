@@ -61,11 +61,15 @@ impl Drop for StaticKey {
 impl StaticKey {
     pub fn generate() -> Result<Self, CryptoError> {
         let params = KEY_PARAMS.parse()?;
-        let pair = snow::Builder::new(params).generate_keypair()?;
-        Ok(Self {
-            private: array(&pair.private)?,
-            public: PublicKey::from_bytes(&pair.public)?,
-        })
+        let mut pair = snow::Builder::new(params).generate_keypair()?;
+        let key = array(&pair.private).and_then(|private| {
+            Ok(Self {
+                private,
+                public: PublicKey::from_bytes(&pair.public)?,
+            })
+        });
+        pair.private.zeroize();
+        key
     }
 
     pub fn from_parts(private: &[u8], public: &[u8]) -> Result<Self, CryptoError> {
