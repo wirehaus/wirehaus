@@ -10,6 +10,8 @@ use wirehaus_crypto::lockout::{Denied, FailureTracker, MAX_LOCK_SECONDS, SUSPEND
 use wirehaus_crypto::pairing::{PSK_BYTES, PairingCode, PairingGrant};
 use wirehaus_crypto::totp::TotpSecret;
 
+use crate::i18n::tr;
+
 pub const MAX_DEVICES: usize = 32;
 pub const MAX_STATE_BYTES: usize = 64 * 1024;
 pub const MAX_FILE_ROOTS: usize = 16;
@@ -18,24 +20,61 @@ const HEADER: &str = "wirehaus-state 1";
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum StateError {
-    #[error("the state file is not valid: {0}")]
+    #[error("{}", self.describe())]
     Invalid(String),
-    #[error("the state file is larger than {MAX_STATE_BYTES} bytes")]
+    #[error("{}", self.describe())]
     TooLarge,
-    #[error("there is already a device with that key")]
+    #[error("{}", self.describe())]
     DuplicateDevice,
-    #[error("the limit of {MAX_DEVICES} devices has been reached")]
+    #[error("{}", self.describe())]
     TooManyDevices,
-    #[error("the limit of {MAX_FILE_ROOTS} shared folders has been reached")]
+    #[error("{}", self.describe())]
     TooManyRoots,
-    #[error("that folder is not shared")]
+    #[error("{}", self.describe())]
     NoSuchRoot,
-    #[error("no device matches")]
+    #[error("{}", self.describe())]
     NoSuchDevice,
-    #[error("more than one device matches")]
+    #[error("{}", self.describe())]
     AmbiguousDevice,
     #[error(transparent)]
     Crypto(#[from] CryptoError),
+}
+
+impl StateError {
+    fn describe(&self) -> String {
+        match self {
+            StateError::Invalid(reason) => tr!(
+                format!("el fichero de estado no es válido: {reason}"),
+                format!("the state file is not valid: {reason}")
+            ),
+            StateError::TooLarge => tr!(
+                format!("el fichero de estado supera {MAX_STATE_BYTES} bytes"),
+                format!("the state file is larger than {MAX_STATE_BYTES} bytes")
+            ),
+            StateError::DuplicateDevice => tr!(
+                "ya hay un dispositivo con esa clave",
+                "there is already a device with that key"
+            ),
+            StateError::TooManyDevices => tr!(
+                format!("se ha alcanzado el límite de {MAX_DEVICES} dispositivos"),
+                format!("the limit of {MAX_DEVICES} devices has been reached")
+            ),
+            StateError::TooManyRoots => tr!(
+                format!("se ha alcanzado el límite de {MAX_FILE_ROOTS} carpetas compartidas"),
+                format!("the limit of {MAX_FILE_ROOTS} shared folders has been reached")
+            ),
+            StateError::NoSuchRoot => tr!(
+                "esa carpeta no está compartida",
+                "that folder is not shared"
+            ),
+            StateError::NoSuchDevice => tr!("ningún dispositivo coincide", "no device matches"),
+            StateError::AmbiguousDevice => tr!(
+                "más de un dispositivo coincide",
+                "more than one device matches"
+            ),
+            StateError::Crypto(error) => error.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

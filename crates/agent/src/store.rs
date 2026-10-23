@@ -8,6 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
+use crate::i18n::tr;
 use crate::state::{State, StateError};
 
 pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
@@ -31,18 +32,58 @@ const LOCK_POLL: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Error)]
 pub enum StoreError {
-    #[error("{0} does not exist; run `wirehaus-agent init` first")]
+    #[error("{}", self.describe())]
     NotInitialized(PathBuf),
-    #[error("{0} already holds an agent identity")]
+    #[error("{}", self.describe())]
     AlreadyInitialized(PathBuf),
-    #[error("{0} can be read by other users; it must be private to its owner")]
+    #[error("{}", self.describe())]
     InsecurePermissions(PathBuf),
-    #[error("the state is locked by another process")]
+    #[error("{}", self.describe())]
     LockTimeout,
-    #[error("cannot access the state: {0}")]
+    #[error("{}", self.describe())]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     State(#[from] StateError),
+}
+
+impl StoreError {
+    fn describe(&self) -> String {
+        match self {
+            StoreError::NotInitialized(path) => tr!(
+                format!(
+                    "{} no existe; ejecuta primero `wirehaus-agent init`",
+                    path.display()
+                ),
+                format!(
+                    "{} does not exist; run `wirehaus-agent init` first",
+                    path.display()
+                )
+            ),
+            StoreError::AlreadyInitialized(path) => tr!(
+                format!("{} ya contiene una identidad del agente", path.display()),
+                format!("{} already holds an agent identity", path.display())
+            ),
+            StoreError::InsecurePermissions(path) => tr!(
+                format!(
+                    "{} lo pueden leer otros usuarios; debe ser privado de su dueño",
+                    path.display()
+                ),
+                format!(
+                    "{} can be read by other users; it must be private to its owner",
+                    path.display()
+                )
+            ),
+            StoreError::LockTimeout => tr!(
+                "el estado está bloqueado por otro proceso",
+                "the state is locked by another process"
+            ),
+            StoreError::Io(error) => tr!(
+                format!("no se puede acceder al estado: {error}"),
+                format!("cannot access the state: {error}")
+            ),
+            StoreError::State(error) => error.to_string(),
+        }
+    }
 }
 
 struct Cached {

@@ -18,6 +18,7 @@ use crate::cli::{
 };
 
 fn main() -> ExitCode {
+    wirehaus_agent::i18n::init(wirehaus_agent::i18n::Language::from_environment());
     let cli = Cli::parse();
     let dir = cli.state_dir.clone().unwrap_or_else(default_dir);
     match run(cli.command, dir) {

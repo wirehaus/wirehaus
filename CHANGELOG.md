@@ -38,6 +38,10 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 - Las tramas usan una cabecera fija de nueve bytes (canal, flujo y longitud) en lugar de una librería de serialización, lo que deja el protocolo sin dependencias de serialización.
 
+### Cambiado
+
+- Los mensajes de las órdenes del agente (`init`, `pairing`, `devices`, `files`, `service` y el resto) y sus errores salen en español o en inglés según `LC_ALL`, `LC_MESSAGES` o `LANG`, con el inglés por defecto. Antes mezclaban español sin tildes e inglés.
+
 ### Corregido
 
 - Un error transitorio al aceptar una conexión ya no detiene el servidor del agente: se registra y se reintenta, y solo cincuenta fallos seguidos lo paran.
@@ -53,4 +57,5 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Seguridad
 
+- Los handshakes de emparejamiento fallidos ya no queman el código: con 160 bits no frenaban nada y permitían a cualquiera que conociera la dirección anular un emparejamiento en curso. Los fallos del segundo factor siguen quemándolo.
 - Todas las respuestas del agente llevan `Cross-Origin-Resource-Policy` y una `Permissions-Policy` que niega al visor cámara, micrófono, geolocalización, pagos y USB.

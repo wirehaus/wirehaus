@@ -4,6 +4,7 @@ pub mod commands;
 mod error;
 pub mod files;
 mod http;
+pub mod i18n;
 pub mod integrity;
 mod link;
 mod mode;

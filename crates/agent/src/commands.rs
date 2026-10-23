@@ -5,6 +5,7 @@ use thiserror::Error;
 use wirehaus_crypto::lockout::Denied;
 use wirehaus_crypto::pairing::VALIDITY_SECONDS;
 
+use crate::i18n::tr;
 use crate::state::{AuthError, ClipboardMode, State, StateError};
 use crate::store::{Clock, Store, StoreError};
 
@@ -16,16 +17,42 @@ pub enum CommandError {
     Store(#[from] StoreError),
     #[error(transparent)]
     State(#[from] StateError),
-    #[error("no se puede abrir la carpeta: {0}")]
+    #[error("{}", self.describe())]
     Folder(std::io::Error),
-    #[error("{0} no es una carpeta")]
+    #[error("{}", self.describe())]
     NotAFolder(std::path::PathBuf),
-    #[error("el codigo es incorrecto")]
+    #[error("{}", self.describe())]
     WrongCode,
-    #[error("demasiados intentos: espera {0} segundos")]
+    #[error("{}", self.describe())]
     TooManyAttempts(u64),
-    #[error("no se puede escribir la salida: {0}")]
+    #[error("{}", self.describe())]
     Output(#[from] std::io::Error),
+}
+
+impl CommandError {
+    fn describe(&self) -> String {
+        match self {
+            CommandError::Folder(error) => tr!(
+                format!("no se puede abrir la carpeta: {error}"),
+                format!("cannot open the folder: {error}")
+            ),
+            CommandError::NotAFolder(path) => tr!(
+                format!("{} no es una carpeta", path.display()),
+                format!("{} is not a folder", path.display())
+            ),
+            CommandError::WrongCode => tr!("el código es incorrecto", "the code is wrong"),
+            CommandError::TooManyAttempts(seconds) => tr!(
+                format!("demasiados intentos: espera {seconds} segundos"),
+                format!("too many attempts: wait {seconds} seconds")
+            ),
+            CommandError::Output(error) => tr!(
+                format!("no se puede escribir la salida: {error}"),
+                format!("cannot write the output: {error}")
+            ),
+            CommandError::Store(error) => error.to_string(),
+            CommandError::State(error) => error.to_string(),
+        }
+    }
 }
 
 pub fn init(dir: &Path, clock: Clock, out: &mut impl Write) -> Result<(), CommandError> {
@@ -38,14 +65,33 @@ pub fn init(dir: &Path, clock: Clock, out: &mut impl Write) -> Result<(), Comman
         )
     })?;
     store.log("init", "agent identity created");
-    writeln!(out, "Identidad del agente creada en {}.", dir.display())?;
-    writeln!(out, "Clave publica del agente: {public}")?;
+    let location = dir.display();
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            format!("Identidad del agente creada en {location}."),
+            format!("Agent identity created in {location}.")
+        )
+    )?;
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            format!("Clave pública del agente: {public}"),
+            format!("Agent public key: {public}")
+        )
+    )?;
     writeln!(out)?;
     writeln!(
         out,
-        "Segundo factor: anade este secreto a tu aplicacion de autenticacion. Solo se muestra ahora."
+        "{}",
+        tr!(
+            "Segundo factor: añade este secreto a tu aplicación de autenticación. Solo se muestra ahora.",
+            "Second factor: add this secret to your authenticator app. It is only shown now."
+        )
     )?;
-    writeln!(out, "Secreto: {secret}")?;
+    writeln!(out, "{}: {secret}", tr!("Secreto", "Secret"))?;
     writeln!(out, "URI: {uri}")?;
     Ok(())
 }
@@ -55,20 +101,46 @@ pub fn permissions(
     input_control: bool,
     out: &mut impl Write,
 ) -> Result<bool, CommandError> {
-    let state = |granted: bool| if granted { "concedido" } else { "pendiente" };
-    writeln!(out, "Grabacion de pantalla: {}", state(screen_recording))?;
+    let state = |granted: bool| {
+        if granted {
+            tr!("concedido", "granted")
+        } else {
+            tr!("pendiente", "pending")
+        }
+    };
     writeln!(
         out,
-        "Control de teclado y raton (Accesibilidad): {}",
+        "{}: {}",
+        tr!("Grabación de pantalla", "Screen recording"),
+        state(screen_recording)
+    )?;
+    writeln!(
+        out,
+        "{}: {}",
+        tr!(
+            "Control de teclado y ratón (Accesibilidad)",
+            "Keyboard and mouse control (Accessibility)"
+        ),
         state(input_control)
     )?;
     let complete = screen_recording && input_control;
     if complete {
-        writeln!(out, "El agente tiene todos los permisos que necesita.")?;
+        writeln!(
+            out,
+            "{}",
+            tr!(
+                "El agente tiene todos los permisos que necesita.",
+                "The agent has every permission it needs."
+            )
+        )?;
     } else {
         writeln!(
             out,
-            "Concede lo pendiente en Ajustes del Sistema > Privacidad y seguridad, al programa que lanza el agente (la terminal o el propio wirehaus-agent). Si macOS lo pide, cierra y vuelve a abrir ese programa y repite este comando."
+            "{}",
+            tr!(
+                "Concede lo pendiente en Ajustes del Sistema > Privacidad y seguridad, al programa que lanza el agente (la terminal o el propio wirehaus-agent). Si macOS lo pide, cierra y vuelve a abrir ese programa y repite este comando.",
+                "Grant what is pending in System Settings > Privacy & Security, to the program that launches the agent (the terminal or wirehaus-agent itself). If macOS asks, quit and reopen that program and run this command again."
+            )
         )?;
     }
     Ok(complete)
@@ -77,11 +149,24 @@ pub fn permissions(
 pub fn pairing(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
     let code = store.update(State::open_pairing)??;
     store.log("pairing_opened", "a pairing code was generated");
-    writeln!(out, "Codigo de emparejamiento: {}", code.to_text())?;
+    let minutes = VALIDITY_SECONDS / 60;
     writeln!(
         out,
-        "Vale una sola vez y caduca en {} minutos. Para entrar tambien hara falta el codigo del segundo factor.",
-        VALIDITY_SECONDS / 60
+        "{}: {}",
+        tr!("Código de emparejamiento", "Pairing code"),
+        code.to_text()
+    )?;
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            format!(
+                "Vale una sola vez y caduca en {minutes} minutos. Para entrar también hará falta el código del segundo factor."
+            ),
+            format!(
+                "It works once and expires in {minutes} minutes. Signing in also needs the second factor code."
+            )
+        )
     )?;
     Ok(())
 }
@@ -93,16 +178,28 @@ pub fn devices(store: &Store, out: &mut impl Write) -> Result<(), CommandError> 
             .iter()
             .map(|device| {
                 let status = match device.failures.check(now) {
-                    Ok(()) => "activo".to_owned(),
-                    Err(Denied::Suspended) => "suspendido".to_owned(),
-                    Err(Denied::Locked { retry_after }) => format!("bloqueado {retry_after} s"),
+                    Ok(()) => tr!("activo", "active"),
+                    Err(Denied::Suspended) => tr!("suspendido", "suspended"),
+                    Err(Denied::Locked { retry_after }) => {
+                        tr!(
+                            format!("bloqueado {retry_after} s"),
+                            format!("locked {retry_after} s")
+                        )
+                    }
                 };
                 format!("{} {} ({status})", device.key.to_text(), device.name)
             })
             .collect::<Vec<_>>()
     })?;
     if lines.is_empty() {
-        writeln!(out, "No hay dispositivos emparejados.")?;
+        writeln!(
+            out,
+            "{}",
+            tr!(
+                "No hay dispositivos emparejados.",
+                "There are no paired devices."
+            )
+        )?;
     }
     for line in lines {
         writeln!(out, "{line}")?;
@@ -125,7 +222,14 @@ pub fn revoke(
         Ok::<_, StateError>(name.unwrap_or_default())
     })??;
     store.log("revoked", &name);
-    writeln!(out, "Dispositivo revocado: {name}")?;
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            format!("Dispositivo revocado: {name}"),
+            format!("Device revoked: {name}")
+        )
+    )?;
     Ok(())
 }
 
@@ -148,7 +252,14 @@ pub fn reactivate(
         )
     })??;
     store.log("reactivated", &name);
-    writeln!(out, "Dispositivo reactivado: {name}")?;
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            format!("Dispositivo reactivado: {name}"),
+            format!("Device reactivated: {name}")
+        )
+    )?;
     Ok(())
 }
 
@@ -168,9 +279,12 @@ pub fn lock(
         out,
         "{}",
         if locked {
-            "Acceso bloqueado: no se aceptan conexiones."
+            tr!(
+                "Acceso bloqueado: no se aceptan conexiones.",
+                "Access locked: connections are refused."
+            )
         } else {
-            "Acceso desbloqueado."
+            tr!("Acceso desbloqueado.", "Access unlocked.")
         }
     )?;
     Ok(())
@@ -191,7 +305,15 @@ pub fn files_add(
     if added {
         store.log("files_root_added", &real.display().to_string());
     }
-    writeln!(out, "Carpeta compartida: {}", real.display())?;
+    let location = real.display();
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            format!("Carpeta compartida: {location}"),
+            format!("Shared folder: {location}")
+        )
+    )?;
     Ok(())
 }
 
@@ -205,14 +327,29 @@ pub fn files_remove(
         .unwrap_or_else(|_| folder.to_path_buf());
     store.update(|state, _| state.remove_file_root(&target))??;
     store.log("files_root_removed", &target.display().to_string());
-    writeln!(out, "Carpeta retirada: {}", target.display())?;
+    let location = target.display();
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            format!("Carpeta retirada: {location}"),
+            format!("Folder removed: {location}")
+        )
+    )?;
     Ok(())
 }
 
 pub fn files_list(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
     let roots = store.read(|state, _| state.file_roots().to_vec())?;
     if roots.is_empty() {
-        writeln!(out, "No hay carpetas compartidas.")?;
+        writeln!(
+            out,
+            "{}",
+            tr!(
+                "No hay carpetas compartidas.",
+                "There are no shared folders."
+            )
+        )?;
     }
     for root in roots {
         writeln!(out, "{}", root.display())?;
@@ -243,11 +380,22 @@ pub fn clipboard(
         out,
         "{}",
         match mode {
-            ClipboardMode::Off => "Portapapeles remoto desactivado.",
-            ClipboardMode::ToRemote => "Portapapeles: el visor puede enviar texto a este equipo.",
-            ClipboardMode::FromRemote =>
+            ClipboardMode::Off => tr!(
+                "Portapapeles remoto desactivado.",
+                "Remote clipboard turned off."
+            ),
+            ClipboardMode::ToRemote => tr!(
+                "Portapapeles: el visor puede enviar texto a este equipo.",
+                "Clipboard: the viewer can send text to this computer."
+            ),
+            ClipboardMode::FromRemote => tr!(
                 "Portapapeles: el visor puede leer el texto de este equipo.",
-            ClipboardMode::Both => "Portapapeles: el visor puede enviar y leer texto.",
+                "Clipboard: the viewer can read the text on this computer."
+            ),
+            ClipboardMode::Both => tr!(
+                "Portapapeles: el visor puede enviar y leer texto.",
+                "Clipboard: the viewer can send and read text."
+            ),
         }
     )?;
     Ok(())
@@ -275,9 +423,12 @@ pub fn terminal(
         out,
         "{}",
         if allow {
-            "Terminal remota permitida."
+            tr!("Terminal remota permitida.", "Remote terminal allowed.")
         } else {
-            "Terminal remota desactivada."
+            tr!(
+                "Terminal remota desactivada.",
+                "Remote terminal turned off."
+            )
         }
     )?;
     Ok(())
@@ -303,7 +454,7 @@ fn host_name() -> String {
         .map(|name| name.trim().to_owned())
         .filter(|name| !name.is_empty())
         .or_else(|| std::env::var("COMPUTERNAME").ok())
-        .unwrap_or_else(|| "equipo".to_owned())
+        .unwrap_or_else(|| "computer".to_owned())
 }
 
 #[cfg(test)]
@@ -381,6 +532,41 @@ mod tests {
     }
 
     #[test]
+    fn the_same_commands_speak_spanish_when_the_locale_says_so() {
+        use crate::i18n::{Language, with_language};
+
+        with_language(Language::Spanish, || {
+            let (_dir, store, time) = setup();
+            let mut out = Vec::new();
+            permissions(true, false, &mut out).unwrap();
+            let report = text(out);
+            assert!(
+                report.contains("Grabación de pantalla: concedido"),
+                "{report}"
+            );
+            assert!(report.contains("Accesibilidad): pendiente"), "{report}");
+            let mut out = Vec::new();
+            pairing(&store, &mut out).unwrap();
+            assert!(text(out).contains("Código de emparejamiento: "));
+            let mut out = Vec::new();
+            devices(&store, &mut out).unwrap();
+            let listing = text(out);
+            assert!(
+                listing.contains("No hay dispositivos emparejados."),
+                "{listing:?}"
+            );
+            let mut out = Vec::new();
+            let error = revoke(&store, "000", &code(&store, &time), &mut out).unwrap_err();
+            assert_eq!(error.to_string(), "ningún dispositivo coincide");
+            assert_eq!(
+                CommandError::WrongCode.to_string(),
+                "el código es incorrecto"
+            );
+        });
+        assert_eq!(CommandError::WrongCode.to_string(), "the code is wrong");
+    }
+
+    #[test]
     fn a_mistake_in_the_target_does_not_use_up_the_code() {
         let (_dir, store, time) = setup();
         add_device(&store, "Aula");
@@ -406,15 +592,15 @@ mod tests {
         let mut out = Vec::new();
         assert!(!permissions(true, false, &mut out).unwrap());
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains("Grabacion de pantalla: concedido"));
-        assert!(text.contains("Accesibilidad): pendiente"));
-        assert!(text.contains("Ajustes del Sistema"));
+        assert!(text.contains("Screen recording: granted"));
+        assert!(text.contains("(Accessibility): pending"));
+        assert!(text.contains("System Settings"));
         let mut done = Vec::new();
         assert!(permissions(true, true, &mut done).unwrap());
         assert!(
             String::from_utf8(done)
                 .unwrap()
-                .contains("todos los permisos")
+                .contains("every permission")
         );
     }
 
@@ -449,8 +635,8 @@ mod tests {
         let mut out = Vec::new();
         pairing(&store, &mut out).unwrap();
         let shown = text(out);
-        assert!(shown.contains("Codigo de emparejamiento: "));
-        assert!(shown.contains("10 minutos"));
+        assert!(shown.contains("Pairing code: "));
+        assert!(shown.contains("10 minutes"));
         let now = time.load(Ordering::SeqCst);
         assert!(
             store
@@ -462,7 +648,7 @@ mod tests {
             .lines()
             .next()
             .unwrap()
-            .trim_start_matches("Codigo de emparejamiento: ");
+            .trim_start_matches("Pairing code: ");
         let parsed = wirehaus_crypto::pairing::PairingCode::from_text(code_text).unwrap();
         assert_eq!(
             store.read(|state, _| state.pairing_psk(now)).unwrap(),
@@ -475,13 +661,13 @@ mod tests {
         let (_dir, store, _time) = setup();
         let mut out = Vec::new();
         devices(&store, &mut out).unwrap();
-        assert!(text(out).contains("No hay dispositivos"));
+        assert!(text(out).contains("There are no paired devices"));
         let key = add_device(&store, "Aula 3");
         let mut out = Vec::new();
         devices(&store, &mut out).unwrap();
         let shown = text(out);
         assert!(shown.contains(&key));
-        assert!(shown.contains("Aula 3 (activo)"));
+        assert!(shown.contains("Aula 3 (active)"));
     }
 
     #[test]
@@ -497,7 +683,7 @@ mod tests {
         let right = code(&store, &time);
         revoke(&store, &key[..10], &right, &mut out).unwrap();
         assert_eq!(store.read(|state, _| state.devices().len()).unwrap(), 0);
-        assert!(text(out).contains("Dispositivo revocado: Aula 3"));
+        assert!(text(out).contains("Device revoked: Aula 3"));
     }
 
     #[test]
@@ -538,7 +724,7 @@ mod tests {
         let mut out = Vec::new();
         lock(&store, true, &right, &mut out).unwrap();
         assert!(store.read(|state, _| state.is_locked()).unwrap());
-        assert!(text(out).contains("bloqueado"));
+        assert!(text(out).contains("locked"));
         next_step(&time);
         let next = code(&store, &time);
         lock(&store, false, &next, &mut Vec::new()).unwrap();
@@ -615,13 +801,13 @@ mod tests {
         }
         let mut out = Vec::new();
         devices(&store, &mut out).unwrap();
-        assert!(text(out).contains("suspendido"));
+        assert!(text(out).contains("suspended"));
         next_step(&time);
         let right = code(&store, &time);
         reactivate(&store, &key[..12], &right, &mut Vec::new()).unwrap();
         let mut out = Vec::new();
         devices(&store, &mut out).unwrap();
-        assert!(text(out).contains("activo"));
+        assert!(text(out).contains("active"));
     }
 
     #[test]

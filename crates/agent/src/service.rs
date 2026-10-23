@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::i18n::tr;
+
 pub const LABEL: &str = "wirehaus.agent";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,16 +18,49 @@ pub struct ServiceConfig {
 
 #[derive(Debug, Error)]
 pub enum ServiceError {
-    #[error("no se puede preparar el servicio: {0}")]
+    #[error("{}", self.describe())]
     Io(#[from] std::io::Error),
-    #[error("no se encuentra la carpeta personal del usuario")]
+    #[error("{}", self.describe())]
     Home,
-    #[error("launchctl ha fallado: {0}")]
+    #[error("{}", self.describe())]
     Launchctl(String),
-    #[error("el agente no esta inicializado en {0}; ejecuta primero wirehaus-agent init")]
+    #[error("{}", self.describe())]
     NotInitialized(PathBuf),
-    #[error("el visor no es de fiar: {0}")]
+    #[error("{}", self.describe())]
     Viewer(#[from] crate::integrity::IntegrityError),
+}
+
+impl ServiceError {
+    fn describe(&self) -> String {
+        match self {
+            ServiceError::Io(error) => tr!(
+                format!("no se puede preparar el servicio: {error}"),
+                format!("cannot set up the service: {error}")
+            ),
+            ServiceError::Home => tr!(
+                "no se encuentra la carpeta personal del usuario",
+                "the user's home folder cannot be found"
+            ),
+            ServiceError::Launchctl(text) => tr!(
+                format!("launchctl ha fallado: {text}"),
+                format!("launchctl failed: {text}")
+            ),
+            ServiceError::NotInitialized(path) => tr!(
+                format!(
+                    "el agente no está inicializado en {}; ejecuta primero wirehaus-agent init",
+                    path.display()
+                ),
+                format!(
+                    "the agent is not initialized in {}; run wirehaus-agent init first",
+                    path.display()
+                )
+            ),
+            ServiceError::Viewer(error) => tr!(
+                format!("el visor no es de fiar: {error}"),
+                format!("the viewer cannot be trusted: {error}")
+            ),
+        }
+    }
 }
 
 fn escape(text: &str) -> String {
@@ -216,15 +251,28 @@ mod launchd {
         if !loaded {
             return Err(ServiceError::Launchctl(text));
         }
-        writeln!(out, "Servicio {LABEL} instalado en {}.", path.display())?;
+        let location = path.display();
         writeln!(
             out,
-            "Registro: {}",
+            "{}",
+            tr!(
+                format!("Servicio {LABEL} instalado en {location}."),
+                format!("Service {LABEL} installed in {location}.")
+            )
+        )?;
+        writeln!(
+            out,
+            "{}: {}",
+            tr!("Registro", "Log"),
             config.log_dir.join("agent.log").display()
         )?;
         writeln!(
             out,
-            "Arranca solo al iniciar sesion y se reinicia si se cae. La primera vez macOS pedira los permisos de Grabacion de pantalla y Accesibilidad para wirehaus-agent; concedelos en Ajustes del Sistema > Privacidad y seguridad."
+            "{}",
+            tr!(
+                "Arranca solo al iniciar sesión y se reinicia si se cae. La primera vez macOS pedirá los permisos de Grabación de pantalla y Accesibilidad para wirehaus-agent; concédelos en Ajustes del Sistema > Privacidad y seguridad.",
+                "It starts by itself when you log in and restarts if it dies. The first time, macOS will ask for the Screen Recording and Accessibility permissions for wirehaus-agent; grant them in System Settings > Privacy & Security."
+            )
         )?;
         Ok(())
     }
@@ -239,9 +287,23 @@ mod launchd {
             std::fs::remove_file(&path)?;
         }
         if existed {
-            writeln!(out, "Servicio {LABEL} desinstalado.")?;
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("Servicio {LABEL} desinstalado."),
+                    format!("Service {LABEL} uninstalled.")
+                )
+            )?;
         } else {
-            writeln!(out, "El servicio {LABEL} no estaba instalado.")?;
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("El servicio {LABEL} no estaba instalado."),
+                    format!("Service {LABEL} was not installed.")
+                )
+            )?;
         }
         Ok(())
     }
@@ -250,19 +312,44 @@ mod launchd {
         let home = home()?;
         let uid = uid()?;
         if !plist_path(&home).exists() {
-            writeln!(out, "El servicio {LABEL} no esta instalado.")?;
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("El servicio {LABEL} no está instalado."),
+                    format!("Service {LABEL} is not installed.")
+                )
+            )?;
             return Ok(());
         }
         let (loaded, text) = launchctl(&print_arguments(&uid))?;
         if loaded && running(&text) {
-            writeln!(out, "El servicio {LABEL} esta en marcha.")?;
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("El servicio {LABEL} está en marcha."),
+                    format!("Service {LABEL} is running.")
+                )
+            )?;
         } else if loaded {
             writeln!(
                 out,
-                "El servicio {LABEL} esta cargado pero parado; mira el registro."
+                "{}",
+                tr!(
+                    format!("El servicio {LABEL} está cargado pero parado; mira el registro."),
+                    format!("Service {LABEL} is loaded but stopped; check the log.")
+                )
             )?;
         } else {
-            writeln!(out, "El servicio {LABEL} esta instalado pero no cargado.")?;
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("El servicio {LABEL} está instalado pero no cargado."),
+                    format!("Service {LABEL} is installed but not loaded.")
+                )
+            )?;
         }
         Ok(())
     }
