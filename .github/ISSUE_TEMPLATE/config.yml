@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Vulnerabilidades
+    url: https://github.com/wirehaus/wirehaus/blob/main/SECURITY.md
+    about: No las publiques en un issue. Sigue las instrucciones de SECURITY.md.

@@ -1,0 +1,44 @@
+name: Error
+description: Algo no funciona como debería
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Si el fallo tiene que ver con la seguridad, no abras un issue y sigue SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: Qué ocurre
+      description: Qué esperabas y qué ha pasado en su lugar.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Cómo reproducirlo
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versión del agente
+      description: La salida de `wirehaus-agent info`.
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: Sistema del equipo con el agente
+      options: [Linux (X11), macOS, Windows]
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Navegador y versión
+  - type: textarea
+    id: logs
+    attributes:
+      label: Registro
+      description: Quita cualquier código, clave o dirección que no quieras compartir.
+      render: text

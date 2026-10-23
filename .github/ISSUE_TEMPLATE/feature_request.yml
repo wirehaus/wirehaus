@@ -1,0 +1,19 @@
+name: Propuesta
+description: Una mejora o una función nueva
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qué problema resuelve
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Cómo lo imaginas
+  - type: textarea
+    id: security
+    attributes:
+      label: Efecto en la seguridad
+      description: Qué superficie nueva abre y cómo se limita.
