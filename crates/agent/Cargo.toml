@@ -18,6 +18,10 @@ path = "src/lib.rs"
 name = "wirehaus-agent"
 path = "src/main.rs"
 
+[[bin]]
+name = "wirehaus-agentd"
+path = "src/bin/wirehaus-agentd.rs"
+
 [dependencies]
 clap.workspace = true
 httparse = "1"

@@ -64,6 +64,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Captura con DXGI Desktop Duplication (`wirehaus-capture`), con reconexión cuando se pierde el acceso a la salida.
 - Entrada de ratón y teclado por código de escaneo y posición física (`wirehaus-input`), con rueda en los dos ejes y liberación de teclas y botones al cerrar la sesión.
 - Portapapeles de texto con el sistema (`wirehaus-clipboard`).
+- `wirehaus-agent service install`, `status` y `uninstall` en Windows: tarea programada del usuario con inicio de sesión interactivo, relanzada cada minuto, y lanzador sin ventana `wirehaus-agentd` con registro propio.
+- La captura elige la salida de DXGI que coincide con el monitor principal y falla con un mensaje claro si no hay ninguna, en vez de usar la primera salida del primer adaptador.
 - `scripts/build-windows.sh` para compilar desde Linux con mingw, sin dependencias de DLL de mingw en el ejecutable.
 
 ### Seguridad

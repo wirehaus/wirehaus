@@ -43,7 +43,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         }
         Command::Init => commands::init(&dir, system_clock(), &mut out)?,
         Command::Pairing => commands::pairing(&open()?, &mut out)?,
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         Command::Service { action } => match action {
             crate::cli::ServiceAction::Install { viewer_dir, listen } => {
                 wirehaus_agent::service::install(&dir, &viewer_dir, listen, &mut out)?;

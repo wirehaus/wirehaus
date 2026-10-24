@@ -70,7 +70,7 @@ fn sddl_grantees(text: &str) -> Vec<String> {
     found
 }
 
-fn current_user_sid() -> std::io::Result<String> {
+pub fn current_user_sid() -> std::io::Result<String> {
     let output = Command::new("whoami")
         .args(["/user", "/fo", "csv", "/nh"])
         .output()?;

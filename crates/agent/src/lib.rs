@@ -6,6 +6,8 @@ pub mod files;
 mod http;
 pub mod i18n;
 pub mod integrity;
+#[cfg(any(windows, test))]
+pub mod launcher;
 mod link;
 mod mode;
 mod pacer;
@@ -13,11 +15,17 @@ mod platform;
 mod server;
 #[cfg(unix)]
 pub mod service;
+#[cfg(windows)]
+#[path = "winservice.rs"]
+pub mod service;
 mod session;
 pub mod state;
 pub mod static_files;
 pub mod store;
 mod stream;
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod taskxml;
 pub mod terminal;
 #[cfg(test)]
 mod testing;

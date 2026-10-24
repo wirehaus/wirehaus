@@ -19,7 +19,7 @@ pub enum Command {
     Pairing,
     #[cfg(target_os = "macos")]
     Permissions,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     Service {
         #[command(subcommand)]
         action: ServiceAction,
@@ -76,7 +76,7 @@ pub enum Command {
     },
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 #[derive(Debug, Subcommand)]
 pub enum ServiceAction {
     Install {
