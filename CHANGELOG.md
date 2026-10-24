@@ -88,6 +88,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 - En Windows el directorio de estado por defecto era relativo (`./wirehaus`) porque no existen `HOME` ni `XDG_CONFIG_HOME`; ahora es `%LOCALAPPDATA%\Wirehaus\state`.
 - `service uninstall` en Windows se mataba a sí mismo al parar los procesos por nombre; ahora excluye su propio PID.
+- Un nombre de pantalla X11 cuyo puerto TCP desborda (por ejemplo `:59999`) hacía entrar en pánico a x11rb; ahora se rechaza con un error.
 
 ### Seguridad
 
