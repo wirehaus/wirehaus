@@ -1,3 +1,4 @@
+import { ALTGR_WINDOW_MS, AltGrFilter, type KeyChange } from './altgr.js';
 import { CLIPBOARD_CHANNEL, type ClipboardMessage, decodeClipboard } from './clipboardprotocol.js';
 import { FILES_CHANNEL, type FilesMessage, decodeFiles } from './filesprotocol.js';
 import { evdevCode } from './keymap.js';
@@ -68,6 +69,7 @@ export class Viewer {
   private agentToPin: Uint8Array | null = null;
   private drawing: Promise<void> = Promise.resolve();
   private readonly pressedKeys = new Set<number>();
+  private readonly altGr = new AltGrFilter();
   private readonly pressedButtons = new Set<MouseButton>();
   private pendingMove: { x: number; y: number } | null = null;
   private ticket: Uint8Array | null = null;
@@ -544,12 +546,21 @@ export class Viewer {
     }
     event.preventDefault();
     event.stopPropagation();
-    if (pressed) {
-      this.pressedKeys.add(code);
-    } else {
-      this.pressedKeys.delete(code);
+    this.sendKeys(this.altGr.feed({ code, pressed, time: event.timeStamp }));
+    if (this.altGr.pending()) {
+      window.setTimeout(() => this.sendKeys(this.altGr.flush(performance.now())), ALTGR_WINDOW_MS);
     }
-    this.sendInput({ kind: 'key', code, pressed });
+  }
+
+  private sendKeys(changes: readonly KeyChange[]): void {
+    for (const { code, pressed } of changes) {
+      if (pressed) {
+        this.pressedKeys.add(code);
+      } else {
+        this.pressedKeys.delete(code);
+      }
+      this.sendInput({ kind: 'key', code, pressed });
+    }
   }
 
   private releaseButtons(): void {

@@ -48,6 +48,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- El visor ya no manda el Ctrl falso que Windows y algunos navegadores inventan al pulsar AltGr (`ControlLeft` y `AltRight` en el mismo instante): escribir `@` o `\u20ac` con un teclado español en un navegador de Windows contra un destino Linux o macOS habría pulsado Ctrl+AltGr. Un Ctrl real se retrasa 5 ms para poder distinguirlo.
+
 - `files add`, `files list` y `files remove` no muestran el prefijo interno `\\?\` de las rutas de Windows.
 
 - En Windows la terminal remota detecta que la shell ha terminado vigilando el proceso hijo: ConPTY no cierra la tubería de salida hasta que se cierra la consola, así que antes teclear `exit` dejaba la pestaña de la terminal abierta para siempre. Los tests de la terminal corren ya también en Windows, contestando a la consulta de posición del cursor (`ESC[6n`) que ConPTY exige.
