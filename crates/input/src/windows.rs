@@ -1,10 +1,10 @@
-use enigo::{Axis, Coordinate, Direction, Enigo, Keyboard, Mouse, Settings};
+use enigo::{Axis, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 use wirehaus_protocol::{Button, InputEvent};
 
 use crate::InputSink;
 use crate::error::InputError;
 use crate::pressed::Pressed;
-use crate::winmap::{scancode, wheel_notches};
+use crate::winmap::{PAUSE, scancode, wheel_notches};
 
 pub fn primary_display_size() -> Result<(u16, u16), InputError> {
     let _ = enigo::set_dpi_awareness();
@@ -73,6 +73,12 @@ impl WindowsInput {
     }
 
     fn key(&mut self, code: u16, pressed: bool) -> Result<(), InputError> {
+        if code == PAUSE {
+            return self
+                .enigo
+                .key(Key::Pause, direction(pressed))
+                .map_err(request_error);
+        }
         let scan = scancode(code).ok_or(InputError::KeyOutOfRange(code))?;
         self.enigo
             .raw(scan, direction(pressed))

@@ -1,5 +1,22 @@
 const EXTENDED: u16 = 0xE000;
 
+const FUNCTION_KEYS: [(u16, u16); 12] = [
+    (183, 0x64),
+    (184, 0x65),
+    (185, 0x66),
+    (186, 0x67),
+    (187, 0x68),
+    (188, 0x69),
+    (189, 0x6A),
+    (190, 0x6B),
+    (191, 0x6C),
+    (192, 0x6D),
+    (193, 0x6E),
+    (194, 0x76),
+];
+
+pub const PAUSE: u16 = 119;
+
 const EXTENDED_KEYS: [(u16, u16); 18] = [
     (96, 0x1C),
     (97, 0x1D),
@@ -26,6 +43,9 @@ const LAST_PLAIN_KEY: u16 = 88;
 pub fn scancode(evdev: u16) -> Option<u16> {
     if (1..=LAST_PLAIN_KEY).contains(&evdev) {
         return Some(evdev);
+    }
+    if let Some((_, scan)) = FUNCTION_KEYS.iter().find(|(code, _)| *code == evdev) {
+        return Some(*scan);
     }
     EXTENDED_KEYS
         .iter()
@@ -64,9 +84,17 @@ mod tests {
     }
 
     #[test]
+    fn the_extra_function_keys_have_their_own_scan_codes() {
+        assert_eq!(scancode(183), Some(0x64));
+        assert_eq!(scancode(193), Some(0x6E));
+        assert_eq!(scancode(194), Some(0x76));
+        assert_eq!(scancode(195), None);
+    }
+
+    #[test]
     fn unsupported_codes_are_rejected() {
         assert_eq!(scancode(0), None);
-        assert_eq!(scancode(119), None);
+        assert_eq!(scancode(PAUSE), None);
         assert_eq!(scancode(89), None);
         assert_eq!(scancode(300), None);
     }

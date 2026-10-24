@@ -71,6 +71,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 - Captura con DXGI Desktop Duplication (`wirehaus-capture`), con reconexión cuando se pierde el acceso a la salida.
 - Entrada de ratón y teclado por código de escaneo y posición física (`wirehaus-input`), con rueda en los dos ejes y liberación de teclas y botones al cerrar la sesión.
+- Las teclas Pausa y F13 a F24 funcionan en Windows (comprobadas con `GetAsyncKeyState`).
 - Portapapeles de texto con el sistema (`wirehaus-clipboard`).
 - `wirehaus-agent service install`, `status` y `uninstall` en Windows: tarea programada del usuario con inicio de sesión interactivo, relanzada cada minuto, y lanzador sin ventana `wirehaus-agentd` con registro propio.
 - `scripts/package-windows.sh` y `scripts/install.ps1`: paquete `.zip` con sumas SHA-256 e instalador por usuario, sin administrador, idempotente, con `-Uninstall` y `-Purge`.
