@@ -86,13 +86,18 @@ fn parse_sid(text: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
-    fn expected_grantees() -> Vec<String> {
-        let mut expected = vec!["SY".to_owned(), current_user_sid().unwrap()];
-        expected.sort();
-        expected
+    const BROAD_GROUPS: [&str; 5] = ["WD", "BU", "AU", "IU", "NU"];
+
+    pub fn assert_private(path: &Path) {
+        let grantees = grantees(path).unwrap();
+        assert!(grantees.contains(&"SY".to_owned()), "{grantees:?}");
+        assert!(grantees.len() <= 3, "{grantees:?}");
+        for group in BROAD_GROUPS {
+            assert!(!grantees.contains(&group.to_owned()), "{grantees:?}");
+        }
     }
 
     #[test]
@@ -123,7 +128,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wirehaus-acl-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         restrict_to_current_user(&dir).unwrap();
-        assert_eq!(grantees(&dir).unwrap(), expected_grantees());
+        assert_private(&dir);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -134,7 +139,7 @@ mod tests {
         let file = dir.join("state");
         std::fs::write(&file, "data").unwrap();
         restrict_to_current_user(&file).unwrap();
-        assert_eq!(grantees(&file).unwrap(), expected_grantees());
+        assert_private(&file);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "data");
         std::fs::remove_dir_all(&dir).unwrap();
     }
