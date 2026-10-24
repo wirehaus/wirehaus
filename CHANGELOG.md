@@ -48,6 +48,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- En Windows `serve` comprueba al arrancar que puede capturar la pantalla y manejar la entrada, y si no (SSH, servicio de Windows, pantalla bloqueada) se niega con un mensaje que explica que hace falta la sesión de escritorio del usuario.
+
 - En Windows la captura espera a los fotogramas de DXGI en lugar de sondear, y la sesión sobrevive a la pantalla de bloqueo y al aviso de control de cuentas reintentando cada segundo.
 
 - Un error transitorio al aceptar una conexión ya no detiene el servidor del agente: se registra y se reintenta, y solo cincuenta fallos seguidos lo paran.

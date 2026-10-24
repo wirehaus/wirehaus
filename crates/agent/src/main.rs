@@ -193,6 +193,8 @@ fn serve(
         let input = wirehaus_input::input_allowed() || wirehaus_input::request_input();
         commands::permissions(screen, input, out)?;
     }
+    #[cfg(windows)]
+    wirehaus_agent::preflight(options.display.as_deref())?;
     #[cfg(not(target_os = "macos"))]
     let _ = out;
     let exposure = wirehaus_agent::Exposure::new(&options.public_hosts, &options.viewer_origins)?;
