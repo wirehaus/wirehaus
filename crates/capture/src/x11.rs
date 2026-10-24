@@ -36,6 +36,9 @@ impl X11Screen {
     }
 
     fn open(display: Option<&str>, use_damage: bool) -> Result<Self, CaptureError> {
+        if let Some(name) = display {
+            check_display_name(name)?;
+        }
         let (connection, number) =
             x11rb::connect(display).map_err(|e| CaptureError::Connect(e.to_string()))?;
         let setup = connection.setup();
@@ -260,9 +263,32 @@ fn request_error(error: impl std::fmt::Display) -> CaptureError {
     CaptureError::Request(error.to_string())
 }
 
+const MAX_DISPLAY_NUMBER: u32 = 65535 - 6000;
+
+fn check_display_name(name: &str) -> Result<(), CaptureError> {
+    let invalid = || CaptureError::Connect(format!("invalid display name: {name}"));
+    let (_, rest) = name.rsplit_once(':').ok_or_else(invalid)?;
+    let number = rest.split('.').next().unwrap_or_default();
+    match number.parse::<u32>() {
+        Ok(n) if n <= MAX_DISPLAY_NUMBER => Ok(()),
+        _ => Err(invalid()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_display_numbers_that_overflow_the_tcp_port() {
+        assert!(check_display_name(":59999").is_err());
+        assert!(check_display_name("host:99999.0").is_err());
+        assert!(check_display_name("nocolon").is_err());
+        assert!(check_display_name(":x").is_err());
+        assert!(check_display_name(":0").is_ok());
+        assert!(check_display_name("host:10.1").is_ok());
+        assert!(check_display_name(":59535").is_ok());
+    }
 
     #[test]
     fn forces_the_alpha_channel_to_opaque() {
