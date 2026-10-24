@@ -7,7 +7,12 @@ use crate::polling::Grabber;
 const FRAME_TIMEOUT_MS: u32 = 10;
 const BYTES_PER_PIXEL: usize = 4;
 
+const MAX_OUTPUTS: usize = 16;
+
+pub type PrimarySize = Box<dyn Fn() -> Result<(u16, u16), CaptureError> + Send>;
+
 pub struct WindowsDisplay {
+    primary: PrimarySize,
     manager: DXGIManager,
     last: Option<Bitmap>,
 }
@@ -21,15 +26,17 @@ impl std::fmt::Debug for WindowsDisplay {
 }
 
 impl WindowsDisplay {
-    pub fn connect() -> Result<Self, CaptureError> {
+    pub fn connect(primary: PrimarySize) -> Result<Self, CaptureError> {
+        let manager = open(&primary)?;
         Ok(Self {
-            manager: open()?,
+            primary,
+            manager,
             last: None,
         })
     }
 
     fn reconnect(&mut self) -> Result<(), CaptureError> {
-        self.manager = open()?;
+        self.manager = open(&self.primary)?;
         Ok(())
     }
 }
@@ -70,8 +77,35 @@ impl WindowsDisplay {
     }
 }
 
-fn open() -> Result<DXGIManager, CaptureError> {
-    DXGIManager::new(FRAME_TIMEOUT_MS).map_err(|error| CaptureError::Connect(format!("{error:?}")))
+fn open(primary: &PrimarySize) -> Result<DXGIManager, CaptureError> {
+    let wanted = primary()?;
+    let mut manager = DXGIManager::new(FRAME_TIMEOUT_MS)
+        .map_err(|error| CaptureError::Connect(format!("{error:?}")))?;
+    let mut sizes = Vec::new();
+    for index in 0..MAX_OUTPUTS {
+        manager.set_capture_source_index(index);
+        let (width, height) = manager.geometry();
+        if width == 0 || height == 0 {
+            break;
+        }
+        sizes.push((width, height));
+    }
+    let index = select_output(&sizes, wanted).ok_or_else(|| {
+        CaptureError::Connect(format!(
+            "no output matches the primary monitor of {}x{}; outputs found: {sizes:?}",
+            wanted.0, wanted.1
+        ))
+    })?;
+    manager.set_capture_source_index(index);
+    Ok(manager)
+}
+
+fn select_output(sizes: &[(usize, usize)], primary: (u16, u16)) -> Option<usize> {
+    let (width, height) = (usize::from(primary.0), usize::from(primary.1));
+    sizes
+        .iter()
+        .position(|&size| size == (width, height))
+        .or_else(|| sizes.iter().position(|&size| size == (height, width)))
 }
 
 fn to_bitmap(mut pixels: Vec<u8>, width: usize, height: usize) -> Result<Bitmap, CaptureError> {
@@ -99,6 +133,24 @@ fn to_bitmap(mut pixels: Vec<u8>, width: usize, height: usize) -> Result<Bitmap,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picks_the_output_with_the_size_of_the_primary_monitor() {
+        let sizes = [(1280, 1024), (1920, 1080), (1920, 1080)];
+        assert_eq!(select_output(&sizes, (1920, 1080)), Some(1));
+        assert_eq!(select_output(&sizes, (1280, 1024)), Some(0));
+    }
+
+    #[test]
+    fn a_rotated_primary_matches_its_unrotated_output() {
+        assert_eq!(select_output(&[(1920, 1080)], (1080, 1920)), Some(0));
+    }
+
+    #[test]
+    fn no_matching_output_is_not_guessed() {
+        assert_eq!(select_output(&[(1920, 1080)], (2560, 1440)), None);
+        assert_eq!(select_output(&[], (1920, 1080)), None);
+    }
 
     #[test]
     fn forces_opaque_pixels() {

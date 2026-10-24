@@ -16,7 +16,7 @@ pub use error::InputError;
 #[cfg(target_os = "macos")]
 pub use macos::{MacInput, input_allowed, request_input};
 #[cfg(windows)]
-pub use windows::WindowsInput;
+pub use windows::{WindowsInput, primary_display_size};
 #[cfg(target_os = "linux")]
 pub use x11::X11Input;
 

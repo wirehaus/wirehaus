@@ -6,6 +6,18 @@ use crate::error::InputError;
 use crate::pressed::Pressed;
 use crate::winmap::{scancode, wheel_notches};
 
+pub fn primary_display_size() -> Result<(u16, u16), InputError> {
+    let _ = enigo::set_dpi_awareness();
+    let enigo = Enigo::new(&Settings::default()).map_err(request_error)?;
+    let (width, height) = enigo.main_display().map_err(request_error)?;
+    match (u16::try_from(width), u16::try_from(height)) {
+        (Ok(width), Ok(height)) => Ok((width, height)),
+        _ => Err(InputError::Request(format!(
+            "the primary display of {width}x{height} is too large"
+        ))),
+    }
+}
+
 pub struct WindowsInput {
     enigo: Enigo,
     pressed: Pressed,

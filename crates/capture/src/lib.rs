@@ -20,7 +20,7 @@ pub use framebuffer::FrameBuffer;
 pub use macos::{MacDisplay, request_screen_capture, screen_capture_allowed};
 pub use polling::{Backoff, Grabber, PollingScreen};
 #[cfg(windows)]
-pub use windows::WindowsDisplay;
+pub use windows::{PrimarySize, WindowsDisplay};
 #[cfg(target_os = "linux")]
 pub use x11::X11Screen;
 
