@@ -116,7 +116,7 @@ impl<G: Grabber> ScreenSource for PollingScreen<G> {
     }
 }
 
-fn is_busy(regions: &[Region], width: u16, height: u16) -> bool {
+pub(crate) fn is_busy(regions: &[Region], width: u16, height: u16) -> bool {
     let changed: usize = regions
         .iter()
         .map(|region| usize::from(region.rect.width) * usize::from(region.rect.height))
@@ -124,7 +124,10 @@ fn is_busy(regions: &[Region], width: u16, height: u16) -> bool {
     changed * 100 >= usize::from(width) * usize::from(height) * BUSY_PERCENT
 }
 
-fn changed_regions(previous: &Bitmap, current: &Bitmap) -> Result<Vec<Region>, CaptureError> {
+pub(crate) fn changed_regions(
+    previous: &Bitmap,
+    current: &Bitmap,
+) -> Result<Vec<Region>, CaptureError> {
     coalesce(&changed_tiles(previous, current))
         .into_iter()
         .map(|rect| {

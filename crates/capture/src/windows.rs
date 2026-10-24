@@ -1,79 +1,167 @@
+use std::time::{Duration, Instant};
+
 use dxgi_capture_rs::{CaptureError as DxgiError, DXGIManager};
 
-use crate::bitmap::Bitmap;
+use crate::bitmap::{Bitmap, Rect};
 use crate::error::CaptureError;
-use crate::polling::Grabber;
+use crate::polling::{Backoff, changed_regions, is_busy};
+use crate::{Region, ScreenSource, Update};
 
 const FRAME_TIMEOUT_MS: u32 = 10;
+const FIRST_FRAME_DEADLINE: Duration = Duration::from_secs(5);
 const BYTES_PER_PIXEL: usize = 4;
-
 const MAX_OUTPUTS: usize = 16;
 
 pub type PrimarySize = Box<dyn Fn() -> Result<(u16, u16), CaptureError> + Send>;
 
-pub struct WindowsDisplay {
+enum Acquired {
+    Idle,
+    Frame { bitmap: Bitmap, reset: bool },
+}
+
+struct Display {
     primary: PrimarySize,
     manager: DXGIManager,
-    last: Option<Bitmap>,
 }
 
-impl std::fmt::Debug for WindowsDisplay {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("WindowsDisplay")
-            .finish_non_exhaustive()
-    }
-}
-
-impl WindowsDisplay {
-    pub fn connect(primary: PrimarySize) -> Result<Self, CaptureError> {
+impl Display {
+    fn connect(primary: PrimarySize) -> Result<Self, CaptureError> {
         let manager = open(&primary)?;
-        Ok(Self {
-            primary,
-            manager,
-            last: None,
-        })
+        Ok(Self { primary, manager })
     }
 
     fn reconnect(&mut self) -> Result<(), CaptureError> {
         self.manager = open(&self.primary)?;
         Ok(())
     }
-}
 
-impl Grabber for WindowsDisplay {
-    fn grab(&mut self) -> Result<Bitmap, CaptureError> {
+    fn acquire(&mut self) -> Result<Acquired, CaptureError> {
         match self.manager.capture_frame_components() {
-            Ok((pixels, (width, height))) => {
-                let bitmap = to_bitmap(pixels, width, height)?;
-                self.last = Some(bitmap.clone());
-                Ok(bitmap)
-            }
-            Err(DxgiError::Timeout) => self.last.clone().map_or_else(|| self.grab_again(), Ok),
+            Ok((pixels, (width, height))) => Ok(Acquired::Frame {
+                bitmap: to_bitmap(pixels, width, height)?,
+                reset: false,
+            }),
+            Err(DxgiError::Timeout) => Ok(Acquired::Idle),
             Err(DxgiError::AccessLost | DxgiError::RefreshFailure) => {
                 self.reconnect()?;
-                self.grab_again()
+                self.acquire_after_reset()
             }
             Err(DxgiError::AccessDenied) => Err(CaptureError::PermissionDenied),
             Err(DxgiError::Fail(error)) => Err(CaptureError::Request(error.to_string())),
         }
     }
-}
 
-impl WindowsDisplay {
-    fn grab_again(&mut self) -> Result<Bitmap, CaptureError> {
+    fn acquire_after_reset(&mut self) -> Result<Acquired, CaptureError> {
         match self.manager.capture_frame_components() {
-            Ok((pixels, (width, height))) => {
-                let bitmap = to_bitmap(pixels, width, height)?;
-                self.last = Some(bitmap.clone());
-                Ok(bitmap)
-            }
-            Err(DxgiError::Timeout) => self
-                .last
-                .clone()
-                .ok_or_else(|| CaptureError::Request("the display produced no frame".to_owned())),
+            Ok((pixels, (width, height))) => Ok(Acquired::Frame {
+                bitmap: to_bitmap(pixels, width, height)?,
+                reset: true,
+            }),
+            Err(DxgiError::Timeout) => Ok(Acquired::Idle),
             Err(error) => Err(CaptureError::Request(error.to_string())),
         }
+    }
+}
+
+pub struct WindowsScreen {
+    display: Display,
+    previous: Option<Bitmap>,
+    backoff: Backoff,
+}
+
+impl std::fmt::Debug for WindowsScreen {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WindowsScreen")
+            .field(
+                "size",
+                &self
+                    .previous
+                    .as_ref()
+                    .map(|frame| (frame.width(), frame.height())),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl WindowsScreen {
+    pub fn connect(primary: PrimarySize) -> Result<Self, CaptureError> {
+        Ok(Self {
+            display: Display::connect(primary)?,
+            previous: None,
+            backoff: Backoff::default(),
+        })
+    }
+
+    fn idle(&self) -> Option<Update> {
+        self.previous.as_ref().map(|frame| Update {
+            width: frame.width(),
+            height: frame.height(),
+            resized: false,
+            regions: Vec::new(),
+        })
+    }
+
+    fn frame(&mut self, now: Instant, bitmap: Bitmap, reset: bool) -> Result<Update, CaptureError> {
+        let (width, height) = (bitmap.width(), bitmap.height());
+        let same_size = self
+            .previous
+            .as_ref()
+            .is_some_and(|previous| previous.width() == width && previous.height() == height);
+        let full = !same_size || reset;
+        let regions = match (&self.previous, full) {
+            (Some(previous), false) => changed_regions(previous, &bitmap)?,
+            _ => vec![Region {
+                rect: Rect {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height,
+                },
+                bitmap: bitmap.clone(),
+            }],
+        };
+        self.backoff
+            .observe(now, full || is_busy(&regions, width, height));
+        self.previous = Some(bitmap);
+        Ok(Update {
+            width,
+            height,
+            resized: !same_size,
+            regions,
+        })
+    }
+}
+
+impl ScreenSource for WindowsScreen {
+    fn next_update(&mut self) -> Result<Update, CaptureError> {
+        let started = Instant::now();
+        if !self.backoff.due(started)
+            && let Some(update) = self.idle()
+        {
+            return Ok(update);
+        }
+        loop {
+            let now = Instant::now();
+            match self.display.acquire()? {
+                Acquired::Frame { bitmap, reset } => return self.frame(now, bitmap, reset),
+                Acquired::Idle => {
+                    self.backoff.observe(now, false);
+                    if let Some(update) = self.idle() {
+                        return Ok(update);
+                    }
+                    if started.elapsed() > FIRST_FRAME_DEADLINE {
+                        return Err(CaptureError::Request(
+                            "the display produced no frame".to_owned(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    fn wake(&mut self) {
+        self.backoff.wake();
     }
 }
 

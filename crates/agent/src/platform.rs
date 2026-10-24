@@ -30,12 +30,10 @@ pub fn connect(_display: Option<&str>) -> Result<Backend, ServerError> {
 #[cfg(windows)]
 pub fn connect(_display: Option<&str>) -> Result<Backend, ServerError> {
     Ok(Backend {
-        screen: Box::new(wirehaus_capture::PollingScreen::new(
-            wirehaus_capture::WindowsDisplay::connect(Box::new(|| {
-                wirehaus_input::primary_display_size()
-                    .map_err(|error| wirehaus_capture::CaptureError::Connect(error.to_string()))
-            }))?,
-        )),
+        screen: Box::new(wirehaus_capture::WindowsScreen::connect(Box::new(|| {
+            wirehaus_input::primary_display_size()
+                .map_err(|error| wirehaus_capture::CaptureError::Connect(error.to_string()))
+        }))?),
         input: Box::new(wirehaus_input::WindowsInput::connect()?),
     })
 }
