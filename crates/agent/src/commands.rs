@@ -303,9 +303,9 @@ pub fn files_add(
     verify(store, code)?;
     let added = store.update(|state, _| state.add_file_root(&real))??;
     if added {
-        store.log("files_root_added", &real.display().to_string());
+        store.log("files_root_added", &plain(&real));
     }
-    let location = real.display();
+    let location = plain(&real);
     writeln!(
         out,
         "{}",
@@ -326,8 +326,8 @@ pub fn files_remove(
         .canonicalize()
         .unwrap_or_else(|_| folder.to_path_buf());
     store.update(|state, _| state.remove_file_root(&target))??;
-    store.log("files_root_removed", &target.display().to_string());
-    let location = target.display();
+    store.log("files_root_removed", &plain(&target));
+    let location = plain(&target);
     writeln!(
         out,
         "{}",
@@ -337,6 +337,14 @@ pub fn files_remove(
         )
     )?;
     Ok(())
+}
+
+fn plain(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc}");
+    }
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
 }
 
 pub fn files_list(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
@@ -352,7 +360,7 @@ pub fn files_list(store: &Store, out: &mut impl Write) -> Result<(), CommandErro
         )?;
     }
     for root in roots {
-        writeln!(out, "{}", root.display())?;
+        writeln!(out, "{}", plain(&root))?;
     }
     Ok(())
 }
@@ -952,5 +960,19 @@ mod tests {
         }
         let secret = store.read(|state, _| state.totp().to_base32()).unwrap();
         assert!(!log.contains(&secret));
+    }
+
+    #[test]
+    fn the_verbatim_prefix_that_windows_adds_is_not_shown_to_people() {
+        assert_eq!(
+            plain(Path::new(r"\\?\C:\Users\Ana\Docs")),
+            r"C:\Users\Ana\Docs"
+        );
+        assert_eq!(
+            plain(Path::new(r"\\?\UNC\server\share\x")),
+            r"\\server\share\x"
+        );
+        assert_eq!(plain(Path::new("/home/ana/docs")), "/home/ana/docs");
+        assert_eq!(plain(Path::new(r"C:\plain")), r"C:\plain");
     }
 }
