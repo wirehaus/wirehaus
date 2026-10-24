@@ -48,6 +48,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- En Windows la captura espera a los fotogramas de DXGI en lugar de sondear, y la sesión sobrevive a la pantalla de bloqueo y al aviso de control de cuentas reintentando cada segundo.
+
 - Un error transitorio al aceptar una conexión ya no detiene el servidor del agente: se registra y se reintenta, y solo cincuenta fallos seguidos lo paran.
 - Retirar el permiso de terminal cierra las terminales abiertas en un segundo y el visor recibe el aviso; antes solo impedía abrir otras nuevas.
 - Un número de flujo de terminal reutilizado ya no hereda la salida ni el cierre del anterior, y el agente deja de esperar sin límite a un intérprete que ha soltado su terminal sin terminar.
