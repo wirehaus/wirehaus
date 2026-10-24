@@ -48,6 +48,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- En Windows la terminal remota detecta que la shell ha terminado vigilando el proceso hijo: ConPTY no cierra la tubería de salida hasta que se cierra la consola, así que antes teclear `exit` dejaba la pestaña de la terminal abierta para siempre. Los tests de la terminal corren ya también en Windows, contestando a la consulta de posición del cursor (`ESC[6n`) que ConPTY exige.
+
 - En Windows `serve` comprueba al arrancar que puede capturar la pantalla y manejar la entrada, y si no (SSH, servicio de Windows, pantalla bloqueada) se niega con un mensaje que explica que hace falta la sesión de escritorio del usuario.
 
 - En Windows la captura espera a los fotogramas de DXGI en lugar de sondear, y la sesión sobrevive a la pantalla de bloqueo y al aviso de control de cuentas reintentando cada segundo.

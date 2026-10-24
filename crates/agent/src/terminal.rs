@@ -10,6 +10,7 @@ use wirehaus_protocol::{MAX_OUTPUT_CHUNK, RefusalReason};
 pub const MAX_SESSIONS: usize = 4;
 const QUEUE_CHUNKS: usize = 64;
 const EXIT_GRACE: Duration = Duration::from_millis(500);
+const EXIT_FLUSH: Duration = Duration::from_millis(150);
 const EXIT_POLL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, PartialEq, Eq)]
@@ -21,6 +22,7 @@ pub enum Event {
 type Tagged = (u64, Event);
 
 struct Session {
+    exited_at: Option<Instant>,
     generation: u64,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -116,6 +118,7 @@ impl Terminals {
         self.sessions.insert(
             stream,
             Session {
+                exited_at: None,
                 generation,
                 master: pair.master,
                 writer,
@@ -165,7 +168,33 @@ impl Terminals {
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
         }
+        if cfg!(windows) && out.len() < limit {
+            out.extend(self.finished_without_end_of_output());
+        }
         out
+    }
+
+    fn finished_without_end_of_output(&mut self) -> Vec<Event> {
+        let now = Instant::now();
+        let mut done = Vec::new();
+        for (&stream, session) in &mut self.sessions {
+            if session.exited_at.is_none() && matches!(session.child.try_wait(), Ok(Some(_))) {
+                session.exited_at = Some(now);
+            }
+            if session
+                .exited_at
+                .is_some_and(|at| now.duration_since(at) >= EXIT_FLUSH)
+            {
+                done.push(stream);
+            }
+        }
+        done.sort_unstable();
+        done.into_iter()
+            .map(|stream| Event::Exited {
+                stream,
+                code: self.finish(stream),
+            })
+            .collect()
     }
 
     fn accept(&mut self, generation: u64, event: Event) -> Option<Event> {
@@ -226,18 +255,32 @@ fn size(columns: u16, rows: u16) -> PtySize {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+
+    const CURSOR_QUERY: &[u8] = b"\x1b[6n";
+    const CURSOR_REPLY: &[u8] = b"\x1b[1;1R";
+
+    fn answer_cursor_query(terminals: &mut Terminals, stream: u32, data: &[u8]) {
+        let queries = data
+            .windows(CURSOR_QUERY.len())
+            .filter(|window| *window == CURSOR_QUERY)
+            .count();
+        for _ in 0..queries {
+            terminals.input(stream, CURSOR_REPLY);
+        }
+    }
 
     fn collect_until(terminals: &mut Terminals, wanted: impl Fn(&[u8]) -> bool) -> Vec<u8> {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut seen = Vec::new();
         while Instant::now() < deadline {
             for event in terminals.drain(64) {
-                if let Event::Output { data, .. } = event {
+                if let Event::Output { stream, data } = event {
+                    answer_cursor_query(terminals, stream, &data);
                     seen.extend_from_slice(&data);
                 }
             }
@@ -254,14 +297,59 @@ mod tests {
     }
 
     fn shell() -> Terminals {
-        Terminals::new("/bin/sh".to_owned())
+        if cfg!(windows) {
+            Terminals::new(default_shell())
+        } else {
+            Terminals::new("/bin/sh".to_owned())
+        }
+    }
+
+    fn line(text: &str) -> Vec<u8> {
+        let ending = if cfg!(windows) { "\r\n" } else { "\n" };
+        format!("{text}{ending}").into_bytes()
+    }
+
+    fn say_sum(word: &str) -> Vec<u8> {
+        if cfg!(windows) {
+            [
+                line("set /a n=20+22 > nul"),
+                line(&format!("echo {word}-%n%")),
+            ]
+            .concat()
+        } else {
+            line(&format!("echo {word}-$((20+22))"))
+        }
+    }
+
+    fn show_size() -> Vec<u8> {
+        line(if cfg!(windows) {
+            "mode con"
+        } else {
+            "stty size"
+        })
+    }
+
+    fn shows_size(seen: &[u8], rows: u16, columns: u16) -> bool {
+        if cfg!(windows) {
+            contains(seen, &rows.to_string()) && contains(seen, &columns.to_string())
+        } else {
+            contains(seen, &format!("{rows} {columns}"))
+        }
+    }
+
+    fn block_forever() -> Vec<u8> {
+        line(if cfg!(windows) {
+            "ping -n 1000 127.0.0.1 > nul"
+        } else {
+            "sleep 1000"
+        })
     }
 
     #[test]
     fn a_shell_runs_commands_and_returns_their_output() {
         let mut terminals = shell();
         terminals.open(1, 80, 24).unwrap();
-        assert!(terminals.input(1, b"echo wirehaus-$((20+22))\n"));
+        assert!(terminals.input(1, &say_sum("wirehaus")));
         let seen = collect_until(&mut terminals, |seen| contains(seen, "wirehaus-42"));
         assert!(
             contains(&seen, "wirehaus-42"),
@@ -274,31 +362,35 @@ mod tests {
     fn the_terminal_reports_its_size_and_follows_resizes() {
         let mut terminals = shell();
         terminals.open(1, 100, 30).unwrap();
-        terminals.input(1, b"stty size\n");
-        let seen = collect_until(&mut terminals, |seen| contains(seen, "30 100"));
-        assert!(contains(&seen, "30 100"));
+        terminals.input(1, &show_size());
+        let seen = collect_until(&mut terminals, |seen| shows_size(seen, 30, 100));
+        assert!(shows_size(&seen, 30, 100));
         assert!(terminals.resize(1, 120, 40));
-        terminals.input(1, b"stty size\n");
-        let seen = collect_until(&mut terminals, |seen| contains(seen, "40 120"));
-        assert!(contains(&seen, "40 120"));
+        terminals.input(1, &show_size());
+        let seen = collect_until(&mut terminals, |seen| shows_size(seen, 40, 120));
+        assert!(shows_size(&seen, 40, 120));
     }
 
     #[test]
     fn the_exit_code_of_the_shell_is_reported_and_the_session_is_gone() {
         let mut terminals = shell();
         terminals.open(7, 80, 24).unwrap();
-        terminals.input(7, b"exit 3\n");
+        terminals.input(7, &line("exit 3"));
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut code = None;
         while Instant::now() < deadline && code.is_none() {
             for event in terminals.drain(64) {
-                if let Event::Exited {
-                    stream,
-                    code: value,
-                } = event
-                {
-                    assert_eq!(stream, 7);
-                    code = Some(value);
+                match event {
+                    Event::Output { stream, data } => {
+                        answer_cursor_query(&mut terminals, stream, &data);
+                    }
+                    Event::Exited {
+                        stream,
+                        code: value,
+                    } => {
+                        assert_eq!(stream, 7);
+                        code = Some(value);
+                    }
                 }
             }
             thread::sleep(Duration::from_millis(20));
@@ -330,7 +422,7 @@ mod tests {
     fn closing_a_session_kills_its_shell() {
         let mut terminals = shell();
         terminals.open(1, 80, 24).unwrap();
-        terminals.input(1, b"sleep 1000\n");
+        terminals.input(1, &block_forever());
         thread::sleep(Duration::from_millis(200));
         terminals.close(1);
         assert_eq!(terminals.count(), 0);
@@ -339,7 +431,11 @@ mod tests {
 
     #[test]
     fn a_program_that_does_not_exist_is_refused() {
-        let mut terminals = Terminals::new("/nonexistent/shell".to_owned());
+        let mut terminals = Terminals::new(if cfg!(windows) {
+            r"C:\nonexistent\shell.exe".to_owned()
+        } else {
+            "/nonexistent/shell".to_owned()
+        });
         assert_eq!(terminals.open(1, 80, 24), Err(RefusalReason::SpawnFailed));
         assert_eq!(terminals.count(), 0);
     }
@@ -357,7 +453,19 @@ mod tests {
     fn a_slow_reader_does_not_lose_output() {
         let mut terminals = shell();
         terminals.open(1, 80, 24).unwrap();
-        terminals.input(1, b"i=0; while [ $i -lt 3000 ]; do echo line-$i; i=$((i+1)); done; echo finished-$((1+1))marker\n");
+        let burst = if cfg!(windows) {
+            [
+                line("set /a n=1+1 > nul"),
+                line("for /l %i in (0,1,2999) do @echo line-%i"),
+                line("echo finished-%n%marker"),
+            ]
+            .concat()
+        } else {
+            line(
+                "i=0; while [ $i -lt 3000 ]; do echo line-$i; i=$((i+1)); done; echo finished-$((1+1))marker",
+            )
+        };
+        terminals.input(1, &burst);
         thread::sleep(Duration::from_millis(500));
         let seen = collect_until(&mut terminals, |seen| contains(seen, "finished-2marker"));
         assert!(contains(&seen, "line-0"));
@@ -372,14 +480,19 @@ mod tests {
         terminals.close(1);
         terminals.open(1, 80, 24).unwrap();
         thread::sleep(Duration::from_millis(300));
+        let events = terminals.drain(64);
+        for event in &events {
+            if let Event::Output { stream, data } = event {
+                answer_cursor_query(&mut terminals, *stream, data);
+            }
+        }
         assert!(
-            terminals
-                .drain(64)
+            events
                 .iter()
                 .all(|event| !matches!(event, Event::Exited { .. }))
         );
         assert_eq!(terminals.count(), 1);
-        assert!(terminals.input(1, b"echo again-$((20+22))\n"));
+        assert!(terminals.input(1, &say_sum("again")));
         let seen = collect_until(&mut terminals, |seen| contains(seen, "again-42"));
         assert!(contains(&seen, "again-42"));
     }
