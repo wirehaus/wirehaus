@@ -1,6 +1,7 @@
 [package]
 name = "wirehaus-agent"
 description = "Wirehaus agent for the machine you want to reach"
+default-run = "wirehaus-agent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
