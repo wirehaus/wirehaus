@@ -80,6 +80,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Seguridad
 
+- Las carpetas compartidas en Windows rechazan los nombres de dispositivo (`CON`, `NUL`, `COM1`, `LPT1`..., con cualquier extensión) y los caracteres que Windows no admite en un nombre: antes, subir un fichero llamado `NUL` respondía que estaba hecho y descartaba los datos en el dispositivo. Los tests del módulo de archivos corren ya también en Windows (antes eran solo para Unix).
+
 - En Windows el directorio de estado y sus ficheros solo admiten al usuario actual y al sistema (ACL sin herencia), el equivalente de los permisos 700 y 600 de Unix.
 
 - Los handshakes de emparejamiento fallidos ya no queman el código: con 160 bits no frenaban nada y permitían a cualquiera que conociera la dirección anular un emparejamiento en curso. Los fallos del segundo factor siguen quemándolo.

@@ -498,15 +498,38 @@ fn components(relative: &str) -> Result<Vec<&str>, FailureReason> {
     relative.split('/').map(valid_component).collect()
 }
 
+const DEVICE_NAMES: [&str; 6] = ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"];
+const WINDOWS_INVALID: [char; 5] = ['<', '>', '"', '|', '?'];
+
+fn is_reserved(part: &str) -> bool {
+    let stem = part.split('.').next().unwrap_or(part).trim_end_matches(' ');
+    let upper = stem.to_uppercase();
+    if DEVICE_NAMES.contains(&upper.as_str()) {
+        return true;
+    }
+    let mut chars = upper.chars();
+    let prefix: String = chars.by_ref().take(3).collect();
+    matches!(prefix.as_str(), "COM" | "LPT")
+        && matches!(
+            chars.next(),
+            Some('1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}')
+        )
+        && chars.next().is_none()
+}
+
 fn valid_component(part: &str) -> Result<&str, FailureReason> {
     let forbidden = |c: char| c.is_control() || matches!(c, '\\' | ':' | '/');
-    let windows_trailing = cfg!(windows) && (part.ends_with('.') || part.ends_with(' '));
+    let windows_only = cfg!(windows)
+        && (part.ends_with('.')
+            || part.ends_with(' ')
+            || part.contains(|c: char| c == '*' || WINDOWS_INVALID.contains(&c))
+            || is_reserved(part));
     if part.is_empty()
         || part == "."
         || part == ".."
         || part.len() > MAX_NAME_LEN
         || part.contains(forbidden)
-        || windows_trailing
+        || windows_only
     {
         return Err(FailureReason::InvalidPath);
     }
@@ -555,11 +578,24 @@ fn map_io(error: &std::io::Error) -> FailureReason {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
-    use std::os::unix::fs::symlink;
-
     use super::*;
+
+    fn symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(original, link)
+        }
+        #[cfg(windows)]
+        {
+            if original.as_ref().is_dir() {
+                std::os::windows::fs::symlink_dir(original, link)
+            } else {
+                std::os::windows::fs::symlink_file(original, link)
+            }
+        }
+    }
 
     struct Sandbox {
         base: PathBuf,
@@ -840,6 +876,7 @@ mod tests {
         assert_eq!(files.active(), 0);
     }
 
+    #[cfg(unix)]
     #[test]
     fn downloading_a_named_pipe_fails_instead_of_blocking() {
         let sandbox = Sandbox::new("fifo");
@@ -954,6 +991,7 @@ mod tests {
 
     #[test]
     fn uploads_never_overwrite_and_files_are_private() {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         let sandbox = Sandbox::new("noclobber");
         let mut files = Files::new();
@@ -967,11 +1005,14 @@ mod tests {
             upload(&mut files, &roots, "fresh.txt", b"x"),
             FilesMessage::Done
         );
-        let mode = fs::metadata(sandbox.root().join("fresh.txt"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o077, 0);
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(sandbox.root().join("fresh.txt"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o077, 0);
+        }
     }
 
     #[test]
@@ -1224,6 +1265,91 @@ mod tests {
                 only(files.handle(1, message, &roots)),
                 FilesMessage::Failed(_)
             ));
+        }
+    }
+
+    #[test]
+    fn reserved_device_names_are_recognised_with_any_case_and_extension() {
+        for name in [
+            "CON",
+            "con",
+            "Nul",
+            "aux.txt",
+            "PRN",
+            "COM1",
+            "lpt9.log",
+            "CONIN$",
+            "CONOUT$",
+            "com3.tar.gz",
+            "COM\u{b9}",
+            "nul .txt",
+        ] {
+            assert!(is_reserved(name), "{name}");
+        }
+        for name in [
+            "console",
+            "com10",
+            "comx",
+            "con2",
+            "a.con",
+            "LPT0x",
+            "report.txt",
+            "NUL1",
+        ] {
+            assert!(!is_reserved(name), "{name}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_refuses_device_names_and_invalid_characters_everywhere() {
+        let sandbox = Sandbox::new("devices");
+        let mut files = Files::new();
+        let roots = sandbox.roots();
+        for name in [
+            "NUL", "con.txt", "COM1", "a<b", "a|b", "q?", "star*", "quote\"x",
+        ] {
+            assert_eq!(
+                upload(&mut files, &roots, name, b"x"),
+                FilesMessage::Failed(FailureReason::InvalidPath),
+                "{name}"
+            );
+            assert_eq!(
+                only(files.handle(1, path_message(mkdir_message, name), &roots)),
+                FilesMessage::Failed(FailureReason::InvalidPath),
+                "{name}"
+            );
+            assert_eq!(
+                only(files.handle(1, path_message(download_message, name), &roots)),
+                FilesMessage::Failed(FailureReason::InvalidPath),
+                "{name}"
+            );
+        }
+        assert!(!sandbox.root().join("sub").join("NUL").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_refuses_drive_letters_streams_and_backslashes() {
+        let sandbox = Sandbox::new("drives");
+        let mut files = Files::new();
+        let roots = sandbox.roots();
+        for path in [
+            "C:\\Windows",
+            "C:Windows",
+            "a.txt:stream",
+            "..\\outside",
+            "sub\\..\\..\\outside",
+            "\\\\server\\share",
+            "//server/share",
+            "a.txt.",
+            "a.txt ",
+        ] {
+            assert_eq!(
+                only(files.handle(1, path_message(download_message, path), &roots)),
+                FilesMessage::Failed(FailureReason::InvalidPath),
+                "{path}"
+            );
         }
     }
 }
