@@ -5,6 +5,9 @@ mod framebuffer;
 #[cfg(target_os = "macos")]
 mod macos;
 mod polling;
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod retry;
 #[cfg(windows)]
 mod windows;
 #[cfg(target_os = "linux")]

@@ -5,6 +5,7 @@ use dxgi_capture_rs::{CaptureError as DxgiError, DXGIManager};
 use crate::bitmap::{Bitmap, Rect};
 use crate::error::CaptureError;
 use crate::polling::{Backoff, changed_regions, is_busy};
+use crate::retry::Retry;
 use crate::{Region, ScreenSource, Update};
 
 const FRAME_TIMEOUT_MS: u32 = 10;
@@ -21,45 +22,55 @@ enum Acquired {
 
 struct Display {
     primary: PrimarySize,
-    manager: DXGIManager,
+    manager: Option<DXGIManager>,
+    retry: Retry,
 }
 
 impl Display {
     fn connect(primary: PrimarySize) -> Result<Self, CaptureError> {
         let manager = open(&primary)?;
-        Ok(Self { primary, manager })
-    }
-
-    fn reconnect(&mut self) -> Result<(), CaptureError> {
-        self.manager = open(&self.primary)?;
-        Ok(())
+        Ok(Self {
+            primary,
+            manager: Some(manager),
+            retry: Retry::default(),
+        })
     }
 
     fn acquire(&mut self) -> Result<Acquired, CaptureError> {
-        match self.manager.capture_frame_components() {
-            Ok((pixels, (width, height))) => Ok(Acquired::Frame {
-                bitmap: to_bitmap(pixels, width, height)?,
-                reset: false,
-            }),
-            Err(DxgiError::Timeout) => Ok(Acquired::Idle),
-            Err(DxgiError::AccessLost | DxgiError::RefreshFailure) => {
-                self.reconnect()?;
-                self.acquire_after_reset()
+        let now = Instant::now();
+        if self.retry.waiting(now) {
+            return Ok(Acquired::Idle);
+        }
+        let reset = self.retry.pending();
+        if self.manager.is_none() {
+            match open(&self.primary) {
+                Ok(manager) => self.manager = Some(manager),
+                Err(_) => return Ok(self.blocked(now)),
             }
-            Err(DxgiError::AccessDenied) => Err(CaptureError::PermissionDenied),
+        }
+        let Some(manager) = self.manager.as_mut() else {
+            return Ok(self.blocked(now));
+        };
+        match manager.capture_frame_components() {
+            Ok((pixels, (width, height))) => {
+                self.retry.recovered();
+                Ok(Acquired::Frame {
+                    bitmap: to_bitmap(pixels, width, height)?,
+                    reset,
+                })
+            }
+            Err(DxgiError::Timeout) => Ok(Acquired::Idle),
+            Err(DxgiError::AccessLost | DxgiError::RefreshFailure | DxgiError::AccessDenied) => {
+                self.manager = None;
+                Ok(self.blocked(now))
+            }
             Err(DxgiError::Fail(error)) => Err(CaptureError::Request(error.to_string())),
         }
     }
 
-    fn acquire_after_reset(&mut self) -> Result<Acquired, CaptureError> {
-        match self.manager.capture_frame_components() {
-            Ok((pixels, (width, height))) => Ok(Acquired::Frame {
-                bitmap: to_bitmap(pixels, width, height)?,
-                reset: true,
-            }),
-            Err(DxgiError::Timeout) => Ok(Acquired::Idle),
-            Err(error) => Err(CaptureError::Request(error.to_string())),
-        }
+    fn blocked(&mut self, now: Instant) -> Acquired {
+        self.retry.failed(now);
+        Acquired::Idle
     }
 }
 
