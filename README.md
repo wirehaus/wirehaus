@@ -105,7 +105,7 @@ wirehaus-agent files add ~/Documentos --code 123456
 wirehaus-agent clipboard allow --direction both --code 123456
 ```
 
-Quitarlos no exige código: `terminal deny`, `files remove <carpeta>` y `clipboard deny`. Una sesión sin actividad se cierra a los 30 minutos (`--idle-minutes`).
+La terminal abre la shell del sistema (`$SHELL` en Linux y macOS, Windows PowerShell en Windows); `WIREHAUS_SHELL` permite elegir otra, por ejemplo `pwsh`. Quitarlos no exige código: `terminal deny`, `files remove <carpeta>` y `clipboard deny`. Una sesión sin actividad se cierra a los 30 minutos (`--idle-minutes`).
 
 ## Estructura
 
