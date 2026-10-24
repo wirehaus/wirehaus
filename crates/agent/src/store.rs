@@ -505,7 +505,7 @@ mod tests {
             );
         }
         #[cfg(windows)]
-        assert_eq!(crate::winacl::entries(&dir.0).unwrap(), 2);
+        assert_eq!(crate::winacl::grantees(&dir.0).unwrap().len(), 2);
         assert!(!dir.0.join(STATE_TEMP).exists());
     }
 
