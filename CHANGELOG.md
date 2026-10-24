@@ -65,8 +65,14 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Entrada de ratón y teclado por código de escaneo y posición física (`wirehaus-input`), con rueda en los dos ejes y liberación de teclas y botones al cerrar la sesión.
 - Portapapeles de texto con el sistema (`wirehaus-clipboard`).
 - `wirehaus-agent service install`, `status` y `uninstall` en Windows: tarea programada del usuario con inicio de sesión interactivo, relanzada cada minuto, y lanzador sin ventana `wirehaus-agentd` con registro propio.
+- `scripts/package-windows.sh` y `scripts/install.ps1`: paquete `.zip` con sumas SHA-256 e instalador por usuario, sin administrador, idempotente, con `-Uninstall` y `-Purge`.
 - La captura elige la salida de DXGI que coincide con el monitor principal y falla con un mensaje claro si no hay ninguna, en vez de usar la primera salida del primer adaptador.
 - `scripts/build-windows.sh` para compilar desde Linux con mingw, sin dependencias de DLL de mingw en el ejecutable.
+
+### Corregido
+
+- En Windows el directorio de estado por defecto era relativo (`./wirehaus`) porque no existen `HOME` ni `XDG_CONFIG_HOME`; ahora es `%LOCALAPPDATA%\Wirehaus\state`.
+- `service uninstall` en Windows se mataba a sí mismo al parar los procesos por nombre; ahora excluye su propio PID.
 
 ### Seguridad
 

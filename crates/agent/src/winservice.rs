@@ -10,8 +10,8 @@ use crate::launcher::{AGENT_IMAGE, agent_path, log_path};
 use crate::static_files::Viewer;
 use crate::store::{Store, system_clock};
 use crate::taskxml::{
-    TASK_NAME, TaskConfig, create_arguments, delete_arguments, end_arguments, process_listed,
-    query_arguments, run_arguments, task_xml, tasklist_arguments, utf16_with_bom,
+    TASK_NAME, TaskConfig, create_arguments, delete_arguments, end_arguments, kill_arguments,
+    process_listed, query_arguments, run_arguments, task_xml, tasklist_arguments, utf16_with_bom,
 };
 
 const LAUNCHER_IMAGE: &str = "wirehaus-agentd.exe";
@@ -155,10 +155,7 @@ pub fn uninstall(out: &mut impl Write) -> Result<(), ServiceError> {
             return Err(ServiceError::Scheduler(text));
         }
     }
-    let _ = run(
-        "taskkill",
-        &["/F".to_owned(), "/IM".to_owned(), AGENT_IMAGE.to_owned()],
-    )?;
+    let _ = run("taskkill", &kill_arguments(AGENT_IMAGE, std::process::id()))?;
     let message = if exists {
         tr!(
             format!("Tarea \"{TASK_NAME}\" desinstalada y agente parado."),

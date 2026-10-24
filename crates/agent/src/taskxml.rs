@@ -162,6 +162,16 @@ pub fn tasklist_arguments(image: &str) -> Vec<String> {
     ]
 }
 
+pub fn kill_arguments(image: &str, own_pid: u32) -> Vec<String> {
+    vec![
+        "/F".to_owned(),
+        "/FI".to_owned(),
+        format!("IMAGENAME eq {image}"),
+        "/FI".to_owned(),
+        format!("PID ne {own_pid}"),
+    ]
+}
+
 pub fn process_listed(tasklist: &str, image: &str) -> bool {
     let wanted = format!("\"{image}\"");
     tasklist.lines().any(|line| {
@@ -231,6 +241,20 @@ mod tests {
         assert_eq!(&bytes[..2], &[0xFF, 0xFE]);
         assert_eq!(bytes.len(), 2 + 2 * "<a>é</a>".chars().count());
         assert_eq!(&bytes[2..4], &[b'<', 0]);
+    }
+
+    #[test]
+    fn stopping_the_agent_never_targets_the_process_doing_the_stopping() {
+        assert_eq!(
+            kill_arguments("wirehaus-agent.exe", 4242),
+            [
+                "/F",
+                "/FI",
+                "IMAGENAME eq wirehaus-agent.exe",
+                "/FI",
+                "PID ne 4242"
+            ]
+        );
     }
 
     #[test]

@@ -150,11 +150,23 @@ fn dir_from(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
     if let Some(dir) = get("WIREHAUS_STATE_DIR") {
         return PathBuf::from(dir);
     }
+    if cfg!(windows)
+        && let Some(dir) = windows_dir(&get)
+    {
+        return dir;
+    }
     let base = get("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| get("HOME").map(|home| PathBuf::from(home).join(".config")))
         .unwrap_or_else(|| PathBuf::from("."));
     base.join("wirehaus")
+}
+
+fn windows_dir(get: &impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    get("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .filter(|base| base.is_absolute() || base.has_root())
+        .map(|base| base.join("Wirehaus").join("state"))
 }
 
 impl Store {
@@ -964,5 +976,18 @@ mod tests {
             PathBuf::from("/home/a/.config/wirehaus")
         );
         assert_eq!(dir_from(environment(&[])), PathBuf::from("./wirehaus"));
+    }
+
+    #[test]
+    fn windows_keeps_the_state_under_the_local_application_data_folder() {
+        assert_eq!(
+            windows_dir(&environment(&[("LOCALAPPDATA", "/data/local")])),
+            Some(PathBuf::from("/data/local/Wirehaus/state"))
+        );
+        assert_eq!(
+            windows_dir(&environment(&[("LOCALAPPDATA", "relative")])),
+            None
+        );
+        assert_eq!(windows_dir(&environment(&[])), None);
     }
 }
