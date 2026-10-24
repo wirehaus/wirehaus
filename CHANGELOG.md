@@ -46,6 +46,10 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 - Los mensajes de las órdenes del agente (`init`, `pairing`, `devices`, `files`, `service` y el resto) y sus errores salen en español o en inglés según `LC_ALL`, `LC_MESSAGES` o `LANG`, con el inglés por defecto. Antes mezclaban español sin tildes e inglés.
 
+### Cambiado
+
+- La terminal remota abre Windows PowerShell por defecto en Windows (antes `cmd.exe`) y se puede elegir otra shell con la variable de entorno `WIREHAUS_SHELL` en cualquier sistema.
+
 ### Corregido
 
 - El visor ya no manda el Ctrl falso que Windows y algunos navegadores inventan al pulsar AltGr (`ControlLeft` y `AltRight` en el mismo instante): escribir `@` o `\u20ac` con un teclado español en un navegador de Windows contra un destino Linux o macOS habría pulsado Ctrl+AltGr. Un Ctrl real se retrasa 5 ms para poder distinguirlo.

@@ -47,11 +47,31 @@ impl std::fmt::Debug for Terminals {
 
 #[must_use]
 pub fn default_shell() -> String {
-    if cfg!(windows) {
-        return std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_owned());
+    shell_from(
+        |name| std::env::var(name).ok(),
+        cfg!(windows),
+        std::path::Path::exists,
+    )
+}
+
+fn shell_from(
+    get: impl Fn(&str) -> Option<String>,
+    windows: bool,
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> String {
+    if let Some(shell) = get("WIREHAUS_SHELL").filter(|shell| !shell.is_empty()) {
+        return shell;
     }
-    std::env::var("SHELL")
-        .ok()
+    if windows {
+        let powershell = get("SystemRoot").map(|root| {
+            std::path::PathBuf::from(root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+        });
+        if let Some(path) = powershell.filter(|path| exists(path)) {
+            return path.to_string_lossy().into_owned();
+        }
+        return get("COMSPEC").unwrap_or_else(|| "cmd.exe".to_owned());
+    }
+    get("SHELL")
         .filter(|shell| !shell.is_empty())
         .unwrap_or_else(|| "/bin/sh".to_owned())
 }
@@ -298,7 +318,7 @@ mod tests {
 
     fn shell() -> Terminals {
         if cfg!(windows) {
-            Terminals::new(default_shell())
+            Terminals::new(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_owned()))
         } else {
             Terminals::new("/bin/sh".to_owned())
         }
@@ -530,5 +550,82 @@ mod tests {
     #[test]
     fn the_default_shell_is_never_empty() {
         assert_ne!(default_shell(), "");
+    }
+
+    fn environment(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: std::collections::HashMap<String, String> = pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect();
+        move |name| map.get(name).cloned()
+    }
+
+    #[test]
+    fn the_shell_follows_the_environment_and_the_platform() {
+        let present = |_: &std::path::Path| true;
+        let absent = |_: &std::path::Path| false;
+        assert_eq!(
+            shell_from(
+                environment(&[("WIREHAUS_SHELL", "/opt/fish"), ("SHELL", "/bin/zsh")]),
+                false,
+                absent
+            ),
+            "/opt/fish"
+        );
+        assert_eq!(
+            shell_from(environment(&[("SHELL", "/bin/zsh")]), false, absent),
+            "/bin/zsh"
+        );
+        assert_eq!(shell_from(environment(&[]), false, absent), "/bin/sh");
+        assert_eq!(
+            shell_from(environment(&[("SHELL", "")]), false, absent),
+            "/bin/sh"
+        );
+        assert!(
+            shell_from(environment(&[("SystemRoot", r"C:\Windows")]), true, present)
+                .ends_with(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+        );
+        assert_eq!(
+            shell_from(
+                environment(&[
+                    ("SystemRoot", r"C:\Windows"),
+                    ("COMSPEC", r"C:\Windows\System32\cmd.exe")
+                ]),
+                true,
+                absent
+            ),
+            r"C:\Windows\System32\cmd.exe"
+        );
+        assert_eq!(shell_from(environment(&[]), true, absent), "cmd.exe");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_default_windows_shell_is_powershell_and_reports_its_exit_code() {
+        assert!(default_shell().to_lowercase().ends_with("powershell.exe"));
+        let mut terminals = Terminals::new(default_shell());
+        terminals.open(1, 100, 30).unwrap();
+        assert!(terminals.input(1, &line("Write-Output ('wirehaus-' + (20+22))")));
+        let seen = collect_until(&mut terminals, |seen| contains(seen, "wirehaus-42"));
+        assert!(
+            contains(&seen, "wirehaus-42"),
+            "{}",
+            String::from_utf8_lossy(&seen)
+        );
+        terminals.input(1, &line("exit 5"));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut code = None;
+        while Instant::now() < deadline && code.is_none() {
+            for event in terminals.drain(64) {
+                match event {
+                    Event::Output { stream, data } => {
+                        answer_cursor_query(&mut terminals, stream, &data);
+                    }
+                    Event::Exited { code: value, .. } => code = Some(value),
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(code, Some(5));
     }
 }
