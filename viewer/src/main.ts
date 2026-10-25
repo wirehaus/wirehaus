@@ -4,6 +4,7 @@ import {
   encodeTerminalOpen,
   encodeTerminalResize,
 } from './protocol.js';
+import { AudioControl } from './audio.js';
 import { DesktopCapture } from './capture.js';
 import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
@@ -107,6 +108,21 @@ const capture = new DesktopCapture(
   },
 );
 
+const audio = new AudioControl(
+  element<HTMLButtonElement>('listen'),
+  { send: (payload) => viewer.sendAudio(payload) },
+  {
+    listen: messages.audioListen,
+    stop: messages.audioStop,
+    starting: messages.audioStarting,
+    unsupported: messages.audioUnsupported,
+    failure: (reason) => messages.audioFailure[reason],
+  },
+  (text) => {
+    toolsNotice.textContent = text;
+  },
+);
+
 let lastKind: ViewerState['kind'] = 'loading';
 
 function show(state: ViewerState): void {
@@ -154,24 +170,28 @@ function show(state: ViewerState): void {
       terminals.endAll();
       files.reset();
       clipboard.reset();
+      audio.reset();
       status.textContent = refusal(state, messages);
       break;
     case 'closed':
       terminals.endAll();
       files.reset();
       clipboard.reset();
+      audio.reset();
       status.textContent = messages.closed;
       break;
     case 'reconnecting':
       terminals.endAll();
       files.reset();
       clipboard.reset();
+      audio.reset();
       status.textContent = messages.reconnecting(state.attempt);
       break;
     case 'ended':
       terminals.endAll();
       files.reset();
       clipboard.reset();
+      audio.reset();
       status.textContent = endedText(state.reason);
       break;
   }
@@ -261,6 +281,7 @@ const clipboard = new ClipboardPanel(
   },
 );
 viewer.clipboardListener = (message) => clipboard.receive(message);
+viewer.audioListener = (message) => audio.receive(message);
 
 type Panel = 'desktop' | 'files' | 'clipboard';
 

@@ -5,7 +5,7 @@ use std::thread::JoinHandle;
 
 use wirehaus_audio::{AudioError, AudioSource, Encoder, FRAME_VALUES, Interrupter};
 
-const QUEUE_PACKETS: usize = 16;
+const QUEUE_PACKETS: usize = 64;
 
 pub type Opener = fn() -> Result<Box<dyn AudioSource>, AudioError>;
 

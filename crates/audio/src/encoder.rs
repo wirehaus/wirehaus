@@ -81,6 +81,8 @@ mod tests {
             .count();
         let measured = f64::from(u32::try_from(crossings).unwrap()) / 0.2;
         assert!((measured - 440.0).abs() < 15.0, "{measured}");
+        let peak = tail.iter().fold(0f32, |peak, value| peak.max(value.abs()));
+        assert!((0.34..0.46).contains(&peak), "{peak}");
     }
 
     #[test]

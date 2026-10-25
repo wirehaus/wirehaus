@@ -1,4 +1,5 @@
 import { ALTGR_WINDOW_MS, AltGrFilter, type KeyChange } from './altgr.js';
+import { AUDIO_CHANNEL, type AudioMessage, decodeAudio } from './audioprotocol.js';
 import { CLIPBOARD_CHANNEL, type ClipboardMessage, decodeClipboard } from './clipboardprotocol.js';
 import { FILES_CHANNEL, type FilesMessage, decodeFiles } from './filesprotocol.js';
 import { evdevCode } from './keymap.js';
@@ -30,6 +31,7 @@ import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './sto
 import type { Target, TargetError } from './target.js';
 import { VideoPlayer, videoSupported } from './video.js';
 
+export type AudioListener = (message: AudioMessage) => void;
 export type ClipboardListener = (message: ClipboardMessage) => void;
 
 export type FilesListener = (stream: number, message: FilesMessage) => void;
@@ -81,6 +83,7 @@ export class Viewer {
   terminalListener: TerminalListener | null = null;
   filesListener: FilesListener | null = null;
   clipboardListener: ClipboardListener | null = null;
+  audioListener: AudioListener | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -314,6 +317,8 @@ export class Viewer {
       this.filesListener?.(frame.stream, decodeFiles(frame.payload));
     } else if (this.phase === 'streaming' && frame.channel === CLIPBOARD_CHANNEL) {
       this.clipboardListener?.(decodeClipboard(frame.payload));
+    } else if (this.phase === 'streaming' && frame.channel === AUDIO_CHANNEL) {
+      this.audioListener?.(decodeAudio(frame.payload));
     } else {
       this.fail(socket);
     }
@@ -438,6 +443,10 @@ export class Viewer {
 
   sendFiles(stream: number, payload: Uint8Array): void {
     this.send(FILES_CHANNEL, payload, stream);
+  }
+
+  sendAudio(payload: Uint8Array): void {
+    this.send(AUDIO_CHANNEL, payload);
   }
 
   sendClipboard(stream: number, payload: Uint8Array): void {

@@ -1,3 +1,4 @@
+import type { AudioFailure } from './audioprotocol.js';
 import type { ClipboardFailure } from './clipboardprotocol.js';
 import type { FileFailure } from './filesprotocol.js';
 
@@ -70,6 +71,11 @@ export type Messages = {
   recordUnsupported: string;
   captureFailed: string;
   recordLimit: string;
+  audioListen: string;
+  audioStop: string;
+  audioStarting: string;
+  audioUnsupported: string;
+  audioFailure: Record<AudioFailure, string>;
   tabClipboard: string;
   clipboardIntro: string;
   clipboardPlaceholder: string;
@@ -170,6 +176,15 @@ const catalog: Record<string, Messages> = {
     recordUnsupported: 'Este navegador no puede grabar vídeo.',
     captureFailed: 'No se pudo guardar.',
     recordLimit: 'Grabación detenida al llegar al límite de 30 minutos o 1 GiB. Se ha guardado lo grabado.',
+    audioListen: 'Escuchar',
+    audioStop: 'Dejar de escuchar',
+    audioStarting: 'Activando el audio...',
+    audioUnsupported: 'Este navegador no puede reproducir el audio del ordenador remoto.',
+    audioFailure: {
+      notAllowed:
+        'El audio está desactivado. Actívalo en el ordenador de casa con "wirehaus-agent audio allow --code".',
+      unavailable: 'El ordenador remoto no puede capturar su audio ahora.',
+    },
     tabClipboard: 'Portapapeles',
     clipboardIntro:
       'Escribe o pega aquí el texto que quieres llevar al ordenador remoto, o tráete el que hayas copiado allí. Nada se sincroniza solo.',
@@ -275,6 +290,15 @@ const catalog: Record<string, Messages> = {
     recordUnsupported: 'This browser cannot record video.',
     captureFailed: 'Could not save.',
     recordLimit: 'Recording stopped at the limit of 30 minutes or 1 GiB. What was recorded has been saved.',
+    audioListen: 'Listen',
+    audioStop: 'Stop listening',
+    audioStarting: 'Starting audio...',
+    audioUnsupported: 'This browser cannot play the remote computer audio.',
+    audioFailure: {
+      notAllowed:
+        'Audio is turned off. Enable it on the home computer with "wirehaus-agent audio allow --code".',
+      unavailable: 'The remote computer cannot capture its audio right now.',
+    },
     tabClipboard: 'Clipboard',
     clipboardIntro:
       'Type or paste here the text you want to take to the remote computer, or bring back what you copied there. Nothing syncs by itself.',
