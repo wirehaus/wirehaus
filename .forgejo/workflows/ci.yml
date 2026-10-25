@@ -25,10 +25,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          components: rustfmt
       - run: cargo fmt --all --check
 
   lint:
@@ -36,13 +32,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          components: clippy
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      - if: env.WIREHAUS_RUNNER != '1'
-        run: sudo apt-get update && sudo apt-get install -y nasm
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   msrv:
@@ -50,12 +39,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: 1.90.0
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      - if: env.WIREHAUS_RUNNER != '1'
-        run: sudo apt-get update && sudo apt-get install -y nasm
+      - run: rustup toolchain install 1.90.0 --profile minimal
       - run: cargo +1.90.0 check --workspace --all-targets --locked
 
   test:
@@ -67,19 +51,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      - if: runner.os == 'Linux' && env.WIREHAUS_RUNNER != '1'
-        run: sudo apt-get update && sudo apt-get install -y xvfb nasm
-      - if: runner.os == 'macOS'
-        run: brew install nasm
-      - if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          choco install nasm -y --no-progress
-          echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
       - run: cargo test --workspace --locked
 
   viewer:
@@ -90,21 +61,10 @@ jobs:
         working-directory: viewer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - run: rustup target add wasm32-unknown-unknown
+        working-directory: .
       - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
         working-directory: .
-      - if: env.WIREHAUS_RUNNER != '1'
-        run: sudo apt-get update && sudo apt-get install -y nasm
-        working-directory: .
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: viewer/package-lock.json
       - run: npm ci
       - run: npm run build
       - run: |
