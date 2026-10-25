@@ -33,7 +33,7 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 | Transferencia de archivos | Funciona. Solo en las carpetas que compartes |
 | Portapapeles de texto | Funciona. Permiso aparte para cada sentido |
 | Capturas y grabación | Funciona. Se hacen en el navegador |
-| Audio del ordenador | Funciona en Linux (PulseAudio o PipeWire) y Windows. En macOS, pendiente. Apagado hasta que lo activas |
+| Audio del ordenador | Funciona en Linux (PulseAudio o PipeWire), Windows y macOS 14.6 o superior. Apagado hasta que lo activas |
 | Instalación en un solo comando y servicio de registro | Pendiente |
 
 ## Seguridad
@@ -106,7 +106,7 @@ wirehaus-agent clipboard allow --direction both --code 123456
 wirehaus-agent audio allow --code 123456
 ```
 
-La terminal abre la shell del sistema (`$SHELL` en Linux y macOS, Windows PowerShell en Windows); `WIREHAUS_SHELL` permite elegir otra, por ejemplo `pwsh`. Quitarlos no exige código: `terminal deny`, `files remove <carpeta>`, `clipboard deny` y `audio deny`. El audio se escucha con el botón Escuchar del visor: en Linux hace falta `parec` (paquete `pulseaudio-utils`, también con PipeWire), en Windows se captura la salida predeterminada, y se codifica con Opus (`opus-pure`, Rust puro). Una sesión sin actividad se cierra a los 30 minutos (`--idle-minutes`), aunque estés escuchando.
+La terminal abre la shell del sistema (`$SHELL` en Linux y macOS, Windows PowerShell en Windows); `WIREHAUS_SHELL` permite elegir otra, por ejemplo `pwsh`. Quitarlos no exige código: `terminal deny`, `files remove <carpeta>`, `clipboard deny` y `audio deny`. El audio se escucha con el botón Escuchar del visor: en Linux hace falta `parec` (paquete `pulseaudio-utils`, también con PipeWire), en Windows y macOS se captura la salida predeterminada (en macOS hace falta el permiso de grabación de audio del sistema), y se codifica con Opus (`opus-pure`, Rust puro). Una sesión sin actividad se cierra a los 30 minutos (`--idle-minutes`), aunque estés escuchando.
 
 ## Estructura
 

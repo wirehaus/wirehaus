@@ -33,7 +33,7 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 | File transfer | Works. Only in the folders you share |
 | Text clipboard | Works. Separate permission for each direction |
 | Screenshots and recording | Works. Done in the browser |
-| Computer audio | Works on Linux (PulseAudio or PipeWire) and Windows. Pending on macOS. Off until you enable it |
+| Computer audio | Works on Linux (PulseAudio or PipeWire), Windows and macOS 14.6 or later. Off until you enable it |
 | One-command install and registration service | Pending |
 
 ## Security
@@ -106,7 +106,7 @@ wirehaus-agent clipboard allow --direction both --code 123456
 wirehaus-agent audio allow --code 123456
 ```
 
-The terminal opens the system shell (`$SHELL` on Linux and macOS, Windows PowerShell on Windows); `WIREHAUS_SHELL` picks another one, for example `pwsh`. Removing them needs no code: `terminal deny`, `files remove <folder>`, `clipboard deny` and `audio deny`. Audio is played with the Listen button in the viewer: on Linux it needs `parec` (package `pulseaudio-utils`, also with PipeWire), on Windows the default output is captured, and it is encoded with Opus (`opus-pure`, pure Rust). A session with no activity is closed after 30 minutes (`--idle-minutes`), even while you listen.
+The terminal opens the system shell (`$SHELL` on Linux and macOS, Windows PowerShell on Windows); `WIREHAUS_SHELL` picks another one, for example `pwsh`. Removing them needs no code: `terminal deny`, `files remove <folder>`, `clipboard deny` and `audio deny`. Audio is played with the Listen button in the viewer: on Linux it needs `parec` (package `pulseaudio-utils`, also with PipeWire), on Windows and macOS the default output is captured (macOS needs the system audio recording permission), and it is encoded with Opus (`opus-pure`, pure Rust). A session with no activity is closed after 30 minutes (`--idle-minutes`), even while you listen.
 
 ## Layout
 
