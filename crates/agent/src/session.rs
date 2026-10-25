@@ -333,9 +333,12 @@ fn handle_frame(
     }
     match ViewerMessage::decode(&frame.payload)? {
         ViewerMessage::Input(event) => match input.send(event) {
-            Ok(()) | Err(InputError::PointerOutOfRange { .. } | InputError::KeyOutOfRange(_)) => {
-                Ok(true)
-            }
+            Ok(())
+            | Err(
+                InputError::PointerOutOfRange { .. }
+                | InputError::KeyOutOfRange(_)
+                | InputError::Blocked,
+            ) => Ok(true),
             Err(error) => Err(error.into()),
         },
         ViewerMessage::FrameAck { sequence } => {
@@ -479,6 +482,11 @@ mod tests {
             ..Recorder::default()
         };
         assert!(handle_frame(&frame, &mut out_of_range, &mut Pacer::new(70), &mut false).is_ok());
+        let mut blocked = Recorder {
+            fail_with: Some(|| InputError::Blocked),
+            ..Recorder::default()
+        };
+        assert!(handle_frame(&frame, &mut blocked, &mut Pacer::new(70), &mut false).is_ok());
         let mut broken = Recorder {
             fail_with: Some(|| InputError::Request("gone".into())),
             ..Recorder::default()

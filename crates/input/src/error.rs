@@ -10,6 +10,8 @@ pub enum InputError {
         "controlling the keyboard and mouse is not allowed for this program; run \"wirehaus-agent permissions\""
     )]
     PermissionDenied,
+    #[error("the system refused the input because a more privileged window has the focus")]
+    Blocked,
     #[error("display request failed: {0}")]
     Request(String),
     #[error("key code {0} is outside the supported range")]

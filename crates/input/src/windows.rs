@@ -110,10 +110,16 @@ impl InputSink for WindowsInput {
     fn release_all(&mut self) -> Result<(), InputError> {
         let (keys, buttons) = self.pressed.take();
         for code in keys {
-            self.key(code, false)?;
+            match self.key(code, false) {
+                Ok(()) | Err(InputError::Blocked) => {}
+                Err(error) => return Err(error),
+            }
         }
         for button in buttons {
-            self.button(button, false)?;
+            match self.button(button, false) {
+                Ok(()) | Err(InputError::Blocked) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(())
     }
@@ -136,5 +142,10 @@ fn to_button(button: Button) -> enigo::Button {
 }
 
 fn request_error(error: impl std::fmt::Display) -> InputError {
-    InputError::Request(error.to_string())
+    let message = error.to_string();
+    if message.contains("UIPI") {
+        InputError::Blocked
+    } else {
+        InputError::Request(message)
+    }
 }

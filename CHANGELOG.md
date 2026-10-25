@@ -52,6 +52,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- En Windows, enviar teclas o clics con la pantalla bloqueada (o ante un aviso de control de cuentas) ya no cierra la sesion: el sistema los rechaza por aislamiento de interfaz (UIPI), el agente los descarta y la sesion sigue viva, de modo que al desbloquear se continua sin reconectar. Antes el error terminaba la conexion.
+
 - El visor ya no manda el Ctrl falso que Windows y algunos navegadores inventan al pulsar AltGr (`ControlLeft` y `AltRight` en el mismo instante): escribir `@` o `\u20ac` con un teclado español en un navegador de Windows contra un destino Linux o macOS habría pulsado Ctrl+AltGr. Un Ctrl real se retrasa 5 ms para poder distinguirlo.
 
 - `files add`, `files list` y `files remove` no muestran el prefijo interno `\\?\` de las rutas de Windows.
