@@ -62,6 +62,9 @@ impl Drop for Xvfb {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let number = self.display.trim_start_matches(':');
+        let _ = std::fs::remove_file(format!("/tmp/.X{number}-lock"));
+        let _ = std::fs::remove_file(format!("/tmp/.X11-unix/X{number}"));
     }
 }
 
