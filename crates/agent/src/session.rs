@@ -5,10 +5,11 @@ use std::time::{Duration, Instant};
 
 use wirehaus_input::{InputError, InputSink};
 use wirehaus_protocol::{
-    Channel, ClipboardFailure, ClipboardMessage, ControlMessage, DesktopMessage, EndReason,
-    FilesMessage, Frame, TerminalMessage, ViewerMessage,
+    AudioFailure, AudioMessage, Channel, ClipboardFailure, ClipboardMessage, ControlMessage,
+    DesktopMessage, EndReason, FilesMessage, Frame, TerminalMessage, ViewerMessage,
 };
 
+use crate::audio::Audio;
 use crate::clipboard::{Hub, Requests};
 use crate::error::ServerError;
 use crate::files::Files;
@@ -28,6 +29,7 @@ pub struct Policy<'a> {
     pub revoked: &'a dyn Fn() -> Option<EndReason>,
     pub idle_timeout: Duration,
     pub terminal_allowed: &'a dyn Fn() -> bool,
+    pub audio_allowed: &'a dyn Fn() -> bool,
     pub file_roots: &'a dyn Fn() -> Vec<PathBuf>,
     pub clipboard_mode: &'a dyn Fn() -> ClipboardMode,
     pub audit: &'a dyn Fn(&str, &str),
@@ -37,6 +39,7 @@ struct Services<'a> {
     terminals: &'a mut Terminals,
     files: &'a mut Files,
     clipboard: &'a mut Requests,
+    audio: &'a mut Audio,
     policy: &'a Policy<'a>,
 }
 
@@ -66,6 +69,7 @@ fn serve(
     let mut terminals = Terminals::new(default_shell());
     let mut files = Files::new();
     let mut clipboard = Requests::new(hub.clone());
+    let mut audio = Audio::new(wirehaus_audio::open_default);
     link.set_write_timeout(WRITE_TIMEOUT)?;
     let mut ticks: u32 = 0;
     let mut viewer_decodes_video = false;
@@ -79,6 +83,7 @@ fn serve(
                 return Err(ServerError::AccessRevoked);
             }
             withdraw_terminals(&mut link, &mut terminals, policy)?;
+            withdraw_audio(&mut link, &mut audio, policy)?;
         }
         if files.active() == 0 && last_activity.elapsed() >= policy.idle_timeout {
             end_session(&mut link, EndReason::Idle);
@@ -101,6 +106,7 @@ fn serve(
         pump_terminals(&mut link, &mut terminals)?;
         pump_files(&mut link, &mut files, policy)?;
         pump_clipboard(&mut link, &mut clipboard)?;
+        pump_audio(&mut link, &mut audio)?;
         let mut active = false;
         let open = receive(
             &mut link,
@@ -111,6 +117,7 @@ fn serve(
                 terminals: &mut terminals,
                 files: &mut files,
                 clipboard: &mut clipboard,
+                audio: &mut audio,
                 policy,
             },
             deadline,
@@ -146,6 +153,71 @@ fn withdraw_terminals(
     Ok(())
 }
 
+fn withdraw_audio(link: &mut Link, audio: &mut Audio, policy: &Policy) -> Result<(), ServerError> {
+    if !audio.active() || (policy.audio_allowed)() {
+        return Ok(());
+    }
+    (policy.audit)(
+        "audio_withdrawn",
+        "the permission was removed during the session",
+    );
+    audio.stop();
+    send_audio(link, &AudioMessage::Stopped)
+}
+
+fn send_audio(link: &mut Link, message: &AudioMessage) -> Result<(), ServerError> {
+    link.send_frame(&Frame::new(Channel::Audio, 0, message.encode())?)?;
+    Ok(())
+}
+
+fn pump_audio(link: &mut Link, audio: &mut Audio) -> Result<(), ServerError> {
+    if !audio.active() {
+        return Ok(());
+    }
+    let drained = audio.drain(AUDIO_PACKETS_PER_TICK);
+    for packet in drained.packets {
+        send_audio(link, &AudioMessage::Packet(packet))?;
+    }
+    if drained.ended {
+        send_audio(link, &AudioMessage::Failed(AudioFailure::Unavailable))?;
+    }
+    Ok(())
+}
+
+fn audio_frame(frame: &Frame, services: &mut Services, link: &mut Link) -> Result<(), ServerError> {
+    match AudioMessage::decode(&frame.payload)? {
+        AudioMessage::Start => {
+            if !(services.policy.audio_allowed)() {
+                return send_audio(link, &AudioMessage::Failed(AudioFailure::NotAllowed));
+            }
+            let was_active = services.audio.active();
+            match services.audio.start() {
+                Ok(()) => {
+                    if !was_active {
+                        (services.policy.audit)("audio_started", "the viewer is listening");
+                    }
+                    send_audio(link, &AudioMessage::Started)
+                }
+                Err(error) => {
+                    (services.policy.audit)("audio_unavailable", &error.to_string());
+                    send_audio(link, &AudioMessage::Failed(AudioFailure::Unavailable))
+                }
+            }
+        }
+        AudioMessage::Stop => {
+            if services.audio.active() {
+                services.audio.stop();
+                (services.policy.audit)("audio_stopped", "the viewer stopped listening");
+            }
+            send_audio(link, &AudioMessage::Stopped)
+        }
+        AudioMessage::Started
+        | AudioMessage::Stopped
+        | AudioMessage::Packet(_)
+        | AudioMessage::Failed(_) => Err(ServerError::UnexpectedMessage),
+    }
+}
+
 fn end_session(link: &mut Link, reason: EndReason) {
     let _ = link.send_control(ControlMessage::SessionEnded { reason });
     let _ = link.flush();
@@ -173,6 +245,11 @@ fn receive(
                 terminal_frame(&frame, services.terminals, allowed, link)?;
                 handled += 1;
             }
+            Incoming::Frame(frame) if frame.channel == Channel::Audio => {
+                *active = true;
+                audio_frame(&frame, services, link)?;
+                handled += 1;
+            }
             Incoming::Frame(frame) if frame.channel == Channel::Clipboard => {
                 *active = true;
                 clipboard_frame(&frame, services, link)?;
@@ -195,6 +272,7 @@ fn receive(
 }
 
 const TERMINAL_EVENTS_PER_TICK: usize = 32;
+const AUDIO_PACKETS_PER_TICK: usize = 8;
 const FILE_CHUNKS_PER_TRANSFER_PER_TICK: usize = 4;
 
 fn pump_files(link: &mut Link, files: &mut Files, policy: &Policy) -> Result<(), ServerError> {

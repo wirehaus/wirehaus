@@ -1,0 +1,18 @@
+[package]
+name = "wirehaus-audio"
+description = "System audio capture and Opus encoding for the Wirehaus agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../LICENSE"
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+opus-pure = "=0.2.2"
+thiserror.workspace = true
+
+[lints]
+workspace = true

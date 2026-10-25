@@ -22,9 +22,9 @@ use wirehaus_crypto::pairing::PairingCode;
 use wirehaus_crypto::session::{Limits, Session};
 use wirehaus_crypto::totp::TotpSecret;
 use wirehaus_protocol::{
-    AuthFailure, Button, Channel, ClipboardFailure, ClipboardMessage, Codec, ControlMessage,
-    DesktopMessage, EndReason, FailureReason, FilesMessage, Frame, HEADER_LEN, InputEvent,
-    MAX_PAYLOAD_LEN, RefusalReason, TerminalMessage, ViewerMessage,
+    AudioFailure, AudioMessage, AuthFailure, Button, Channel, ClipboardFailure, ClipboardMessage,
+    Codec, ControlMessage, DesktopMessage, EndReason, FailureReason, FilesMessage, Frame,
+    HEADER_LEN, InputEvent, MAX_PAYLOAD_LEN, RefusalReason, TerminalMessage, ViewerMessage,
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
@@ -2523,4 +2523,123 @@ fn refuses_to_start_without_an_agent_identity() {
         exposure: wirehaus_agent::Exposure::default(),
     });
     assert!(matches!(result, Err(ServerError::Store(_))));
+}
+
+fn pulse_available() -> bool {
+    std::process::Command::new("pactl")
+        .arg("info")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn send_audio(client: &mut Client, message: &AudioMessage) {
+    client.send(&Frame::new(Channel::Audio, 0, message.encode()).unwrap());
+}
+
+fn next_audio(client: &mut Client) -> AudioMessage {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        match client.read_frame() {
+            Received::Got(frame) if frame.channel == Channel::Audio => {
+                return AudioMessage::decode(&frame.payload).unwrap();
+            }
+            Received::Got(frame) => {
+                if let Ok(DesktopMessage::FrameEnd { sequence }) =
+                    DesktopMessage::decode(&frame.payload)
+                {
+                    client.send_viewer(ViewerMessage::FrameAck { sequence });
+                }
+            }
+            Received::Timeout => {}
+            Received::Closed => panic!("the connection closed"),
+        }
+    }
+    panic!("no audio message arrived");
+}
+
+fn audio_packets(client: &mut Client, wanted: usize) -> usize {
+    let mut seen = 0;
+    while seen < wanted {
+        match next_audio(client) {
+            AudioMessage::Packet(data) => {
+                assert!(!data.is_empty() && data.len() <= wirehaus_protocol::MAX_AUDIO_PACKET);
+                seen += 1;
+            }
+            other => panic!("expected a packet, got {other:?}"),
+        }
+    }
+    seen
+}
+
+#[test]
+fn audio_is_refused_until_the_owner_allows_it_and_then_streams_packets() {
+    if !pulse_available() {
+        eprintln!("skipped: no PulseAudio or PipeWire server");
+        return;
+    }
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+
+    send_audio(&mut client, &AudioMessage::Start);
+    assert_eq!(
+        next_audio(&mut client),
+        AudioMessage::Failed(AudioFailure::NotAllowed)
+    );
+
+    server
+        .store
+        .update(|state, _| state.set_audio_allowed(true))
+        .unwrap();
+    send_audio(&mut client, &AudioMessage::Start);
+    assert_eq!(next_audio(&mut client), AudioMessage::Started);
+    assert_eq!(audio_packets(&mut client, 10), 10);
+
+    send_audio(&mut client, &AudioMessage::Stop);
+    loop {
+        match next_audio(&mut client) {
+            AudioMessage::Packet(_) => {}
+            AudioMessage::Stopped => break,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn removing_the_audio_permission_stops_the_stream_that_is_running() {
+    if !pulse_available() {
+        eprintln!("skipped: no PulseAudio or PipeWire server");
+        return;
+    }
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    server
+        .store
+        .update(|state, _| state.set_audio_allowed(true))
+        .unwrap();
+    send_audio(&mut client, &AudioMessage::Start);
+    assert_eq!(next_audio(&mut client), AudioMessage::Started);
+    assert_eq!(audio_packets(&mut client, 5), 5);
+
+    server
+        .store
+        .update(|state, _| state.set_audio_allowed(false))
+        .unwrap();
+    loop {
+        match next_audio(&mut client) {
+            AudioMessage::Packet(_) => {}
+            AudioMessage::Stopped => break,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    send_audio(&mut client, &AudioMessage::Start);
+    assert_eq!(
+        next_audio(&mut client),
+        AudioMessage::Failed(AudioFailure::NotAllowed)
+    );
 }

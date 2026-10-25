@@ -192,6 +192,7 @@ pub struct State {
     totp_last_step: Option<u64>,
     locked: bool,
     terminal_allowed: bool,
+    audio_allowed: bool,
     clipboard: ClipboardMode,
     file_roots: Vec<PathBuf>,
     pairing: Option<PairingGrant>,
@@ -208,6 +209,7 @@ impl State {
             totp_last_step: None,
             locked: false,
             terminal_allowed: false,
+            audio_allowed: false,
             clipboard: ClipboardMode::Off,
             file_roots: Vec::new(),
             pairing: None,
@@ -259,6 +261,15 @@ impl State {
 
     pub fn set_terminal_allowed(&mut self, allowed: bool) {
         self.terminal_allowed = allowed;
+    }
+
+    #[must_use]
+    pub fn audio_allowed(&self) -> bool {
+        self.audio_allowed
+    }
+
+    pub fn set_audio_allowed(&mut self, allowed: bool) {
+        self.audio_allowed = allowed;
     }
 
     #[must_use]
@@ -459,6 +470,7 @@ impl State {
         let _ = writeln!(out, "totp_last_step {step}");
         let _ = writeln!(out, "locked {}", u8::from(self.locked));
         let _ = writeln!(out, "terminal {}", u8::from(self.terminal_allowed));
+        let _ = writeln!(out, "audio {}", u8::from(self.audio_allowed));
         let _ = writeln!(out, "clipboard {}", self.clipboard.name());
         for root in &self.file_roots {
             let _ = writeln!(out, "root {}", root.display());
@@ -541,6 +553,7 @@ struct Parser {
     last_step_seen: bool,
     locked: Option<bool>,
     terminal: Option<bool>,
+    audio: Option<bool>,
     clipboard: Option<ClipboardMode>,
     file_roots: Vec<PathBuf>,
     pairing: Option<PairingGrant>,
@@ -573,6 +586,7 @@ impl Parser {
             }
             "locked" => once(&mut self.locked, parse_flag(rest)?, key),
             "terminal" => once(&mut self.terminal, parse_flag(rest)?, key),
+            "audio" => once(&mut self.audio, parse_flag(rest)?, key),
             "clipboard" => once(&mut self.clipboard, ClipboardMode::parse(rest)?, key),
             "root" => {
                 if self.file_roots.len() >= MAX_FILE_ROOTS {
@@ -639,6 +653,7 @@ impl Parser {
             },
             locked: self.locked.ok_or_else(|| missing("locked"))?,
             terminal_allowed: self.terminal.unwrap_or(false),
+            audio_allowed: self.audio.unwrap_or(false),
             clipboard: self.clipboard.unwrap_or_default(),
             file_roots: self.file_roots,
             pairing: self.pairing,
@@ -877,6 +892,18 @@ mod tests {
         assert!(State::parse(&broken).is_err());
         let twice = format!("{}clipboard both\n", state.serialize());
         assert!(State::parse(&twice).is_err());
+    }
+
+    #[test]
+    fn the_audio_permission_is_off_by_default_and_persists() {
+        let mut state = State::create().unwrap();
+        assert!(!state.audio_allowed());
+        state.set_audio_allowed(true);
+        assert!(State::parse(&state.serialize()).unwrap().audio_allowed());
+        state.set_audio_allowed(false);
+        assert!(!State::parse(&state.serialize()).unwrap().audio_allowed());
+        let older = state.serialize().replace("audio 0\n", "");
+        assert!(!State::parse(&older).unwrap().audio_allowed());
     }
 
     #[test]

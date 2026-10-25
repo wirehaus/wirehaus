@@ -350,6 +350,11 @@ impl Server {
                         .read(|state, _| state.terminal_allowed())
                         .unwrap_or(false)
                 },
+                audio_allowed: &|| {
+                    self.store
+                        .read(|state, _| state.audio_allowed())
+                        .unwrap_or(false)
+                },
                 clipboard_mode: &|| {
                     self.store
                         .read(|state, _| state.clipboard_mode())

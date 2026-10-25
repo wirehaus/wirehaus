@@ -36,6 +36,10 @@ pub enum Command {
         #[command(subcommand)]
         action: ClipboardAction,
     },
+    Audio {
+        #[command(subcommand)]
+        action: AudioAction,
+    },
     Viewer {
         #[command(subcommand)]
         action: ViewerAction,
@@ -134,6 +138,15 @@ pub enum FilesAction {
 
 #[derive(Debug, Subcommand)]
 pub enum TerminalAction {
+    Allow {
+        #[arg(long)]
+        code: String,
+    },
+    Deny,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AudioAction {
     Allow {
         #[arg(long)]
         code: String,

@@ -442,6 +442,39 @@ pub fn terminal(
     Ok(())
 }
 
+pub fn audio(
+    store: &Store,
+    allow: bool,
+    code: Option<&str>,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    if allow {
+        verify(store, code.unwrap_or_default())?;
+    }
+    store.update(|state, _| state.set_audio_allowed(allow))?;
+    store.log(
+        if allow {
+            "audio_allowed"
+        } else {
+            "audio_denied"
+        },
+        "by the local administrator",
+    );
+    writeln!(
+        out,
+        "{}",
+        if allow {
+            tr!(
+                "Audio del equipo permitido: el visor podrá escuchar lo que suena aqui.",
+                "Audio allowed: the viewer can listen to what plays here."
+            )
+        } else {
+            tr!("Audio desactivado.", "Audio turned off.")
+        }
+    )?;
+    Ok(())
+}
+
 pub fn secrets_status(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
     let storage = store.storage()?;
     writeln!(
@@ -892,6 +925,25 @@ mod tests {
         assert_eq!(mode(&store), ClipboardMode::FromRemote);
         clipboard(&store, ClipboardMode::Off, None, &mut Vec::new()).unwrap();
         assert_eq!(mode(&store), ClipboardMode::Off);
+    }
+
+    #[test]
+    fn allowing_audio_needs_a_code_and_denying_it_does_not() {
+        let (_dir, store, time) = setup();
+        assert!(matches!(
+            audio(&store, true, Some("000000"), &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        assert!(matches!(
+            audio(&store, true, None, &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        assert!(!store.read(|state, _| state.audio_allowed()).unwrap());
+        let right = code(&store, &time);
+        audio(&store, true, Some(&right), &mut Vec::new()).unwrap();
+        assert!(store.read(|state, _| state.audio_allowed()).unwrap());
+        audio(&store, false, None, &mut Vec::new()).unwrap();
+        assert!(!store.read(|state, _| state.audio_allowed()).unwrap());
     }
 
     #[test]

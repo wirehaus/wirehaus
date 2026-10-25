@@ -1,3 +1,4 @@
+pub mod audio;
 mod auth;
 pub mod clipboard;
 pub mod commands;

@@ -1,3 +1,4 @@
+mod audio;
 mod channel;
 mod clipboard;
 mod control;
@@ -9,6 +10,7 @@ mod input;
 mod terminal;
 mod viewer;
 
+pub use audio::{AudioFailure, AudioMessage, MAX_AUDIO_PACKET};
 pub use channel::Channel;
 pub use clipboard::{ClipboardFailure, ClipboardMessage, MAX_CLIPBOARD_TEXT};
 pub use control::{AuthFailure, CODE_LEN, ControlMessage, EndReason, TICKET_LEN};

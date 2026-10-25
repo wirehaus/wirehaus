@@ -920,6 +920,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "opus-pure"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4de7c2ad44427a636b27bf0b03eb29e713775ba1b45ff31a0618c19ee5adb215"
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1591,6 +1597,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.21",
  "tungstenite",
+ "wirehaus-audio",
  "wirehaus-capture",
  "wirehaus-clipboard",
  "wirehaus-crypto",
@@ -1599,6 +1606,14 @@ dependencies = [
  "wirehaus-protocol",
  "wirehaus-vault",
  "x11rb 0.14.0",
+]
+
+[[package]]
+name = "wirehaus-audio"
+version = "0.1.0"
+dependencies = [
+ "opus-pure",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

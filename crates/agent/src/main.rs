@@ -13,8 +13,8 @@ use wirehaus_protocol::PROTOCOL_VERSION;
 use wirehaus_agent::state::{ClipboardMode, SecretStorage};
 
 use crate::cli::{
-    Cli, ClipboardAction, Command, DeviceAction, Direction, FilesAction, SecretsAction,
-    SecretsTarget, TerminalAction, ViewerAction,
+    AudioAction, Cli, ClipboardAction, Command, DeviceAction, Direction, FilesAction,
+    SecretsAction, SecretsTarget, TerminalAction, ViewerAction,
 };
 
 fn main() -> ExitCode {
@@ -71,6 +71,12 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Terminal {
             action: TerminalAction::Deny,
         } => commands::terminal(&open()?, false, None, &mut out)?,
+        Command::Audio {
+            action: AudioAction::Allow { code },
+        } => commands::audio(&open()?, true, Some(&code), &mut out)?,
+        Command::Audio {
+            action: AudioAction::Deny,
+        } => commands::audio(&open()?, false, None, &mut out)?,
         Command::Viewer { action } => run_viewer(action)?,
         Command::Clipboard { action } => run_clipboard(&open()?, action, &mut out)?,
         Command::Files { action } => run_files(&open()?, action, &mut out)?,
