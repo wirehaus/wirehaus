@@ -2609,6 +2609,26 @@ fn audio_is_refused_until_the_owner_allows_it_and_then_streams_packets() {
 }
 
 #[test]
+fn listening_does_not_keep_an_idle_session_alive() {
+    if !pulse_available() {
+        eprintln!("skipped: no PulseAudio or PipeWire server");
+        return;
+    }
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start_with_idle(&xvfb.display, Duration::from_secs(2));
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    server
+        .store
+        .update(|state, _| state.set_audio_allowed(true))
+        .unwrap();
+    send_audio(&mut client, &AudioMessage::Start);
+    assert_eq!(next_audio(&mut client), AudioMessage::Started);
+    let reason = client.read_until_session_ends(Duration::from_secs(10));
+    assert_eq!(reason, Some(EndReason::Idle));
+}
+
+#[test]
 fn removing_the_audio_permission_stops_the_stream_that_is_running() {
     if !pulse_available() {
         eprintln!("skipped: no PulseAudio or PipeWire server");
