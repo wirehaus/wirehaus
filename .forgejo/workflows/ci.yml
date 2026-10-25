@@ -56,8 +56,6 @@ jobs:
   viewer:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     defaults:
       run:
         working-directory: viewer
