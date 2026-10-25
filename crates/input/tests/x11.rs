@@ -7,9 +7,11 @@ use std::time::{Duration, Instant};
 
 use wirehaus_input::{InputError, InputSink, X11Input};
 use wirehaus_protocol::{Button, InputEvent};
+use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::connection::Connection;
+use x11rb::protocol::Event;
 use x11rb::protocol::randr::{ConnectionExt as _, Rotation};
-use x11rb::protocol::xproto::ConnectionExt;
+use x11rb::protocol::xproto::{ConnectionExt, CreateWindowAux, EventMask, InputFocus, WindowClass};
 use x11rb::rust_connection::RustConnection;
 
 struct Xvfb {
@@ -193,4 +195,91 @@ fn follows_a_screen_that_changes_size_while_connected() {
         let (x, y, _) = pointer(&observer, root);
         (x, y) == (600, 300)
     }));
+}
+
+fn set_layout(display: &str, layout: &str) {
+    let status = Command::new("setxkbmap")
+        .args(["-display", display, layout])
+        .status()
+        .expect("setxkbmap must be installed to run this test");
+    assert!(status.success(), "setxkbmap rejected the layout {layout}");
+}
+
+fn focused_window(observer: &RustConnection, root: u32) -> u32 {
+    let window = observer.generate_id().unwrap();
+    observer
+        .create_window(
+            COPY_DEPTH_FROM_PARENT,
+            window,
+            root,
+            0,
+            0,
+            100,
+            100,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            0,
+            &CreateWindowAux::new().event_mask(EventMask::KEY_PRESS),
+        )
+        .unwrap();
+    observer.map_window(window).unwrap();
+    observer
+        .set_input_focus(InputFocus::POINTER_ROOT, window, 0u32)
+        .unwrap();
+    observer.get_input_focus().unwrap().reply().unwrap();
+    window
+}
+
+fn keysym_produced_by(input: &mut X11Input, observer: &RustConnection, code: u16) -> Option<u32> {
+    input
+        .send(InputEvent::Key {
+            code,
+            pressed: true,
+        })
+        .unwrap();
+    input
+        .send(InputEvent::Key {
+            code,
+            pressed: false,
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        if let Some(Event::KeyPress(event)) = observer.poll_for_event().unwrap() {
+            let mapping = observer
+                .get_keyboard_mapping(event.detail, 1)
+                .unwrap()
+                .reply()
+                .unwrap();
+            return mapping.keysyms.first().copied();
+        }
+        sleep(Duration::from_millis(20));
+    }
+    None
+}
+
+#[test]
+fn keys_follow_the_layout_of_the_target_machine() {
+    let server = Xvfb::start(50 + std::process::id() % 9);
+    let (observer, number) = x11rb::connect(Some(&server.display)).unwrap();
+    let root = observer.setup().roots[number].root;
+    focused_window(&observer, root);
+    let mut input = X11Input::connect(Some(&server.display)).unwrap();
+    let cases: [(&str, [(u16, u32); 4]); 4] = [
+        ("us", [(21, 0x79), (44, 0x7a), (16, 0x71), (39, 0x3b)]),
+        ("es", [(21, 0x79), (44, 0x7a), (16, 0x71), (39, 0xf1)]),
+        ("de", [(21, 0x7a), (44, 0x79), (16, 0x71), (39, 0xf6)]),
+        ("fr", [(21, 0x79), (44, 0x77), (16, 0x61), (39, 0x6d)]),
+    ];
+    for (layout, keys) in cases {
+        set_layout(&server.display, layout);
+        sleep(Duration::from_millis(200));
+        for (code, expected) in keys {
+            assert_eq!(
+                keysym_produced_by(&mut input, &observer, code),
+                Some(expected),
+                "layout {layout}, evdev code {code}"
+            );
+        }
+    }
 }
