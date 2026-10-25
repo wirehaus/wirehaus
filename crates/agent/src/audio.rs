@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 
 use wirehaus_audio::{AudioError, AudioSource, Encoder, FRAME_VALUES, Interrupter};
@@ -12,6 +12,7 @@ pub type Opener = fn() -> Result<Box<dyn AudioSource>, AudioError>;
 struct Running {
     packets: Receiver<Vec<u8>>,
     stop: Arc<AtomicBool>,
+    reason: Arc<Mutex<Option<String>>>,
     interrupt: Interrupter,
     thread: Option<JoinHandle<()>>,
 }
@@ -33,7 +34,7 @@ impl std::fmt::Debug for Audio {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Drained {
     pub packets: Vec<Vec<u8>>,
-    pub ended: bool,
+    pub ended: Option<String>,
 }
 
 impl Audio {
@@ -59,13 +60,21 @@ impl Audio {
         let interrupt = source.interrupter();
         let (sender, packets) = sync_channel(QUEUE_PACKETS);
         let stop = Arc::new(AtomicBool::new(false));
+        let reason = Arc::new(Mutex::new(None));
         let thread = {
             let stop = Arc::clone(&stop);
-            std::thread::spawn(move || capture(source, encoder, &sender, &stop))
+            let reason = Arc::clone(&reason);
+            std::thread::spawn(move || {
+                if let Err(error) = capture(source, encoder, &sender, &stop) {
+                    *reason.lock().unwrap_or_else(PoisonError::into_inner) =
+                        Some(error.to_string());
+                }
+            })
         };
         self.running = Some(Running {
             packets,
             stop,
+            reason,
             interrupt,
             thread: Some(thread),
         });
@@ -92,12 +101,17 @@ impl Audio {
                 Ok(packet) => drained.packets.push(packet),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    drained.ended = true;
+                    let reason = running
+                        .reason
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .clone();
+                    drained.ended = Some(reason.unwrap_or_else(|| "the capture ended".to_owned()));
                     break;
                 }
             }
         }
-        if drained.ended {
+        if drained.ended.is_some() {
             self.stop();
         }
         drained
@@ -115,20 +129,17 @@ fn capture(
     mut encoder: Encoder,
     sender: &SyncSender<Vec<u8>>,
     stop: &AtomicBool,
-) {
+) -> Result<(), AudioError> {
     let mut frame = vec![0f32; FRAME_VALUES];
     while !stop.load(Ordering::Relaxed) {
-        if source.read_frame(&mut frame).is_err() {
-            return;
-        }
-        let Ok(packet) = encoder.encode(&frame) else {
-            return;
-        };
+        source.read_frame(&mut frame)?;
+        let packet = encoder.encode(&frame)?;
         match sender.try_send(packet) {
             Ok(()) | Err(TrySendError::Full(_)) => {}
-            Err(TrySendError::Disconnected(_)) => return,
+            Err(TrySendError::Disconnected(_)) => return Ok(()),
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -190,10 +201,10 @@ mod tests {
     fn wait_for(audio: &mut Audio, count: usize) -> Drained {
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut all = Drained::default();
-        while all.packets.len() < count && !all.ended && Instant::now() < deadline {
+        while all.packets.len() < count && all.ended.is_none() && Instant::now() < deadline {
             let part = audio.drain(64);
             all.packets.extend(part.packets);
-            all.ended |= part.ended;
+            all.ended = all.ended.or(part.ended);
             std::thread::sleep(Duration::from_millis(5));
         }
         all
@@ -206,7 +217,7 @@ mod tests {
         audio.start().unwrap();
         assert!(audio.active());
         let got = wait_for(&mut audio, 5);
-        assert!(got.packets.len() >= 5 && !got.ended);
+        assert!(got.packets.len() >= 5 && got.ended.is_none());
         audio.stop();
         assert!(!audio.active());
         assert_eq!(audio.drain(8), Drained::default());
@@ -232,7 +243,11 @@ mod tests {
         let mut audio = Audio::new(dying);
         audio.start().unwrap();
         let got = wait_for(&mut audio, usize::MAX);
-        assert!(got.ended);
+        assert!(
+            got.ended
+                .as_deref()
+                .is_some_and(|reason| reason.contains("gone"))
+        );
         assert!(!audio.active());
     }
 

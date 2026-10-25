@@ -14,5 +14,8 @@ authors.workspace = true
 opus-pure = "=0.2.2"
 thiserror.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+cpal = { version = "0.18", default-features = false }
+
 [lints]
 workspace = true

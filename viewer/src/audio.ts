@@ -32,12 +32,13 @@ export class AudioPlayer {
 
   async start(): Promise<void> {
     const config: AudioDecoderConfig = { codec: 'opus', sampleRate: SAMPLE_RATE, numberOfChannels: CHANNELS };
+    const context = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: 'interactive' });
+    void context.resume();
     const support = await AudioDecoder.isConfigSupported(config);
     if (support.supported !== true) {
+      void context.close();
       throw new Error('opus is not supported');
     }
-    const context = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: 'interactive' });
-    await context.resume();
     const decoder = new AudioDecoder({
       output: (data) => this.play(data),
       error: () => this.stop(),

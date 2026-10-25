@@ -106,7 +106,7 @@ fn serve(
         pump_terminals(&mut link, &mut terminals)?;
         pump_files(&mut link, &mut files, policy)?;
         pump_clipboard(&mut link, &mut clipboard)?;
-        pump_audio(&mut link, &mut audio)?;
+        pump_audio(&mut link, &mut audio, policy)?;
         let mut active = false;
         let open = receive(
             &mut link,
@@ -170,7 +170,7 @@ fn send_audio(link: &mut Link, message: &AudioMessage) -> Result<(), ServerError
     Ok(())
 }
 
-fn pump_audio(link: &mut Link, audio: &mut Audio) -> Result<(), ServerError> {
+fn pump_audio(link: &mut Link, audio: &mut Audio, policy: &Policy) -> Result<(), ServerError> {
     if !audio.active() {
         return Ok(());
     }
@@ -178,7 +178,8 @@ fn pump_audio(link: &mut Link, audio: &mut Audio) -> Result<(), ServerError> {
     for packet in drained.packets {
         send_audio(link, &AudioMessage::Packet(packet))?;
     }
-    if drained.ended {
+    if let Some(reason) = drained.ended {
+        (policy.audit)("audio_ended", &reason);
         send_audio(link, &AudioMessage::Failed(AudioFailure::Unavailable))?;
     }
     Ok(())

@@ -10,12 +10,22 @@ pub trait AudioSource: Send {
 #[cfg(target_os = "linux")]
 mod parec;
 
+#[cfg(windows)]
+mod loopback;
+
+#[cfg(any(windows, test))]
+mod resample;
+
 pub fn open_default() -> Result<Box<dyn AudioSource>, AudioError> {
     #[cfg(target_os = "linux")]
     {
         Ok(Box::new(parec::Parec::open()?))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        Ok(Box::new(loopback::Loopback::open()?))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         Err(AudioError::Unavailable(
             "no capture backend for this system yet".to_owned(),
