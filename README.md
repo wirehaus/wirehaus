@@ -33,7 +33,7 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 | Transferencia de archivos | Funciona. Solo en las carpetas que compartes |
 | Portapapeles de texto | Funciona. Permiso aparte para cada sentido |
 | Capturas y grabación | Funciona. Se hacen en el navegador |
-| Audio | Pendiente |
+| Audio del ordenador | Funciona en Linux (PulseAudio o PipeWire) y Windows. En macOS, pendiente. Apagado hasta que lo activas |
 | Instalación en un solo comando y servicio de registro | Pendiente |
 
 ## Seguridad
@@ -42,7 +42,7 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 - Dispositivo emparejado con un código de un solo uso de 160 bits y segundo factor TOTP que verifica el agente. Ninguna de las dos cosas basta por sí sola.
 - Bloqueo creciente por dispositivo, suspensión tras diez fallos y registro de accesos sin secretos.
 - Clave y secreto del segundo factor opcionalmente en el almacén de claves del sistema, fuera del fichero de estado.
-- Terminal, archivos y portapapeles desactivados por defecto. Activarlos exige un código del segundo factor en el propio ordenador.
+- Terminal, archivos, portapapeles y audio desactivados por defecto. Activarlos exige un código del segundo factor en el propio ordenador.
 - Cierre automático por inactividad (30 minutos por defecto).
 - Sin `unsafe` en el código propio, entradas validadas antes de reservar memoria y pruebas con datos hostiles en cada canal.
 - El visor se sirve desde memoria, verificado contra un manifiesto de hashes SHA-256 de compilación reproducible.
@@ -103,9 +103,10 @@ Para activar los demás canales, siempre en el ordenador y con un código del se
 wirehaus-agent terminal allow --code 123456
 wirehaus-agent files add ~/Documentos --code 123456
 wirehaus-agent clipboard allow --direction both --code 123456
+wirehaus-agent audio allow --code 123456
 ```
 
-La terminal abre la shell del sistema (`$SHELL` en Linux y macOS, Windows PowerShell en Windows); `WIREHAUS_SHELL` permite elegir otra, por ejemplo `pwsh`. Quitarlos no exige código: `terminal deny`, `files remove <carpeta>` y `clipboard deny`. Una sesión sin actividad se cierra a los 30 minutos (`--idle-minutes`).
+La terminal abre la shell del sistema (`$SHELL` en Linux y macOS, Windows PowerShell en Windows); `WIREHAUS_SHELL` permite elegir otra, por ejemplo `pwsh`. Quitarlos no exige código: `terminal deny`, `files remove <carpeta>`, `clipboard deny` y `audio deny`. El audio se escucha con el botón Escuchar del visor: en Linux hace falta `parec` (paquete `pulseaudio-utils`, también con PipeWire), en Windows se captura la salida predeterminada, y se codifica con Opus (`opus-pure`, Rust puro). Una sesión sin actividad se cierra a los 30 minutos (`--idle-minutes`), aunque estés escuchando.
 
 ## Estructura
 
@@ -118,6 +119,7 @@ La terminal abre la shell del sistema (`$SHELL` en Linux y macOS, Windows PowerS
 | `crates/encode` | Codificación de las zonas cambiadas en JPEG y H.264 |
 | `crates/input` | Inyección de ratón y teclado |
 | `crates/clipboard` | Acceso al portapapeles del sistema |
+| `crates/audio` | Captura del audio del sistema y codificación Opus |
 | `crates/vault` | Acceso al almacén de claves del sistema (Llavero, Administrador de credenciales, servicio de secretos) |
 | `crates/agent` | Agente que se ejecuta en el ordenador de casa |
 | `viewer` | Visor que corre en el navegador |

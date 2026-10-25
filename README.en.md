@@ -33,7 +33,7 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 | File transfer | Works. Only in the folders you share |
 | Text clipboard | Works. Separate permission for each direction |
 | Screenshots and recording | Works. Done in the browser |
-| Audio | Pending |
+| Computer audio | Works on Linux (PulseAudio or PipeWire) and Windows. Pending on macOS. Off until you enable it |
 | One-command install and registration service | Pending |
 
 ## Security
@@ -42,7 +42,7 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 - A device paired with a one-time 160-bit code, plus a TOTP second factor verified by the agent. Neither is enough on its own.
 - Escalating lockout per device, suspension after ten failures and an access log with no secrets.
 - The key and the second factor secret can optionally live in the system secret store, outside the state file.
-- Terminal, files and clipboard are off by default. Enabling them needs a second factor code on the computer itself.
+- Terminal, files, clipboard and audio are off by default. Enabling them needs a second factor code on the computer itself.
 - Automatic close on inactivity (30 minutes by default).
 - No `unsafe` in our own code, inputs validated before allocating memory and tests with hostile data on every channel.
 - The viewer is served from memory, verified against a manifest of SHA-256 hashes from a reproducible build.
@@ -103,9 +103,10 @@ To enable the other channels, always on the computer and with a second factor co
 wirehaus-agent terminal allow --code 123456
 wirehaus-agent files add ~/Documents --code 123456
 wirehaus-agent clipboard allow --direction both --code 123456
+wirehaus-agent audio allow --code 123456
 ```
 
-The terminal opens the system shell (`$SHELL` on Linux and macOS, Windows PowerShell on Windows); `WIREHAUS_SHELL` picks another one, for example `pwsh`. Removing them needs no code: `terminal deny`, `files remove <folder>` and `clipboard deny`. A session with no activity is closed after 30 minutes (`--idle-minutes`).
+The terminal opens the system shell (`$SHELL` on Linux and macOS, Windows PowerShell on Windows); `WIREHAUS_SHELL` picks another one, for example `pwsh`. Removing them needs no code: `terminal deny`, `files remove <folder>`, `clipboard deny` and `audio deny`. Audio is played with the Listen button in the viewer: on Linux it needs `parec` (package `pulseaudio-utils`, also with PipeWire), on Windows the default output is captured, and it is encoded with Opus (`opus-pure`, pure Rust). A session with no activity is closed after 30 minutes (`--idle-minutes`), even while you listen.
 
 ## Layout
 
@@ -118,6 +119,7 @@ The terminal opens the system shell (`$SHELL` on Linux and macOS, Windows PowerS
 | `crates/encode` | JPEG and H.264 encoding of the changed regions |
 | `crates/input` | Mouse and keyboard injection |
 | `crates/clipboard` | System clipboard access |
+| `crates/audio` | System audio capture and Opus encoding |
 | `crates/vault` | Access to the system secret store (Keychain, Credential Manager, secret service) |
 | `crates/agent` | The agent that runs on the home computer |
 | `viewer` | The viewer that runs in the browser |

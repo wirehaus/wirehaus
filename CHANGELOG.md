@@ -6,6 +6,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Añadido
 
+- Audio del ordenador: canal propio con permiso explícito (`audio allow --code`, `audio deny`), apagado por defecto. El agente captura el audio del sistema (Linux por `parec` sobre PulseAudio o PipeWire; Windows por el bucle de WASAPI de la salida predeterminada con `cpal`), lo convierte a 48 kHz estéreo y lo codifica con Opus en tramas de 20 ms usando `opus-pure` (Rust puro, sin dependencia de C, versión fijada). El visor lo decodifica con WebCodecs y lo reproduce con un botón Escuchar, descartando lo que llega tarde para mantener la latencia baja. Si se retira el permiso durante la sesión, el audio se corta. macOS queda pendiente.
+
 - Esqueleto del espacio de trabajo con el crate `wirehaus-protocol` y el binario `wirehaus-agent`.
 - Codificación y decodificación de tramas con límite de tamaño.
 - Canales del protocolo: escritorio, terminal, archivos, portapapeles, audio y captura.
