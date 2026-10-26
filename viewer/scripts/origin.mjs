@@ -8,6 +8,11 @@ export function integrityOf(bytes) {
   return `sha256-${createHash('sha256').update(bytes).digest('base64')}`;
 }
 
+export function pinWasm(moduleSource, wasmBytes) {
+  const hash = createHash('sha256').update(wasmBytes).digest('hex');
+  return replaceExactly(moduleSource, /export const WASM_SHA256 = '';/g, `export const WASM_SHA256 = '${hash}';`, 1);
+}
+
 export function moduleIntegrity(files) {
   const entries = [...files.entries()]
     .filter(([name]) => MODULE_EXTENSIONS.some((extension) => name.endsWith(extension)))
@@ -22,6 +27,7 @@ export function contentSecurityPolicy(importMapText, connect) {
     "default-src 'none'",
     `script-src 'self' 'wasm-unsafe-eval' '${hash}'`,
     "style-src 'self'",
+    'img-src data:',
     `connect-src 'self' ${connect}`,
     "base-uri 'none'",
     "form-action 'none'",

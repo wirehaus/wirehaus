@@ -8,6 +8,7 @@ import {
   contentSecurityPolicy,
   headersFile,
   moduleIntegrity,
+  pinWasm,
   rewriteIndex,
   securityTxt,
 } from './origin.mjs';
@@ -16,13 +17,13 @@ const SECURITY_TXT_VALID_DAYS = 180;
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const source = join(root, 'dist');
-const target = join(root, 'dist-origin');
 
 const arg = (name, fallback) => {
   const index = process.argv.indexOf(name);
   return index === -1 ? fallback : process.argv[index + 1];
 };
 const connect = arg('--connect', DEFAULT_CONNECT);
+const target = arg('--out', join(root, 'dist-origin'));
 
 if (!existsSync(join(source, 'index.html'))) {
   console.error('viewer/dist is missing: run npm run build first');
@@ -32,6 +33,12 @@ if (!existsSync(join(source, 'index.html'))) {
 rmSync(target, { recursive: true, force: true });
 cpSync(source, target, { recursive: true });
 rmSync(join(target, 'manifest.sha256'));
+
+const hashModule = join(target, 'wasmhash.js');
+writeFileSync(
+  hashModule,
+  pinWasm(readFileSync(hashModule, 'utf8'), readFileSync(join(target, 'wirehaus_crypto_wasm_bg.wasm'))),
+);
 
 const files = new Map(
   readdirSync(target).map((name) => [name, readFileSync(join(target, name))]),

@@ -5,6 +5,7 @@ import {
   headersFile,
   integrityOf,
   moduleIntegrity,
+  pinWasm,
   rewriteIndex,
   securityTxt,
 } from './origin.mjs';
@@ -82,4 +83,14 @@ test('security.txt names the contact and expires in the future', () => {
   assert.ok(text.includes('Contact: mailto:security@wirehaus.dev\n'));
   assert.ok(text.includes('Expires: 2027-04-24T12:00:00.000Z\n'));
   assert.ok(text.endsWith('\n'));
+});
+
+test('the wasm hash is written into the hash module and only once', () => {
+  const source = "export const WASM_SHA256 = '';\n";
+  const pinned = pinWasm(source, bytes('abc'));
+  assert.equal(
+    pinned,
+    "export const WASM_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';\n",
+  );
+  assert.throws(() => pinWasm(pinned, bytes('abc')));
 });
