@@ -25,6 +25,8 @@ pub enum ServiceError {
     #[error("{}", self.describe())]
     Launchctl(String),
     #[error("{}", self.describe())]
+    Systemctl(String),
+    #[error("{}", self.describe())]
     NotInitialized(PathBuf),
     #[error("{}", self.describe())]
     Viewer(#[from] crate::integrity::IntegrityError),
@@ -44,6 +46,10 @@ impl ServiceError {
             ServiceError::Launchctl(text) => tr!(
                 format!("launchctl ha fallado: {text}"),
                 format!("launchctl failed: {text}")
+            ),
+            ServiceError::Systemctl(text) => tr!(
+                format!("systemctl ha fallado: {text}"),
+                format!("systemctl failed: {text}")
             ),
             ServiceError::NotInitialized(path) => tr!(
                 format!(
@@ -181,8 +187,99 @@ pub fn running(launchctl_print: &str) -> bool {
         .any(|line| line == "state = running")
 }
 
+pub const UNIT: &str = "wirehaus-agent.service";
+
+fn unit_quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '%' => out.push_str("%%"),
+            '$' => out.push_str("$$"),
+            '\n' => out.push_str("\\n"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
+}
+
+#[must_use]
+pub fn systemd_unit(config: &ServiceConfig) -> String {
+    let command = arguments(config)
+        .iter()
+        .map(|item| unit_quote(item))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let log = unit_quote(&path_text(&config.log_dir.join("agent.log")));
+    let log = &log[1..log.len() - 1];
+    [
+        "[Unit]".to_owned(),
+        "Description=Wirehaus agent".to_owned(),
+        "PartOf=graphical-session.target".to_owned(),
+        "After=graphical-session.target".to_owned(),
+        String::new(),
+        "[Service]".to_owned(),
+        format!("ExecStart={command}"),
+        "Restart=on-failure".to_owned(),
+        "RestartSec=10".to_owned(),
+        "NoNewPrivileges=yes".to_owned(),
+        format!("StandardOutput=append:{log}"),
+        format!("StandardError=append:{log}"),
+        String::new(),
+        "[Install]".to_owned(),
+        "WantedBy=graphical-session.target".to_owned(),
+        String::new(),
+    ]
+    .join("\n")
+}
+
+#[must_use]
+pub fn unit_path(home: &Path) -> PathBuf {
+    home.join(".config").join("systemd").join("user").join(UNIT)
+}
+
+#[must_use]
+pub fn systemd_log_dir(home: &Path) -> PathBuf {
+    home.join(".local").join("state").join("wirehaus")
+}
+
+#[must_use]
+pub fn systemctl_enable_arguments() -> Vec<String> {
+    ["--user", "enable", "--now", UNIT]
+        .map(str::to_owned)
+        .to_vec()
+}
+
+#[must_use]
+pub fn systemctl_disable_arguments() -> Vec<String> {
+    ["--user", "disable", "--now", UNIT]
+        .map(str::to_owned)
+        .to_vec()
+}
+
+#[must_use]
+pub fn systemctl_active_arguments() -> Vec<String> {
+    ["--user", "is-active", UNIT].map(str::to_owned).to_vec()
+}
+
+#[must_use]
+pub fn systemctl_reload_arguments() -> Vec<String> {
+    ["--user", "daemon-reload"].map(str::to_owned).to_vec()
+}
+
+#[must_use]
+pub fn unit_active(systemctl_is_active: &str) -> bool {
+    systemctl_is_active.trim() == "active"
+}
+
 #[cfg(target_os = "macos")]
 pub use launchd::{install, status, uninstall};
+
+#[cfg(target_os = "linux")]
+pub use systemd::{install, status, uninstall};
 
 #[cfg(target_os = "macos")]
 mod launchd {
@@ -356,6 +453,168 @@ mod launchd {
     }
 }
 
+#[cfg(target_os = "linux")]
+mod systemd {
+    use std::io::Write;
+    use std::net::SocketAddr;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    use super::{
+        ServiceConfig, ServiceError, UNIT, systemctl_active_arguments, systemctl_disable_arguments,
+        systemctl_enable_arguments, systemctl_reload_arguments, systemd_log_dir, systemd_unit,
+        unit_active, unit_path,
+    };
+    use crate::i18n::tr;
+    use crate::static_files::Viewer;
+    use crate::store::{Store, system_clock};
+
+    fn home() -> Result<PathBuf, ServiceError> {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|home| home.is_absolute())
+            .ok_or(ServiceError::Home)
+    }
+
+    fn systemctl(arguments: &[String]) -> Result<(bool, String), ServiceError> {
+        let output = Command::new("/usr/bin/systemctl")
+            .args(arguments)
+            .output()?;
+        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        Ok((output.status.success(), text.trim().to_owned()))
+    }
+
+    pub fn install(
+        state_dir: &Path,
+        viewer_dir: &Path,
+        listen: SocketAddr,
+        out: &mut impl Write,
+    ) -> Result<(), ServiceError> {
+        let home = home()?;
+        let state_dir = std::fs::canonicalize(state_dir)
+            .map_err(|_| ServiceError::NotInitialized(state_dir.to_path_buf()))?;
+        Store::open(&state_dir, system_clock())
+            .map_err(|_| ServiceError::NotInitialized(state_dir.clone()))?;
+        let viewer_dir = std::fs::canonicalize(viewer_dir)?;
+        Viewer::open(&viewer_dir, None)?;
+        let config = ServiceConfig {
+            executable: std::fs::canonicalize(std::env::current_exe()?)?,
+            state_dir,
+            viewer_dir,
+            listen,
+            log_dir: systemd_log_dir(&home),
+        };
+        std::fs::create_dir_all(&config.log_dir)?;
+        let path = unit_path(&home);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, systemd_unit(&config))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+        let (reloaded, text) = systemctl(&systemctl_reload_arguments())?;
+        if !reloaded {
+            return Err(ServiceError::Systemctl(text));
+        }
+        let (enabled, text) = systemctl(&systemctl_enable_arguments())?;
+        if !enabled {
+            return Err(ServiceError::Systemctl(text));
+        }
+        let location = path.display();
+        writeln!(
+            out,
+            "{}",
+            tr!(
+                format!("Servicio {UNIT} instalado en {location}."),
+                format!("Service {UNIT} installed in {location}.")
+            )
+        )?;
+        writeln!(
+            out,
+            "{}: {}",
+            tr!("Registro", "Log"),
+            config.log_dir.join("agent.log").display()
+        )?;
+        writeln!(
+            out,
+            "{}",
+            tr!(
+                "Arranca solo con la sesión gráfica y se reinicia si se cae. Necesita una sesión de escritorio X11 abierta.",
+                "It starts by itself with the graphical session and restarts if it dies. It needs an open X11 desktop session."
+            )
+        )?;
+        Ok(())
+    }
+
+    pub fn uninstall(out: &mut impl Write) -> Result<(), ServiceError> {
+        let home = home()?;
+        let path = unit_path(&home);
+        let existed = path.exists();
+        if existed {
+            let _ = systemctl(&systemctl_disable_arguments())?;
+            std::fs::remove_file(&path)?;
+            let _ = systemctl(&systemctl_reload_arguments())?;
+        }
+        if existed {
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("Servicio {UNIT} desinstalado."),
+                    format!("Service {UNIT} uninstalled.")
+                )
+            )?;
+        } else {
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("El servicio {UNIT} no estaba instalado."),
+                    format!("Service {UNIT} was not installed.")
+                )
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn status(out: &mut impl Write) -> Result<(), ServiceError> {
+        let home = home()?;
+        if !unit_path(&home).exists() {
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("El servicio {UNIT} no está instalado."),
+                    format!("Service {UNIT} is not installed.")
+                )
+            )?;
+            return Ok(());
+        }
+        let (_, text) = systemctl(&systemctl_active_arguments())?;
+        if unit_active(&text) {
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("El servicio {UNIT} está en marcha."),
+                    format!("Service {UNIT} is running.")
+                )
+            )?;
+        } else {
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    format!("El servicio {UNIT} está instalado pero parado; mira el registro."),
+                    format!("Service {UNIT} is installed but stopped; check the log.")
+                )
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +706,59 @@ mod tests {
         assert!(!running("wirehaus.agent = {\n\tstate = waiting\n}"));
         assert!(!running("Could not find service"));
         assert!(!running("\tlast exit state = running"));
+    }
+
+    #[test]
+    fn the_unit_starts_with_the_graphical_session_and_restarts_on_failure() {
+        let text = systemd_unit(&config());
+        assert!(text.starts_with("[Unit]\n"));
+        assert!(text.contains("PartOf=graphical-session.target\n"));
+        assert!(text.contains("WantedBy=graphical-session.target\n"));
+        assert!(text.contains("Restart=on-failure\n"));
+        assert!(text.contains("NoNewPrivileges=yes\n"));
+        assert!(text.contains(
+            "ExecStart=\"/Applications/Wirehaus/wirehaus-agent\" \"--state-dir\" \"/Users/ana/.config/wirehaus\" \"serve\""
+        ));
+        assert!(
+            text.contains("StandardOutput=append:/Users/ana/Library/Logs/Wirehaus/agent.log\n")
+        );
+        assert!(text.ends_with("WantedBy=graphical-session.target\n"));
+    }
+
+    #[test]
+    fn paths_with_unit_syntax_characters_cannot_change_the_command() {
+        let mut odd = config();
+        odd.executable = PathBuf::from("/opt/a b/\"x\"/$HOME/100%");
+        let text = systemd_unit(&odd);
+        assert!(text.contains("ExecStart=\"/opt/a b/\\\"x\\\"/$$HOME/100%%\" "));
+        assert_eq!(text.matches("ExecStart=").count(), 1);
+    }
+
+    #[test]
+    fn systemctl_acts_on_the_user_manager_and_the_unit_path_is_under_the_config_folder() {
+        assert_eq!(
+            systemctl_enable_arguments(),
+            ["--user", "enable", "--now", "wirehaus-agent.service"]
+        );
+        assert_eq!(
+            systemctl_disable_arguments(),
+            ["--user", "disable", "--now", "wirehaus-agent.service"]
+        );
+        assert_eq!(
+            unit_path(Path::new("/home/ana")),
+            PathBuf::from("/home/ana/.config/systemd/user/wirehaus-agent.service")
+        );
+        assert_eq!(
+            systemd_log_dir(Path::new("/home/ana")),
+            PathBuf::from("/home/ana/.local/state/wirehaus")
+        );
+    }
+
+    #[test]
+    fn only_the_active_state_counts_as_running() {
+        assert!(unit_active("active\n"));
+        assert!(!unit_active("inactive\n"));
+        assert!(!unit_active("failed\n"));
+        assert!(!unit_active(""));
     }
 }
