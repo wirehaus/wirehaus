@@ -15,7 +15,9 @@ for argument in "$@"; do
   esac
 done
 
-if [ "$(uname -s)" = Darwin ]; then
+if [ -n "${WIREHAUS_STATE_DIR:-}" ]; then
+  data_dir=$WIREHAUS_STATE_DIR
+elif [ "$(uname -s)" = Darwin ]; then
   data_dir="$HOME/Library/Application Support/Wirehaus"
 else
   data_dir=${XDG_DATA_HOME:-"$HOME/.local/share"}/wirehaus-state

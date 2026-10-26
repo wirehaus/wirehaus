@@ -16,6 +16,9 @@ rm -rf "$out" "$out.tar.gz"
 mkdir -p "$out"
 cp target/release/wirehaus-agent scripts/install.sh LICENSE "$out/"
 cp -r viewer/dist "$out/viewer"
+if [ "$system" = darwin ] && [ -z "${WIREHAUS_SKIP_SIGN:-}" ]; then
+  scripts/macos-sign.sh "$out/wirehaus-agent"
+fi
 (cd "$out" && find . -type f ! -name SHA256SUMS ! -name install.sh | sed 's|^\./||' | LC_ALL=C sort | xargs sh -c 'if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi' _ > SHA256SUMS)
 tar -C target/dist -czf "$out.tar.gz" "$name"
 (cd target/dist && sum "$name.tar.gz" | tee "$name.tar.gz.sha256")
