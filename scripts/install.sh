@@ -47,9 +47,9 @@ checksum() {
 verify_package() {
   sums="$source_dir/SHA256SUMS"
   [ -f "$sums" ] || { echo "SHA256SUMS is missing from the package." >&2; exit 1; }
-  while read -r hash name; do
-    [ -f "$source_dir/$name" ] || { echo "$name is listed in SHA256SUMS but missing." >&2; exit 1; }
-    [ "$(checksum "$source_dir/$name")" = "$hash" ] || { echo "$name does not match SHA256SUMS." >&2; exit 1; }
+  while read -r hash file; do
+    [ -f "$source_dir/$file" ] || { echo "$file is listed in SHA256SUMS but missing." >&2; exit 1; }
+    [ "$(checksum "$source_dir/$file")" = "$hash" ] || { echo "$file does not match SHA256SUMS." >&2; exit 1; }
   done < "$sums"
 }
 
@@ -61,6 +61,8 @@ if [ "$mode" = uninstall ]; then
   if [ -x "$agent" ]; then
     run_agent service uninstall || true
   fi
+  rm -f "$HOME/.local/bin/wirehaus-agent"
+  case "$install_dir" in ""|/) echo "refusing to remove $install_dir" >&2; exit 1 ;; esac
   rm -rf "$install_dir"
   if [ "$purge" = yes ]; then
     rm -rf "$data_dir"
@@ -79,6 +81,8 @@ rm -rf "$install_dir/viewer"
 cp "$source_dir/wirehaus-agent" "$agent"
 chmod 755 "$agent"
 cp -R "$source_dir/viewer" "$install_dir/viewer"
+mkdir -p "$HOME/.local/bin"
+ln -sf "$agent" "$HOME/.local/bin/wirehaus-agent"
 
 if ! run_agent devices >/dev/null 2>&1; then
   mkdir -p "$data_dir"
