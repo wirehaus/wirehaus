@@ -218,8 +218,6 @@ pub fn systemd_unit(config: &ServiceConfig) -> String {
     [
         "[Unit]".to_owned(),
         "Description=Wirehaus agent".to_owned(),
-        "PartOf=graphical-session.target".to_owned(),
-        "After=graphical-session.target".to_owned(),
         String::new(),
         "[Service]".to_owned(),
         format!("ExecStart={command}"),
@@ -228,9 +226,6 @@ pub fn systemd_unit(config: &ServiceConfig) -> String {
         "NoNewPrivileges=yes".to_owned(),
         format!("StandardOutput=append:{log}"),
         format!("StandardError=append:{log}"),
-        String::new(),
-        "[Install]".to_owned(),
-        "WantedBy=graphical-session.target".to_owned(),
         String::new(),
     ]
     .join("\n")
@@ -247,17 +242,41 @@ pub fn systemd_log_dir(home: &Path) -> PathBuf {
 }
 
 #[must_use]
-pub fn systemctl_enable_arguments() -> Vec<String> {
-    ["--user", "enable", "--now", UNIT]
+pub fn autostart_path(home: &Path) -> PathBuf {
+    home.join(".config")
+        .join("autostart")
+        .join("wirehaus-agent.desktop")
+}
+
+#[must_use]
+pub fn autostart_entry() -> String {
+    [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Wirehaus agent",
+        "Exec=sh -c 'systemctl --user import-environment DISPLAY XAUTHORITY && systemctl --user start wirehaus-agent.service'",
+        "NoDisplay=true",
+        "X-GNOME-Autostart-enabled=true",
+        "",
+    ]
+    .join("\n")
+}
+
+#[must_use]
+pub fn systemctl_import_arguments() -> Vec<String> {
+    ["--user", "import-environment", "DISPLAY", "XAUTHORITY"]
         .map(str::to_owned)
         .to_vec()
 }
 
 #[must_use]
-pub fn systemctl_disable_arguments() -> Vec<String> {
-    ["--user", "disable", "--now", UNIT]
-        .map(str::to_owned)
-        .to_vec()
+pub fn systemctl_start_arguments() -> Vec<String> {
+    ["--user", "start", UNIT].map(str::to_owned).to_vec()
+}
+
+#[must_use]
+pub fn systemctl_stop_arguments() -> Vec<String> {
+    ["--user", "stop", UNIT].map(str::to_owned).to_vec()
 }
 
 #[must_use]
@@ -462,8 +481,9 @@ mod systemd {
     use std::process::Command;
 
     use super::{
-        ServiceConfig, ServiceError, UNIT, systemctl_active_arguments, systemctl_disable_arguments,
-        systemctl_enable_arguments, systemctl_reload_arguments, systemd_log_dir, systemd_unit,
+        ServiceConfig, ServiceError, UNIT, autostart_entry, autostart_path,
+        systemctl_active_arguments, systemctl_import_arguments, systemctl_reload_arguments,
+        systemctl_start_arguments, systemctl_stop_arguments, systemd_log_dir, systemd_unit,
         unit_active, unit_path,
     };
     use crate::i18n::tr;
@@ -517,9 +537,23 @@ mod systemd {
         if !reloaded {
             return Err(ServiceError::Systemctl(text));
         }
-        let (enabled, text) = systemctl(&systemctl_enable_arguments())?;
-        if !enabled {
-            return Err(ServiceError::Systemctl(text));
+        let autostart = autostart_path(&home);
+        if let Some(parent) = autostart.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&autostart, autostart_entry())?;
+        std::fs::set_permissions(&autostart, std::fs::Permissions::from_mode(0o644))?;
+        let in_session = std::env::var_os("DISPLAY").is_some();
+        if in_session {
+            let _ = systemctl(&systemctl_stop_arguments())?;
+            let (imported, text) = systemctl(&systemctl_import_arguments())?;
+            if !imported {
+                return Err(ServiceError::Systemctl(text));
+            }
+            let (started, text) = systemctl(&systemctl_start_arguments())?;
+            if !started {
+                return Err(ServiceError::Systemctl(text));
+            }
         }
         let location = path.display();
         writeln!(
@@ -540,8 +574,8 @@ mod systemd {
             out,
             "{}",
             tr!(
-                "Arranca solo con la sesión gráfica y se reinicia si se cae. Necesita una sesión de escritorio X11 abierta.",
-                "It starts by itself with the graphical session and restarts if it dies. It needs an open X11 desktop session."
+                "Arranca solo al iniciar sesión en el escritorio y se reinicia si se cae. Necesita una sesión de escritorio X11 abierta; si no hay ninguna ahora, arrancará en el próximo inicio de sesión.",
+                "It starts by itself when you sign in to the desktop and restarts if it dies. It needs an open X11 desktop session; if there is none now, it will start at your next sign-in."
             )
         )?;
         Ok(())
@@ -551,8 +585,12 @@ mod systemd {
         let home = home()?;
         let path = unit_path(&home);
         let existed = path.exists();
+        let autostart = autostart_path(&home);
+        if autostart.exists() {
+            std::fs::remove_file(&autostart)?;
+        }
         if existed {
-            let _ = systemctl(&systemctl_disable_arguments())?;
+            let _ = systemctl(&systemctl_stop_arguments())?;
             std::fs::remove_file(&path)?;
             let _ = systemctl(&systemctl_reload_arguments())?;
         }
@@ -709,11 +747,10 @@ mod tests {
     }
 
     #[test]
-    fn the_unit_starts_with_the_graphical_session_and_restarts_on_failure() {
+    fn the_unit_restarts_on_failure_and_is_started_by_the_autostart_entry_not_by_a_target() {
         let text = systemd_unit(&config());
         assert!(text.starts_with("[Unit]\n"));
-        assert!(text.contains("PartOf=graphical-session.target\n"));
-        assert!(text.contains("WantedBy=graphical-session.target\n"));
+        assert!(!text.contains("[Install]"));
         assert!(text.contains("Restart=on-failure\n"));
         assert!(text.contains("NoNewPrivileges=yes\n"));
         assert!(text.contains(
@@ -722,7 +759,20 @@ mod tests {
         assert!(
             text.contains("StandardOutput=append:/Users/ana/Library/Logs/Wirehaus/agent.log\n")
         );
-        assert!(text.ends_with("WantedBy=graphical-session.target\n"));
+    }
+
+    #[test]
+    fn the_autostart_entry_hands_the_desktop_environment_to_the_user_manager_before_starting() {
+        let text = autostart_entry();
+        assert!(text.starts_with("[Desktop Entry]\n"));
+        assert!(text.contains(
+            "import-environment DISPLAY XAUTHORITY && systemctl --user start wirehaus-agent.service"
+        ));
+        assert!(text.contains("NoDisplay=true\n"));
+        assert_eq!(
+            autostart_path(Path::new("/home/ana")),
+            PathBuf::from("/home/ana/.config/autostart/wirehaus-agent.desktop")
+        );
     }
 
     #[test]
@@ -737,12 +787,12 @@ mod tests {
     #[test]
     fn systemctl_acts_on_the_user_manager_and_the_unit_path_is_under_the_config_folder() {
         assert_eq!(
-            systemctl_enable_arguments(),
-            ["--user", "enable", "--now", "wirehaus-agent.service"]
+            systemctl_start_arguments(),
+            ["--user", "start", "wirehaus-agent.service"]
         );
         assert_eq!(
-            systemctl_disable_arguments(),
-            ["--user", "disable", "--now", "wirehaus-agent.service"]
+            systemctl_stop_arguments(),
+            ["--user", "stop", "wirehaus-agent.service"]
         );
         assert_eq!(
             unit_path(Path::new("/home/ana")),
