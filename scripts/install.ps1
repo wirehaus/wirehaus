@@ -57,7 +57,7 @@ Get-ChildItem -Recurse -File $source | Unblock-File
 Test-Package
 
 if (Test-Path $agent) {
-    Invoke-Agent @('service', 'uninstall')
+    try { Invoke-Agent @('service', 'uninstall') } catch { Write-Host 'No previous service to remove.' }
 }
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 foreach ($file in $files) {
