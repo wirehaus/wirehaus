@@ -6,14 +6,27 @@ install_dir=${WIREHAUS_INSTALL_DIR:-"$HOME/.local/share/wirehaus"}
 agent="$install_dir/wirehaus-agent"
 mode=install
 purge=no
+name=
+zone=wirehaus.dev
+viewer_origin=https://app.wirehaus.dev
+public_host=
 
-for argument in "$@"; do
-  case "$argument" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --uninstall) mode=uninstall ;;
     --purge) purge=yes ;;
-    *) echo "unknown option: $argument" >&2; exit 2 ;;
+    --name) [ $# -ge 2 ] || { echo "--name needs a value" >&2; exit 2; }; name=$2; shift ;;
+    --zone) [ $# -ge 2 ] || { echo "--zone needs a value" >&2; exit 2; }; zone=$2; shift ;;
+    --viewer-origin) [ $# -ge 2 ] || { echo "--viewer-origin needs a value" >&2; exit 2; }; viewer_origin=$2; shift ;;
+    --public-host) [ $# -ge 2 ] || { echo "--public-host needs a value" >&2; exit 2; }; public_host=$2; shift ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
+  shift
 done
+
+if [ -n "$name" ] && [ -z "$public_host" ]; then
+  public_host=$name.$zone
+fi
 
 if [ -n "${WIREHAUS_STATE_DIR:-}" ]; then
   data_dir=$WIREHAUS_STATE_DIR
@@ -76,7 +89,15 @@ if ! run_agent devices >/dev/null 2>&1; then
   echo
 fi
 
-run_agent service install --viewer-dir "$install_dir/viewer"
+if [ -n "$public_host" ]; then
+  run_agent service install --viewer-dir "$install_dir/viewer" --public-host "$public_host" --viewer-origin "$viewer_origin"
+else
+  run_agent service install --viewer-dir "$install_dir/viewer"
+fi
 run_agent pairing
 echo
-echo "Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code."
+if [ -n "$public_host" ]; then
+  echo "Next, connect the tunnel (see your dashboard), then open $viewer_origin/${public_host%%.*} and enter the pairing code."
+else
+  echo "Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code."
+fi

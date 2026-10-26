@@ -87,6 +87,8 @@ pub fn install(
     state_dir: &Path,
     viewer_dir: &Path,
     listen: SocketAddr,
+    public_hosts: &[String],
+    viewer_origins: &[String],
     out: &mut impl Write,
 ) -> Result<(), ServiceError> {
     let state_dir = std::path::absolute(state_dir)?;
@@ -109,6 +111,8 @@ pub fn install(
         state_dir,
         viewer_dir,
         listen,
+        public_hosts: public_hosts.to_vec(),
+        viewer_origins: viewer_origins.to_vec(),
         user_sid: crate::winacl::current_user_sid()?,
         working_dir,
     };

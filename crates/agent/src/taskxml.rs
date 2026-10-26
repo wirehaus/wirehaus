@@ -10,6 +10,8 @@ pub struct TaskConfig {
     pub state_dir: PathBuf,
     pub viewer_dir: PathBuf,
     pub listen: std::net::SocketAddr,
+    pub public_hosts: Vec<String>,
+    pub viewer_origins: Vec<String>,
     pub user_sid: String,
     pub working_dir: PathBuf,
 }
@@ -38,7 +40,7 @@ fn path_text(path: &Path) -> String {
 }
 
 pub fn arguments(config: &TaskConfig) -> String {
-    [
+    let mut items = vec![
         "--state-dir".to_owned(),
         quote(&path_text(&config.state_dir)),
         "serve".to_owned(),
@@ -46,8 +48,16 @@ pub fn arguments(config: &TaskConfig) -> String {
         quote(&path_text(&config.viewer_dir)),
         "--listen".to_owned(),
         config.listen.to_string(),
-    ]
-    .join(" ")
+    ];
+    for host in &config.public_hosts {
+        items.push("--public-host".to_owned());
+        items.push(quote(host));
+    }
+    for origin in &config.viewer_origins {
+        items.push("--viewer-origin".to_owned());
+        items.push(quote(origin));
+    }
+    items.join(" ")
 }
 
 pub fn task_xml(config: &TaskConfig) -> String {
@@ -191,6 +201,8 @@ mod tests {
             state_dir: PathBuf::from(r"C:\Users\Ana Pérez\AppData\Roaming\Wirehaus"),
             viewer_dir: PathBuf::from(r"C:\Program Files\Wirehaus\viewer"),
             listen: "127.0.0.1:7878".parse().unwrap(),
+            public_hosts: Vec::new(),
+            viewer_origins: Vec::new(),
             user_sid: "S-1-5-21-1-2-3-1001".to_owned(),
             working_dir: PathBuf::from(r"C:\Program Files\Wirehaus"),
         }
@@ -216,6 +228,16 @@ mod tests {
             2
         );
         assert!(!text.contains("HighestAvailable"));
+    }
+
+    #[test]
+    fn the_public_host_and_viewer_origin_are_quoted_arguments() {
+        let mut settings = config();
+        settings.public_hosts = vec!["ana.wirehaus.dev".to_owned()];
+        settings.viewer_origins = vec!["https://app.wirehaus.dev".to_owned()];
+        assert!(arguments(&settings).ends_with(
+            " --public-host \"ana.wirehaus.dev\" --viewer-origin \"https://app.wirehaus.dev\""
+        ));
     }
 
     #[test]

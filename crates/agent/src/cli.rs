@@ -88,6 +88,10 @@ pub enum ServiceAction {
         viewer_dir: PathBuf,
         #[arg(long, default_value = "127.0.0.1:7878")]
         listen: SocketAddr,
+        #[arg(long = "public-host", value_name = "HOST")]
+        public_hosts: Vec<String>,
+        #[arg(long = "viewer-origin", value_name = "URL")]
+        viewer_origins: Vec<String>,
     },
     Uninstall,
     Status,

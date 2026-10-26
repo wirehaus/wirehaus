@@ -45,8 +45,21 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Pairing => commands::pairing(&open()?, &mut out)?,
         #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         Command::Service { action } => match action {
-            crate::cli::ServiceAction::Install { viewer_dir, listen } => {
-                wirehaus_agent::service::install(&dir, &viewer_dir, listen, &mut out)?;
+            crate::cli::ServiceAction::Install {
+                viewer_dir,
+                listen,
+                public_hosts,
+                viewer_origins,
+            } => {
+                wirehaus_agent::Exposure::new(&public_hosts, &viewer_origins)?;
+                wirehaus_agent::service::install(
+                    &dir,
+                    &viewer_dir,
+                    listen,
+                    &public_hosts,
+                    &viewer_origins,
+                    &mut out,
+                )?;
             }
             crate::cli::ServiceAction::Uninstall => wirehaus_agent::service::uninstall(&mut out)?,
             crate::cli::ServiceAction::Status => wirehaus_agent::service::status(&mut out)?,

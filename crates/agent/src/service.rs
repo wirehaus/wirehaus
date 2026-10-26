@@ -13,6 +13,8 @@ pub struct ServiceConfig {
     pub state_dir: PathBuf,
     pub viewer_dir: PathBuf,
     pub listen: SocketAddr,
+    pub public_hosts: Vec<String>,
+    pub viewer_origins: Vec<String>,
     pub log_dir: PathBuf,
 }
 
@@ -90,7 +92,7 @@ fn path_text(path: &Path) -> String {
 
 #[must_use]
 pub fn arguments(config: &ServiceConfig) -> Vec<String> {
-    vec![
+    let mut items = vec![
         path_text(&config.executable),
         "--state-dir".to_owned(),
         path_text(&config.state_dir),
@@ -99,7 +101,16 @@ pub fn arguments(config: &ServiceConfig) -> Vec<String> {
         path_text(&config.viewer_dir),
         "--listen".to_owned(),
         config.listen.to_string(),
-    ]
+    ];
+    for host in &config.public_hosts {
+        items.push("--public-host".to_owned());
+        items.push(host.clone());
+    }
+    for origin in &config.viewer_origins {
+        items.push("--viewer-origin".to_owned());
+        items.push(origin.clone());
+    }
+    items
 }
 
 #[must_use]
@@ -339,6 +350,8 @@ mod launchd {
         state_dir: &Path,
         viewer_dir: &Path,
         listen: SocketAddr,
+        public_hosts: &[String],
+        viewer_origins: &[String],
         out: &mut impl Write,
     ) -> Result<(), ServiceError> {
         let home = home()?;
@@ -354,6 +367,8 @@ mod launchd {
             state_dir,
             viewer_dir,
             listen,
+            public_hosts: public_hosts.to_vec(),
+            viewer_origins: viewer_origins.to_vec(),
             log_dir: log_dir(&home),
         };
         std::fs::create_dir_all(&config.log_dir)?;
@@ -510,6 +525,8 @@ mod systemd {
         state_dir: &Path,
         viewer_dir: &Path,
         listen: SocketAddr,
+        public_hosts: &[String],
+        viewer_origins: &[String],
         out: &mut impl Write,
     ) -> Result<(), ServiceError> {
         let home = home()?;
@@ -524,6 +541,8 @@ mod systemd {
             state_dir,
             viewer_dir,
             listen,
+            public_hosts: public_hosts.to_vec(),
+            viewer_origins: viewer_origins.to_vec(),
             log_dir: systemd_log_dir(&home),
         };
         std::fs::create_dir_all(&config.log_dir)?;
@@ -663,6 +682,8 @@ mod tests {
             state_dir: PathBuf::from("/Users/ana/.config/wirehaus"),
             viewer_dir: PathBuf::from("/Applications/Wirehaus/viewer"),
             listen: "127.0.0.1:7878".parse().unwrap(),
+            public_hosts: Vec::new(),
+            viewer_origins: Vec::new(),
             log_dir: PathBuf::from("/Users/ana/Library/Logs/Wirehaus"),
         }
     }
@@ -681,6 +702,28 @@ mod tests {
                 "--listen",
                 "127.0.0.1:7878"
             ]
+        );
+    }
+
+    #[test]
+    fn the_public_host_and_viewer_origin_reach_the_service_command_line() {
+        let mut settings = config();
+        settings.public_hosts = vec!["ana.wirehaus.dev".to_owned()];
+        settings.viewer_origins = vec!["https://app.wirehaus.dev".to_owned()];
+        let items = arguments(&settings);
+        assert_eq!(
+            items[items.len() - 4..],
+            [
+                "--public-host",
+                "ana.wirehaus.dev",
+                "--viewer-origin",
+                "https://app.wirehaus.dev"
+            ]
+        );
+        assert!(
+            !arguments(&config())
+                .iter()
+                .any(|item| item.starts_with("--public"))
         );
     }
 

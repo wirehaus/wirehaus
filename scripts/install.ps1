@@ -2,6 +2,10 @@
 param(
     [switch]$Uninstall,
     [switch]$Purge,
+    [string]$Name = '',
+    [string]$Zone = 'wirehaus.dev',
+    [string]$ViewerOrigin = 'https://app.wirehaus.dev',
+    [string]$PublicHost = '',
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\Wirehaus')
 )
 
@@ -71,7 +75,18 @@ if ($firstRun) {
     Write-Host ''
 }
 
-Invoke-Agent @('service', 'install', '--viewer-dir', $viewer)
+if ($Name -and -not $PublicHost) {
+    $PublicHost = "$Name.$Zone"
+}
+$serviceArguments = @('service', 'install', '--viewer-dir', $viewer)
+if ($PublicHost) {
+    $serviceArguments += @('--public-host', $PublicHost, '--viewer-origin', $ViewerOrigin)
+}
+Invoke-Agent $serviceArguments
 Invoke-Agent @('pairing')
 Write-Host ''
-Write-Host 'Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code.'
+if ($PublicHost) {
+    Write-Host "Next, connect the tunnel (see your dashboard), then open $ViewerOrigin/$($PublicHost.Split('.')[0]) and enter the pairing code."
+} else {
+    Write-Host 'Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code.'
+}
