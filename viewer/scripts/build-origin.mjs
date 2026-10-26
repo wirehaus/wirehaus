@@ -8,6 +8,7 @@ import {
   contentSecurityPolicy,
   headersFile,
   moduleIntegrity,
+  redirectsFile,
   pinWasm,
   rewriteIndex,
   securityTxt,
@@ -47,6 +48,7 @@ const importMapText = moduleIntegrity(files);
 const page = rewriteIndex(files.get('index.html').toString('utf8'), files, importMapText);
 writeFileSync(join(target, 'index.html'), page);
 writeFileSync(join(target, '_headers'), headersFile(contentSecurityPolicy(importMapText, connect)));
+writeFileSync(join(target, '_redirects'), redirectsFile());
 mkdirSync(join(target, '.well-known'));
 writeFileSync(join(target, '.well-known/security.txt'), securityTxt(new Date(), SECURITY_TXT_VALID_DAYS));
 

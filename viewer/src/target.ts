@@ -10,6 +10,7 @@ export type TargetError = 'missing' | 'invalid';
 export type PageLocation = {
   protocol: string;
   host: string;
+  pathname: string;
   hash: string;
 };
 
@@ -17,6 +18,7 @@ const MAX_HOST_LENGTH = 253;
 const MAX_LABEL_LENGTH = 63;
 const LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 const PORT = /^[0-9]{1,5}$/;
+const RESERVED_NAMES = new Set(['app', 'www', 'api', 'admin', 'mail']);
 const SCHEMES = ['https://', 'wss://'];
 
 function validHost(host: string): boolean {
@@ -86,13 +88,27 @@ function ownTarget(page: PageLocation): Target {
   };
 }
 
+function agentFromPath(page: PageLocation): string | undefined {
+  const match = /^\/([A-Za-z0-9-]+)\/?$/.exec(page.pathname);
+  const name = match?.[1]?.toLowerCase();
+  const dot = page.host.indexOf('.');
+  if (name === undefined || dot === -1 || !LABEL.test(name) || name.length > MAX_LABEL_LENGTH || RESERVED_NAMES.has(name)) {
+    return undefined;
+  }
+  return parseAgentAddress(`${name}${page.host.slice(dot)}`);
+}
+
 export function resolveTarget(page: PageLocation, configurable: boolean): Target | TargetError {
   if (!configurable) {
     return ownTarget(page);
   }
   const requested = new URLSearchParams(page.hash.replace(/^#/, '')).getAll('agent');
   if (requested.length === 0) {
-    return 'missing';
+    const named = agentFromPath(page);
+    if (named !== undefined) {
+      return foreignTarget(named);
+    }
+    return page.pathname.replace(/\/+$/, '') === '' ? 'missing' : 'invalid';
   }
   const authority = requested.length === 1 ? parseAgentAddress(requested[0] ?? '') : undefined;
   return authority === undefined ? 'invalid' : foreignTarget(authority);

@@ -99,3 +99,7 @@ export function rewriteIndex(html, files, importMapText) {
     1,
   );
 }
+
+export function redirectsFile() {
+  return '/* /index.html 200\n';
+}

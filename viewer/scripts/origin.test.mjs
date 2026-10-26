@@ -5,6 +5,7 @@ import {
   headersFile,
   integrityOf,
   moduleIntegrity,
+  redirectsFile,
   pinWasm,
   rewriteIndex,
   securityTxt,
@@ -93,4 +94,8 @@ test('the wasm hash is written into the hash module and only once', () => {
     "export const WASM_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';\n",
   );
   assert.throws(() => pinWasm(pinned, bytes('abc')));
+});
+
+test('every path that is not a file serves the viewer', () => {
+  assert.equal(redirectsFile(), '/* /index.html 200\n');
 });

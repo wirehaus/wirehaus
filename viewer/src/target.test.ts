@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import { parseAgentAddress, resolveTarget } from './target.js';
 
-const page = { protocol: 'https:', host: 'viewer.example.com', hash: '' };
+const page = { protocol: 'https:', host: 'viewer.example.com', pathname: '/', hash: '' };
 
 test('accepts plain hosts, hosts with a port and a leading secure scheme', () => {
   assert.equal(parseAgentAddress('user.wirehaus.dev'), 'user.wirehaus.dev');
@@ -53,7 +53,7 @@ test('rejects anything that is not a bare host and optional port', () => {
 });
 
 test('a viewer served by the agent connects to its own origin', () => {
-  const target = resolveTarget({ protocol: 'http:', host: '127.0.0.1:7878', hash: '#agent=evil.example.com' }, false);
+  const target = resolveTarget({ protocol: 'http:', host: '127.0.0.1:7878', pathname: '/', hash: '#agent=evil.example.com' }, false);
   assert.deepEqual(target, {
     authority: '127.0.0.1:7878',
     origin: 'http://127.0.0.1:7878',
@@ -70,7 +70,7 @@ test('a configurable viewer takes the agent from the fragment and always uses a 
     socketUrl: 'wss://user.wirehaus.dev/ws',
     foreign: true,
   });
-  const plain = resolveTarget({ protocol: 'http:', host: 'viewer.example.com', hash: '#agent=user.wirehaus.dev' }, true);
+  const plain = resolveTarget({ protocol: 'http:', host: 'viewer.example.com', pathname: '/', hash: '#agent=user.wirehaus.dev' }, true);
   assert.equal(typeof plain === 'object' && plain.socketUrl, 'wss://user.wirehaus.dev/ws');
 });
 
@@ -90,4 +90,33 @@ test('a configurable viewer without a usable address reports why', () => {
   assert.equal(resolveTarget({ ...page, hash: '#agent=a.example.com&agent=b.example.com' }, true), 'invalid');
   assert.equal(resolveTarget({ ...page, hash: '#agent=http://a.example.com' }, true), 'invalid');
   assert.equal(resolveTarget({ ...page, hash: '#agent=a.example.com/x' }, true), 'invalid');
+});
+
+const app = { protocol: 'https:', host: 'app.wirehaus.dev', hash: '' };
+
+test('a single name in the path selects that name under the parent domain', () => {
+  for (const pathname of ['/cristobal', '/Cristobal/', '/mi-equipo']) {
+    const target = resolveTarget({ ...app, pathname }, true);
+    assert.ok(typeof target === 'object');
+    assert.equal(target.authority, `${pathname.replace(/\//g, '').toLowerCase()}.wirehaus.dev`);
+    assert.equal(target.socketUrl, `wss://${target.authority}/ws`);
+  }
+});
+
+test('reserved or malformed names in the path are refused', () => {
+  for (const pathname of ['/app', '/www', '/a/b', '/-x', '/x-', '/a.b', '/%2e', `/${'a'.repeat(64)}`, '//x']) {
+    assert.equal(resolveTarget({ ...app, pathname }, true), 'invalid', pathname);
+  }
+  assert.equal(resolveTarget({ ...app, pathname: '/' }, true), 'missing');
+});
+
+test('an explicit agent in the fragment wins over the path', () => {
+  const target = resolveTarget({ ...app, pathname: '/cristobal', hash: '#agent=other.wirehaus.dev' }, true);
+  assert.ok(typeof target === 'object');
+  assert.equal(target.authority, 'other.wirehaus.dev');
+});
+
+test('the path is ignored when the agent serves its own viewer', () => {
+  const target = resolveTarget({ protocol: 'http:', host: '127.0.0.1:7878', pathname: '/x', hash: '' }, false);
+  assert.ok(typeof target === 'object' && !target.foreign);
 });
