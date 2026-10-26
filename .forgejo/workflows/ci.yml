@@ -76,4 +76,6 @@ jobs:
       - run: |
           echo "Viewer bundle hash: $(cat dist/manifest.sha256 | sha256sum | cut -d' ' -f1)" >> "$GITHUB_STEP_SUMMARY"
           (cd dist && sha256sum --check --quiet manifest.sha256)
+      - run: npm run build:origin
+      - run: (cd dist-origin && sha256sum --check --quiet manifest.sha256)
       - run: npm test

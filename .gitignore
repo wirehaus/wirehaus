@@ -8,3 +8,4 @@ build-test
 *.key
 .DS_Store
 viewer/src/wirehaus_crypto_wasm*
+dist-origin

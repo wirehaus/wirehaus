@@ -6,6 +6,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Añadido
 
+- Compilación del visor para un origen propio (`npm run build:origin`): la página declara que acepta la dirección del agente en el fragmento, cada hoja de estilo y módulo lleva su huella de integridad (atributo `integrity` y mapa de importación con política de contenido que fija su hash), `_headers` con política `default-src 'none'` y conexiones solo a `'self'` y `wss://*.wirehaus.dev`, `security.txt` y un manifiesto propio de la versión. La orden `wirehaus-agent serve` sigue sirviendo el visor sin esa capacidad.
+
 - Audio del ordenador: canal propio con permiso explícito (`audio allow --code`, `audio deny`), apagado por defecto. El agente captura el audio del sistema (Linux por `parec` sobre PulseAudio o PipeWire; Windows y macOS 14.6 o superior por el bucle de la salida predeterminada con `cpal`: WASAPI y un tap de CoreAudio), lo convierte a 48 kHz estéreo y lo codifica con Opus en tramas de 20 ms usando `opus-pure` (Rust puro, sin dependencia de C, versión fijada). El visor lo decodifica con WebCodecs y lo reproduce con un botón Escuchar, descartando lo que llega tarde para mantener la latencia baja. Si se retira el permiso durante la sesión, el audio se corta.
 
 - Esqueleto del espacio de trabajo con el crate `wirehaus-protocol` y el binario `wirehaus-agent`.
