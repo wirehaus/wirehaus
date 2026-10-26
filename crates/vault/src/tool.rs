@@ -156,8 +156,17 @@ impl Vault for ToolVault {
 mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, MutexGuard};
 
     use super::*;
+
+    static EXCLUSIVE: Mutex<()> = Mutex::new(());
+
+    fn exclusive() -> MutexGuard<'static, ()> {
+        EXCLUSIVE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -205,6 +214,7 @@ esac"#,
 
     #[test]
     fn a_value_goes_in_comes_out_and_goes_away() {
+        let _exclusive = exclusive();
         let directory = scratch("roundtrip");
         let vault = fake(&directory);
         assert_eq!(vault.get("a/key").unwrap(), None);
@@ -220,6 +230,7 @@ esac"#,
 
     #[test]
     fn the_secret_never_appears_in_the_arguments() {
+        let _exclusive = exclusive();
         let directory = scratch("arguments");
         let log = directory.join("arguments");
         let program = install(
@@ -236,6 +247,7 @@ esac"#,
 
     #[test]
     fn a_locked_or_broken_vault_is_an_error_and_not_an_absent_value() {
+        let _exclusive = exclusive();
         let directory = scratch("locked");
         let program = install(
             &directory,
@@ -264,6 +276,7 @@ esac"#,
 
     #[test]
     fn a_tool_that_never_answers_is_stopped() {
+        let _exclusive = exclusive();
         let directory = scratch("slow");
         let program = install(&directory, "sleep 600");
         let vault = ToolVault::with_program(&program).with_timeout(Duration::from_millis(300));
