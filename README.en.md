@@ -3,12 +3,36 @@
 [Español](README.md) | English
 
 [![CI](https://github.com/wirehaus/wirehaus/actions/workflows/ci.yml/badge.svg)](https://github.com/wirehaus/wirehaus/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-PolyForm%20Shield%201.0.0-blue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange)](rust-toolchain.toml)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#platforms)
 
-Remote access to your computer from any browser: desktop, terminal, files and clipboard, end-to-end encrypted.
+**Remote access to your computer from any browser: desktop, terminal, files, clipboard and audio, end-to-end encrypted.**
 
 You leave the home computer on with the Wirehaus agent and connect from anywhere, without installing anything on the machine you connect from and without opening ports on your router.
+
+- **End-to-end encryption.** The key is negotiated between your browser and your agent; the tunnel and whoever runs it see only opaque bytes.
+- **Two factors you cannot skip.** A one-time pairing code and a TOTP verified by your own agent, not by someone else's server.
+- **Nothing open.** The agent listens only on `127.0.0.1` and goes out through a tunnel.
+- **One command to install it**, and one to remove it.
+- **Sensitive features off by default**: terminal, files, clipboard and audio are turned on by hand, on the computer itself.
+
+## Install
+
+Create your access at [wirehaus.dev](https://wirehaus.dev) and click **Connect** in your dashboard: it gives you a command with a single-use code.
+
+```
+curl -fsSL https://wirehaus.dev/install.sh | sh -s -- XXXX-XXXX-XXXX-XXXX-XXXX
+```
+
+On Windows, in PowerShell: `& ([scriptblock]::Create((irm https://wirehaus.dev/install.ps1))) XXXX-XXXX-XXXX-XXXX-XXXX`.
+
+The installer downloads the package for your system, checks its SHA-256 sum, installs it as a service for your user, downloads `cloudflared` (version and checksum pinned in the script itself) and leaves it connected to your name. It asks for no administrator rights and opens no ports. Remove it with `--uninstall` (and `--purge` to delete the keys too).
+
+The 0.2.0 packages are for Linux x86_64 and Windows x64; the macOS (Apple Silicon) one arrives with the next release and, until then, you can [build it](#build).
+
+If you would rather not run a downloaded script, download the package from [wirehaus.dev/download](https://wirehaus.dev/docs/#download), check its signature and run `install.sh` (or `install.ps1`) from the extracted folder. You can also [build it](#build) yourself.
 
 ## How it works
 
@@ -23,7 +47,7 @@ You leave the home computer on with the Wirehaus agent and connect from anywhere
 
 The agent only listens on `127.0.0.1`. To reach it from outside it is published behind an outbound tunnel (for example `cloudflared`), so nothing needs to be opened on the router. The tunnel only carries encrypted bytes: encryption is negotiated between the browser and the agent, and the agent itself checks the second factor.
 
-## What it does today
+## What it does
 
 | Feature | Status |
 |---|---|
@@ -46,21 +70,7 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 - No `unsafe` in our own code, inputs validated before allocating memory and tests with hostile data on every channel.
 - The viewer is served from memory, verified against a manifest of SHA-256 hashes from a reproducible build.
 
-The design has not had an external review yet: do not expose it to the Internet on a machine you care about. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
-
-## Install
-
-Create your access at [wirehaus.dev](https://wirehaus.dev) and click **Connect** in your dashboard: it gives you a command with a single-use code.
-
-```
-curl -fsSL https://wirehaus.dev/install.sh | sh -s -- XXXX-XXXX-XXXX-XXXX-XXXX
-```
-
-On Windows, in PowerShell: `& ([scriptblock]::Create((irm https://wirehaus.dev/install.ps1))) XXXX-XXXX-XXXX-XXXX-XXXX`.
-
-The installer downloads the package for your system, checks its SHA-256 sum, installs it as a service for your user, downloads `cloudflared` (version and checksum pinned in the script itself) and leaves it connected to your name. It asks for no administrator rights and opens no ports. Remove it with `--uninstall` (and `--purge` to delete the keys too).
-
-If you would rather not run a downloaded script, download the package from [wirehaus.dev/download](https://wirehaus.dev/docs/#download), check its signature and run `install.sh` (or `install.ps1`) from the extracted folder. You can also [build it](#build) yourself.
+Nobody outside the project has audited the design or the code yet: use it knowing that, and do not protect anything with it that you cannot afford to lose. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Platforms
 
@@ -71,7 +81,11 @@ If you would rather not run a downloaded script, download the package from [wire
 | Windows 10 and 11 | Works. Must run inside the user's desktop session |
 | Linux with Wayland | Planned |
 
+### macOS
+
 On macOS, `wirehaus-agent permissions` checks and requests the permissions and `wirehaus-agent service install` sets it up as a user service. macOS ties permissions to the program's signature: `scripts/macos-sign.sh <binary>` signs it with a stable identity so you do not have to grant them again after every build.
+
+### Windows
 
 On Windows the agent captures with DXGI Desktop Duplication, injects keys by physical position (scan codes, as on Linux and macOS) and uses the system clipboard. It has to start in the user's interactive session: a Windows service or an SSH session runs in session 0, which has no desktop. `wirehaus-agent service install --viewer-dir <viewer>` creates a per-user scheduled task that launches it at sign-in without a window (`wirehaus-agentd.exe` starts it hidden and keeps the log in `%LOCALAPPDATA%\Wirehaus\agent.log`) and relaunches it every minute if it dies; `service status` and `service uninstall` query and remove it. It cannot control windows that run with more privileges than the agent, nor the lock screen or the account control prompt. The agent state is protected with an ACL that only allows the user and the system. `scripts/build-windows.sh` builds from Linux with mingw and `scripts/package-windows.sh` produces a `.zip` with the executables, the viewer, the SHA-256 sums and `install.ps1`. To install, unzip and run `powershell -ExecutionPolicy Bypass -File install.ps1`: it installs into `%LOCALAPPDATA%\Programs\Wirehaus` without asking for administrator rights, checks the sums, creates the keys the first time (showing the second-factor secret once), installs the service and prints the pairing code. `install.ps1 -Uninstall` removes it and `-Purge` also deletes the keys. State lives in `%LOCALAPPDATA%\Wirehaus\state`.
 

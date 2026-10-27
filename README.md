@@ -3,12 +3,36 @@
 Español | [English](README.en.md)
 
 [![CI](https://github.com/wirehaus/wirehaus/actions/workflows/ci.yml/badge.svg)](https://github.com/wirehaus/wirehaus/actions/workflows/ci.yml)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-0.2.0-blue)](CHANGELOG.md)
 [![Licencia](https://img.shields.io/badge/licencia-PolyForm%20Shield%201.0.0-blue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange)](rust-toolchain.toml)
+[![Plataformas](https://img.shields.io/badge/plataformas-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-lightgrey)](#plataformas)
 
-Acceso remoto a tu ordenador desde cualquier navegador: escritorio, terminal, archivos y portapapeles, con cifrado de extremo a extremo.
+**Acceso remoto a tu ordenador desde cualquier navegador: escritorio, terminal, archivos, portapapeles y audio, con cifrado de extremo a extremo.**
 
 Dejas el ordenador de casa encendido con el agente de Wirehaus y te conectas desde donde estés, sin instalar nada en el equipo desde el que entras y sin abrir puertos en tu router.
+
+- **Cifrado de extremo a extremo.** La clave se negocia entre tu navegador y tu agente; el túnel y quien lo opere ven solo bytes opacos.
+- **Dos factores que no se pueden saltar.** Un código de emparejamiento de un solo uso y un TOTP que verifica tu propio agente, no un servidor ajeno.
+- **Nada abierto.** El agente escucha solo en `127.0.0.1` y sale hacia fuera por un túnel.
+- **Un comando para instalarlo**, y otro para quitarlo.
+- **Funciones sensibles apagadas por defecto**: terminal, archivos, portapapeles y audio se activan a mano, en el propio ordenador.
+
+## Instalación
+
+Crea tu acceso en [wirehaus.dev](https://wirehaus.dev) y pulsa **Conectar** en tu panel: te da un comando con un código de un solo uso.
+
+```
+curl -fsSL https://wirehaus.dev/install.sh | sh -s -- XXXX-XXXX-XXXX-XXXX-XXXX
+```
+
+En Windows, en PowerShell: `& ([scriptblock]::Create((irm https://wirehaus.dev/install.ps1))) XXXX-XXXX-XXXX-XXXX-XXXX`.
+
+El instalador descarga el paquete de tu sistema, comprueba su suma SHA-256, lo instala como servicio de tu usuario, descarga `cloudflared` (versión y suma fijadas en el propio script) y lo deja conectado a tu nombre. No pide administrador ni abre puertos. Quítalo con `--uninstall` (y `--purge` para borrar también las claves).
+
+Los paquetes de la versión 0.2.0 son para Linux x86_64 y Windows x64; el de macOS (Apple Silicon) llega con la siguiente publicación y, mientras tanto, se [compila](#compilar).
+
+Si prefieres no ejecutar un script descargado, bájate el paquete de [wirehaus.dev/download](https://wirehaus.dev/docs/#descarga), comprueba su firma y ejecuta `install.sh` (o `install.ps1`) desde la carpeta descomprimida. También puedes [compilarlo](#compilar) tú.
 
 ## Cómo funciona
 
@@ -23,7 +47,7 @@ Dejas el ordenador de casa encendido con el agente de Wirehaus y te conectas des
 
 El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica detrás de un túnel de salida (por ejemplo `cloudflared`), así que no hace falta abrir nada en el router. El túnel solo transporta bytes cifrados: el cifrado se negocia entre el navegador y el agente, y el segundo factor lo comprueba el propio agente.
 
-## Qué hace hoy
+## Qué hace
 
 | Función | Estado |
 |---|---|
@@ -46,21 +70,7 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 - Sin `unsafe` en el código propio, entradas validadas antes de reservar memoria y pruebas con datos hostiles en cada canal.
 - El visor se sirve desde memoria, verificado contra un manifiesto de hashes SHA-256 de compilación reproducible.
 
-El diseño todavía no ha pasado una revisión externa: no lo expongas a Internet en un equipo que te importe. Las vulnerabilidades se informan según [SECURITY.md](SECURITY.md).
-
-## Instalación
-
-Crea tu acceso en [wirehaus.dev](https://wirehaus.dev) y pulsa **Conectar** en tu panel: te da un comando con un código de un solo uso.
-
-```
-curl -fsSL https://wirehaus.dev/install.sh | sh -s -- XXXX-XXXX-XXXX-XXXX-XXXX
-```
-
-En Windows, en PowerShell: `& ([scriptblock]::Create((irm https://wirehaus.dev/install.ps1))) XXXX-XXXX-XXXX-XXXX-XXXX`.
-
-El instalador descarga el paquete de tu sistema, comprueba su suma SHA-256, lo instala como servicio de tu usuario, descarga `cloudflared` (versión y suma fijadas en el propio script) y lo deja conectado a tu nombre. No pide administrador ni abre puertos. Quítalo con `--uninstall` (y `--purge` para borrar también las claves).
-
-Si prefieres no ejecutar un script descargado, bájate el paquete de [wirehaus.dev/download](https://wirehaus.dev/docs/#descarga), comprueba su firma y ejecuta `install.sh` (o `install.ps1`) desde la carpeta descomprimida. También puedes [compilarlo](#compilar) tú.
+El diseño y el código todavía no los ha auditado nadie ajeno al proyecto: úsalo sabiéndolo y no protejas con él nada que no puedas permitirte perder. Las vulnerabilidades se informan según [SECURITY.md](SECURITY.md).
 
 ## Plataformas
 
@@ -71,7 +81,11 @@ Si prefieres no ejecutar un script descargado, bájate el paquete de [wirehaus.d
 | Windows 10 y 11 | Funciona. Debe ejecutarse dentro de la sesión de escritorio del usuario |
 | Linux con Wayland | Previsto |
 
+### macOS
+
 En macOS, `wirehaus-agent permissions` comprueba y solicita los permisos y `wirehaus-agent service install` lo deja como servicio de usuario. macOS asocia los permisos a la firma del programa: `scripts/macos-sign.sh <binario>` lo firma con una identidad estable para no tener que volver a concederlos tras cada compilación.
+
+### Windows
 
 En Windows el agente captura con DXGI Desktop Duplication, inyecta teclas por posición física (código de escaneo, como en Linux y macOS) y usa el portapapeles del sistema. Tiene que arrancar en la sesión interactiva del usuario: un servicio de Windows o una sesión SSH corren en la sesión 0, que no tiene escritorio. `wirehaus-agent service install --viewer-dir <visor>` crea una tarea programada del usuario que lo lanza al iniciar sesión, sin ventana (`wirehaus-agentd.exe` lo arranca oculto y guarda el registro en `%LOCALAPPDATA%\Wirehaus\agent.log`) y lo vuelve a lanzar cada minuto si se cae; `service status` y `service uninstall` lo consultan y lo quitan. No puede controlar ventanas que se ejecutan con más privilegios que el agente, ni la pantalla de bloqueo ni el aviso de control de cuentas. El estado del agente se protege con una ACL que solo permite al usuario y al sistema. `scripts/build-windows.sh` compila desde Linux con mingw y `scripts/package-windows.sh` genera un `.zip` con los ejecutables, el visor, las sumas SHA-256 y `install.ps1`. Para instalarlo, descomprimir y ejecutar `powershell -ExecutionPolicy Bypass -File install.ps1`: instala en `%LOCALAPPDATA%\Programs\Wirehaus` sin pedir administrador, comprueba las sumas, crea las claves la primera vez (muestra el secreto del segundo factor una sola vez), instala el servicio y muestra el código de emparejamiento. `install.ps1 -Uninstall` lo quita y `-Purge` borra también las claves. El estado vive en `%LOCALAPPDATA%\Wirehaus\state`.
 

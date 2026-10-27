@@ -1,6 +1,6 @@
 # Contribuir
 
-Gracias por el interés. Wirehaus está en desarrollo temprano y la arquitectura todavía se mueve, así que antes de escribir código abre un issue y cuéntame qué quieres cambiar.
+Gracias por el interés. Wirehaus es un proyecto personal que evoluciona rápido, así que antes de escribir código abre un issue y cuéntame qué quieres cambiar: así evitamos trabajo que no encaje con la arquitectura.
 
 ## Antes de enviar un cambio
 
