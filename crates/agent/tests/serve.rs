@@ -2491,7 +2491,7 @@ fn serves_only_the_viewer_files() {
     assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
     assert!(reply.contains("Content-Security-Policy: default-src 'none'"));
     assert!(reply.contains("Cross-Origin-Resource-Policy: same-origin"));
-    assert!(reply.contains("Permissions-Policy: camera=(), microphone=()"));
+    assert!(reply.contains("Permissions-Policy: camera=(self), microphone=()"));
     assert!(reply.ends_with("<title>viewer</title>"));
 
     for path in [
@@ -2682,5 +2682,176 @@ fn removing_the_audio_permission_stops_the_stream_that_is_running() {
     assert_eq!(
         next_audio(&mut client),
         AudioMessage::Failed(AudioFailure::NotAllowed)
+    );
+}
+
+fn next_link(client: &mut Client) -> wirehaus_protocol::LinkMessage {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        match client.read_frame() {
+            Received::Got(frame) if frame.channel == Channel::Link => {
+                return wirehaus_protocol::LinkMessage::decode(&frame.payload).unwrap();
+            }
+            Received::Got(frame) => {
+                if let Ok(DesktopMessage::FrameEnd { sequence }) =
+                    DesktopMessage::decode(&frame.payload)
+                {
+                    client.send_viewer(ViewerMessage::FrameAck { sequence });
+                }
+            }
+            Received::Timeout => {}
+            Received::Closed => panic!("the connection closed"),
+        }
+    }
+    panic!("no link message arrived");
+}
+
+fn send_link(client: &mut Client, message: &wirehaus_protocol::LinkMessage) {
+    client.send(&Frame::new(Channel::Link, 0, message.encode()).unwrap());
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
+}
+
+fn unhex(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+        .collect()
+}
+
+fn json_field(body: &str, name: &str) -> String {
+    let marker = format!("\"{name}\":\"");
+    let start = body
+        .find(&marker)
+        .unwrap_or_else(|| panic!("{name} in {body}"))
+        + marker.len();
+    let end = body[start..].find('"').unwrap() + start;
+    body[start..end].to_owned()
+}
+
+fn link_get(server: &Running, path: &str, origin: Option<&str>) -> String {
+    let origin = origin.map_or(String::new(), |o| format!("Origin: {o}\r\n"));
+    server.http(&format!(
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{origin}Connection: close\r\n\r\n",
+        server.port
+    ))
+}
+
+#[test]
+fn a_paired_device_links_a_new_computer_with_a_sealed_pairing_code() {
+    use wirehaus_protocol::{LinkFailure, LinkMessage};
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut phone, _device) = pair_and_login(&server, "Movil");
+
+    assert!(link_get(&server, "/link/ping", None).contains("200 OK"));
+    let (private, public) = wirehaus_crypto::link::generate().unwrap();
+    let started = link_get(&server, &format!("/link/start?k={}", hex(&public)), None);
+    assert!(started.contains("200 OK"), "{started}");
+    let id_hex = json_field(&started, "id");
+    let manual = json_field(&started, "manual");
+    let verify = json_field(&started, "verify");
+    let pending = link_get(&server, &format!("/link/poll?i={id_hex}"), None);
+    assert!(pending.contains(r#""state":"pending""#));
+
+    send_link(&mut phone, &LinkMessage::Lookup("ZZZZ-ZZZZ".to_owned()));
+    assert_eq!(next_link(&mut phone), LinkMessage::NotFound);
+    send_link(&mut phone, &LinkMessage::Lookup(manual.to_lowercase()));
+    let LinkMessage::Info { id, verification } = next_link(&mut phone) else {
+        panic!("expected the link details");
+    };
+    assert_eq!(hex(&id), id_hex);
+    assert_eq!(verification, verify);
+
+    send_link(
+        &mut phone,
+        &LinkMessage::Approve {
+            id,
+            code: "000000".to_owned(),
+        },
+    );
+    assert_eq!(
+        next_link(&mut phone),
+        LinkMessage::Failed(LinkFailure::WrongCode)
+    );
+    assert!(link_get(&server, &format!("/link/poll?i={id_hex}"), None).contains("pending"));
+
+    send_link(
+        &mut phone,
+        &LinkMessage::Approve {
+            id,
+            code: server.fresh_totp(),
+        },
+    );
+    assert_eq!(next_link(&mut phone), LinkMessage::Approved);
+
+    let ready = link_get(&server, &format!("/link/poll?i={id_hex}"), None);
+    let sealed = unhex(&json_field(&ready, "sealed"));
+    let text = wirehaus_crypto::link::open(&private, &sealed).unwrap();
+    let code = PairingCode::from_text(std::str::from_utf8(&text).unwrap()).unwrap();
+    let now = server.time.load(Ordering::SeqCst);
+    assert_eq!(
+        server
+            .store
+            .read(|state, _| state.pairing_psk(now))
+            .unwrap(),
+        Some(code.psk())
+    );
+    assert!(link_get(&server, &format!("/link/poll?i={id_hex}"), None).contains("gone"));
+    assert!(!String::from_utf8_lossy(&sealed).contains('-'));
+}
+
+#[test]
+fn the_link_endpoints_check_the_origin_and_the_input() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let evil = link_get(&server, "/link/ping", Some("https://evil.example"));
+    assert!(evil.contains("403 Forbidden"), "{evil}");
+    assert!(!evil.contains("Access-Control-Allow-Origin"));
+    let own = server.origin();
+    let ok = link_get(&server, "/link/ping", Some(&own));
+    assert!(ok.contains("200 OK"));
+    assert!(ok.contains(&format!("Access-Control-Allow-Origin: {own}")));
+    assert!(link_get(&server, "/link/start?k=zz", None).contains("400 Bad Request"));
+    assert!(link_get(&server, "/link/start?k=abcd", None).contains("400 Bad Request"));
+    assert!(link_get(&server, "/link/poll?i=1234", None).contains("400 Bad Request"));
+    assert!(link_get(&server, "/link/nothing", None).contains("404 Not Found"));
+    let post = server.http(&format!(
+        "POST /link/start HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+        server.port
+    ));
+    assert!(post.contains("405"), "{post}");
+}
+
+#[test]
+fn a_viewer_cannot_send_the_agents_link_messages() {
+    use wirehaus_protocol::LinkMessage;
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut phone, _device) = pair_and_login(&server, "Movil");
+    send_link(&mut phone, &LinkMessage::Approved);
+    assert!(phone.wait_closed(Duration::from_secs(5)));
+}
+
+#[test]
+fn lookups_in_one_session_are_limited() {
+    use wirehaus_protocol::{LinkFailure, LinkMessage};
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut phone, _device) = pair_and_login(&server, "Movil");
+    for _ in 0..12 {
+        send_link(&mut phone, &LinkMessage::Lookup("AAAA-BBBB".to_owned()));
+        assert_eq!(next_link(&mut phone), LinkMessage::NotFound);
+    }
+    send_link(&mut phone, &LinkMessage::Lookup("AAAA-BBBB".to_owned()));
+    assert_eq!(
+        next_link(&mut phone),
+        LinkMessage::Failed(LinkFailure::TooManyAttempts)
     );
 }

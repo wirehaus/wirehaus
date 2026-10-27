@@ -213,10 +213,17 @@ if [ -n "$tunnel_token_file" ]; then
 fi
 run_agent pairing
 echo
-if [ -n "$public_host" ] && [ -n "$tunnel_token_file" ]; then
-  echo "The tunnel is connected. Open $viewer_origin/${public_host%%.*} and enter the pairing code."
-elif [ -n "$public_host" ]; then
-  echo "Next, connect the tunnel (see your dashboard), then open $viewer_origin/${public_host%%.*} and enter the pairing code."
+if [ -n "$public_host" ]; then
+  [ -n "$tunnel_token_file" ] || echo "First connect the tunnel (see your dashboard)."
+  cat <<STEPS
+Next steps:
+  1. Scan the first QR (second factor) with an authenticator app such as 2FAS, Aegis, Google Authenticator or Apple Passwords.
+  2. Scan the second QR with your phone: it opens $viewer_origin/${public_host%%.*} with the pairing code filled in.
+     On another device, open that address and type the pairing code instead.
+  3. Type the six digits your authenticator app shows.
+Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR.
+Show the second factor again on this computer with: wirehaus-agent totp
+STEPS
 else
   echo "Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code."
 fi

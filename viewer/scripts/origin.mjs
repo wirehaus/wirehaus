@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const DEFAULT_CONNECT = 'wss://*.wirehaus.dev';
+export const DEFAULT_CONNECT = 'wss://*.wirehaus.dev https://*.wirehaus.dev';
 export const DEFAULT_API = 'https://api.wirehaus.dev';
 
 const MODULE_EXTENSIONS = ['.js', '.mjs'];
@@ -28,7 +28,9 @@ export function contentSecurityPolicy(importMapText, connect) {
     "default-src 'none'",
     `script-src 'self' 'wasm-unsafe-eval' '${hash}'`,
     "style-src 'self'",
-    'img-src data:',
+    "img-src 'self' data:",
+    "manifest-src 'self'",
+    "worker-src 'self'",
     `connect-src 'self' ${connect}`,
     "base-uri 'none'",
     "form-action 'none'",
@@ -46,7 +48,7 @@ export function headersFile(policy) {
     '  Referrer-Policy: no-referrer',
     '  Cross-Origin-Opener-Policy: same-origin',
     '  Cross-Origin-Resource-Policy: same-origin',
-    '  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    '  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=()',
     '/manifest.sha256',
     '  Content-Type: text/plain; charset=utf-8',
     '',

@@ -127,6 +127,8 @@ fn content_type(name: &str) -> Option<&'static str> {
         "js" | "mjs" => Some("text/javascript; charset=utf-8"),
         "css" => Some("text/css; charset=utf-8"),
         "wasm" => Some("application/wasm"),
+        "png" => Some("image/png"),
+        "webmanifest" => Some("application/manifest+json"),
         "sha256" => Some("text/plain; charset=utf-8"),
         _ => None,
     }
@@ -172,6 +174,11 @@ mod tests {
         assert_eq!(content_type("a.mjs"), content_type("a.js"));
         assert!(content_type("a.css").is_some());
         assert_eq!(content_type("a.wasm"), Some("application/wasm"));
+        assert_eq!(content_type("a.png"), Some("image/png"));
+        assert_eq!(
+            content_type("m.webmanifest"),
+            Some("application/manifest+json")
+        );
         assert!(content_type("manifest.sha256").is_some());
         assert!(content_type("a.map").is_none());
         assert!(content_type("a").is_none());

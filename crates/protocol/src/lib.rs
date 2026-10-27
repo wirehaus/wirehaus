@@ -7,6 +7,7 @@ mod error;
 mod files;
 mod frame;
 mod input;
+mod link;
 mod terminal;
 mod viewer;
 
@@ -22,6 +23,10 @@ pub use files::{
 };
 pub use frame::{Frame, HEADER_LEN, MAX_PAYLOAD_LEN, MAX_VIEWER_MESSAGE};
 pub use input::{Button, InputEvent};
+pub use link::{
+    LINK_CODE_LEN, LINK_ID_LEN, LINK_KEY_MAX, LINK_KEY_MIN, LINK_VERIFY_LEN, LinkFailure,
+    LinkMessage,
+};
 pub use terminal::{
     MAX_DIMENSION, MAX_INPUT_CHUNK, MAX_OUTPUT_CHUNK, RefusalReason, TerminalMessage,
 };

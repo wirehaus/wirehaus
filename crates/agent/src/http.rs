@@ -171,14 +171,40 @@ pub fn response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
          Referrer-Policy: no-referrer\r\n\
          Cross-Origin-Opener-Policy: same-origin\r\n\
          Cross-Origin-Resource-Policy: same-origin\r\n\
-         Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()\r\n\
-         Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src data:; \
-         connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n\
+         Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=()\r\n\
+         Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; \
+         manifest-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n\
          Connection: close\r\n\r\n",
         body.len()
     );
     let mut out = head.into_bytes();
     out.extend_from_slice(body);
+    out
+}
+
+pub fn json_response(status: &str, body: &str, allow_origin: Option<&str>) -> Vec<u8> {
+    let cors = match allow_origin {
+        Some(origin) => format!(
+            "Access-Control-Allow-Origin: {origin}\r\n\
+             Cross-Origin-Resource-Policy: cross-origin\r\n"
+        ),
+        None => "Cross-Origin-Resource-Policy: same-origin\r\n".to_owned(),
+    };
+    let head = format!(
+        "HTTP/1.1 {status}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Cache-Control: no-store\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         Referrer-Policy: no-referrer\r\n\
+         Vary: Origin\r\n\
+         {cors}\
+         Content-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\n\
+         Connection: close\r\n\r\n",
+        body.len()
+    );
+    let mut out = head.into_bytes();
+    out.extend_from_slice(body.as_bytes());
     out
 }
 

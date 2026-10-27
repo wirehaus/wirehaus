@@ -113,7 +113,7 @@ cargo run -p wirehaus-agent -- init
 cargo run -p wirehaus-agent -- serve --viewer-dir viewer/dist
 ```
 
-`init` creates the agent identity and shows the second factor as a QR (and as a typed secret) for any authenticator app (2FAS, Aegis, Google Authenticator, Apple Passwords...); `wirehaus-agent totp` shows it again on that same computer. Open `http://127.0.0.1:7878` in the browser. The first time, generate a code with `cargo run -p wirehaus-agent -- pairing` and type it in the page together with the six-digit code from your app; the browser is then paired and later visits only ask for the second factor.
+`init` creates the agent identity and shows the second factor as a QR (and as a typed secret) for any authenticator app (2FAS, Aegis, Google Authenticator, Apple Passwords...); `wirehaus-agent totp` shows it again on that same computer. To give another device access without typing the long code, choose "Connect with my phone" on the pairing page and approve it from the connected phone (menu, "Link another device"). Open `http://127.0.0.1:7878` in the browser. The first time, generate a code with `cargo run -p wirehaus-agent -- pairing` and type it in the page together with the six-digit code from your app; the browser is then paired and later visits only ask for the second factor.
 
 The agent keeps its state in `~/.config/wirehaus` (or `--state-dir`), readable only by its owner. `devices` lists the paired devices; `devices revoke`, `devices reactivate`, `lock` and `unlock` need a second factor code with `--code`. `--display` picks another X11 display and `--listen` another port on the local machine. Messages come out in Spanish or English according to `LANG`.
 

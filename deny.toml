@@ -17,6 +17,7 @@ allow = [
     "BSD-2-Clause",
     "IJG",
     "BSL-1.0",
+    "Zlib",
 ]
 confidence-threshold = 0.9
 unused-allowed-license = "allow"

@@ -9,10 +9,11 @@ pub enum Channel {
     Audio,
     Capture,
     Control,
+    Link,
 }
 
 impl Channel {
-    pub const ALL: [Channel; 7] = [
+    pub const ALL: [Channel; 8] = [
         Channel::Desktop,
         Channel::Terminal,
         Channel::Files,
@@ -20,6 +21,7 @@ impl Channel {
         Channel::Audio,
         Channel::Capture,
         Channel::Control,
+        Channel::Link,
     ];
 
     pub(crate) fn tag(self) -> u8 {
@@ -31,6 +33,7 @@ impl Channel {
             Channel::Audio => 4,
             Channel::Capture => 5,
             Channel::Control => 6,
+            Channel::Link => 7,
         }
     }
 
@@ -43,6 +46,7 @@ impl Channel {
             4 => Ok(Channel::Audio),
             5 => Ok(Channel::Capture),
             6 => Ok(Channel::Control),
+            7 => Ok(Channel::Link),
             other => Err(ProtocolError::UnknownChannel(other)),
         }
     }

@@ -9,6 +9,44 @@ export type Messages = {
   homePlaceholder: string;
   homeOpen: string;
   homeContinue: (name: string) => string;
+  linkOr: string;
+  linkStart: string;
+  linkPcTitle: string;
+  linkPcIntro: string;
+  linkPcManual: string;
+  linkPcVerify: string;
+  linkPcWaiting: string;
+  linkPcApproved: string;
+  linkPcExpired: string;
+  linkPcBusy: string;
+  linkPcSlow: string;
+  linkPcFailed: string;
+  linkPcRetry: string;
+  linkPcCancel: string;
+  linkPcCountdown: (seconds: number) => string;
+  linkOpen: string;
+  linkIntro: string;
+  linkScan: string;
+  linkManualLabel: string;
+  linkFind: string;
+  linkScanDenied: string;
+  linkNotFound: string;
+  linkOther: (name: string) => string;
+  linkInvalid: string;
+  linkVerifyText: string;
+  linkCodeLabel: string;
+  linkCodeHint: string;
+  linkApprove: string;
+  linkDone: string;
+  linkWrongCode: string;
+  linkTooMany: string;
+  linkGone: string;
+  linkUnavailable: string;
+  linkClose: string;
+  linkScanning: string;
+  installApp: string;
+  installIos: string;
+
   homeNoAccess: string;
   homeCreate: string;
   homeInvalid: (name: string) => string;
@@ -160,12 +198,6 @@ export type Messages = {
   captureFailed: string;
   recordLimit: string;
   audioListen: string;
-  keysButton: string;
-  keysClose: string;
-  keysSwitch: string;
-  keysCad: string;
-  keysSuper: string;
-  keysEscape: string;
   audioStop: string;
   audioStarting: string;
   audioUnsupported: string;
@@ -204,6 +236,43 @@ const catalog: Record<string, Messages> = {
     homePlaceholder: 'tu-nombre',
     homeOpen: 'Abrir',
     homeContinue: (name) => `Continuar con ${name}`,
+    linkOr: 'o',
+    linkStart: 'Conectar con mi móvil',
+    linkPcTitle: 'Conecta con tu móvil',
+    linkPcIntro: 'En tu móvil, abre Wirehaus, entra en este ordenador y elige «Vincular otro equipo» en el menú. Escanea este código o escribe el código de abajo.',
+    linkPcManual: 'Código',
+    linkPcVerify: 'Debe coincidir con tu móvil',
+    linkPcWaiting: 'Esperando a tu móvil…',
+    linkPcApproved: 'Aprobado. Preparando el emparejamiento…',
+    linkPcExpired: 'El código ha caducado.',
+    linkPcBusy: 'Hay demasiadas vinculaciones en curso. Espera un minuto y vuelve a intentarlo.',
+    linkPcSlow: 'Espera un momento y vuelve a intentarlo.',
+    linkPcFailed: 'No se ha podido iniciar la vinculación. Usa el código de emparejamiento.',
+    linkPcRetry: 'Generar otro código',
+    linkPcCancel: 'Volver',
+    linkPcCountdown: (seconds) => `Caduca en ${seconds} s`,
+    linkOpen: 'Vincular otro equipo',
+    linkIntro: 'Da acceso a otro ordenador o navegador sin escribir el código largo: ábrelo en esa página, elige «Conectar con mi móvil» y escanea el código que aparece.',
+    linkScan: 'Escanear con la cámara',
+    linkManualLabel: 'O escribe el código que ves',
+    linkFind: 'Continuar',
+    linkScanDenied: 'No se ha podido usar la cámara. Escribe el código a mano.',
+    linkScanning: 'Apunta la cámara al código del otro equipo.',
+    linkNotFound: 'No encuentro ese código. Comprueba que el otro equipo sigue mostrándolo (caduca a los 3 minutos).',
+    linkOther: (name) => `Ese código es de otro ordenador (${name}). Conéctate a ese para vincularlo.`,
+    linkInvalid: 'Eso no parece un código de Wirehaus.',
+    linkVerifyText: 'Comprueba que el otro equipo muestra este número:',
+    linkCodeLabel: 'Código de tu aplicación de autenticación',
+    linkCodeHint: 'Lo pedimos otra vez para confirmar que eres tú.',
+    linkApprove: 'Aprobar',
+    linkDone: 'Listo. En el otro equipo escribe el código de tu aplicación (si te lo rechaza, espera al siguiente).',
+    linkWrongCode: 'Código incorrecto.',
+    linkTooMany: 'Demasiados intentos. Espera un momento.',
+    linkGone: 'El código ha caducado. Genera otro en el otro equipo.',
+    linkUnavailable: 'No se ha podido completar. Inténtalo de nuevo.',
+    linkClose: 'Cerrar',
+    installApp: 'Instalar la aplicación',
+    installIos: 'Instalar: pulsa Compartir y «Añadir a pantalla de inicio»',
     homeNoAccess: '¿Todavía no tienes acceso?',
     homeCreate: 'Crear el mío',
     homeInvalid: (name) => `«${name}» no es una dirección válida. Usa de 3 a 32 letras minúsculas, cifras o guiones.`,
@@ -373,12 +442,6 @@ const catalog: Record<string, Messages> = {
     captureFailed: 'No se pudo guardar.',
     recordLimit: 'Grabación detenida al llegar al límite de 30 minutos o 1 GiB. Se ha guardado lo grabado.',
     audioListen: 'Escuchar',
-    keysButton: 'Teclas',
-    keysClose: 'Cerrar ventana (Alt+F4)',
-    keysSwitch: 'Cambiar de ventana (Alt+Tab)',
-    keysCad: 'Ctrl+Alt+Supr',
-    keysSuper: 'Tecla Super (Windows)',
-    keysEscape: 'Escape',
     audioStop: 'Dejar de escuchar',
     audioStarting: 'Activando el audio...',
     audioUnsupported: 'Este navegador no puede reproducir el audio del ordenador remoto.',
@@ -426,6 +489,43 @@ const catalog: Record<string, Messages> = {
     homePlaceholder: 'your-name',
     homeOpen: 'Open',
     homeContinue: (name) => `Continue with ${name}`,
+    linkOr: 'or',
+    linkStart: 'Connect with my phone',
+    linkPcTitle: 'Connect with your phone',
+    linkPcIntro: 'On your phone, open Wirehaus, connect to this computer and choose "Link another device" in the menu. Scan this code or type the code below.',
+    linkPcManual: 'Code',
+    linkPcVerify: 'Must match your phone',
+    linkPcWaiting: 'Waiting for your phone…',
+    linkPcApproved: 'Approved. Preparing the pairing…',
+    linkPcExpired: 'The code has expired.',
+    linkPcBusy: 'Too many links are in progress. Wait a minute and try again.',
+    linkPcSlow: 'Wait a moment and try again.',
+    linkPcFailed: 'The link could not be started. Use the pairing code instead.',
+    linkPcRetry: 'Generate another code',
+    linkPcCancel: 'Back',
+    linkPcCountdown: (seconds) => `Expires in ${seconds} s`,
+    linkOpen: 'Link another device',
+    linkIntro: 'Give another computer or browser access without typing the long code: open this page there, choose "Connect with my phone" and scan the code it shows.',
+    linkScan: 'Scan with the camera',
+    linkManualLabel: 'Or type the code you see',
+    linkFind: 'Continue',
+    linkScanDenied: 'The camera could not be used. Type the code by hand.',
+    linkScanning: 'Point the camera at the code on the other device.',
+    linkNotFound: 'I cannot find that code. Check that the other device is still showing it (it expires after 3 minutes).',
+    linkOther: (name) => `That code belongs to another computer (${name}). Connect to that one to link it.`,
+    linkInvalid: 'That does not look like a Wirehaus code.',
+    linkVerifyText: 'Check that the other device shows this number:',
+    linkCodeLabel: 'Code from your authenticator app',
+    linkCodeHint: 'We ask again to confirm it is you.',
+    linkApprove: 'Approve',
+    linkDone: 'Done. On the other device type the code from your app (if it is rejected, wait for the next one).',
+    linkWrongCode: 'Wrong code.',
+    linkTooMany: 'Too many attempts. Wait a moment.',
+    linkGone: 'The code has expired. Generate another on the other device.',
+    linkUnavailable: 'It could not be completed. Try again.',
+    linkClose: 'Close',
+    installApp: 'Install the app',
+    installIos: 'Install: tap Share and "Add to Home Screen"',
     homeNoAccess: "Don't have an access yet?",
     homeCreate: 'Create mine',
     homeInvalid: (name) => `"${name}" is not a valid address. Use 3 to 32 lowercase letters, digits or hyphens.`,
@@ -595,12 +695,6 @@ const catalog: Record<string, Messages> = {
     captureFailed: 'Could not save.',
     recordLimit: 'Recording stopped at the limit of 30 minutes or 1 GiB. What was recorded has been saved.',
     audioListen: 'Listen',
-    keysButton: 'Keys',
-    keysClose: 'Close window (Alt+F4)',
-    keysSwitch: 'Switch window (Alt+Tab)',
-    keysCad: 'Ctrl+Alt+Del',
-    keysSuper: 'Super (Windows) key',
-    keysEscape: 'Escape',
     audioStop: 'Stop listening',
     audioStarting: 'Starting audio...',
     audioUnsupported: 'This browser cannot play the remote computer audio.',

@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 use wirehaus_input::{InputError, InputSink};
 use wirehaus_protocol::{
     AudioFailure, AudioMessage, Channel, ClipboardFailure, ClipboardMessage, ControlMessage,
-    DesktopMessage, EndReason, FilesMessage, Frame, TerminalMessage, ViewerMessage,
+    DesktopMessage, EndReason, FilesMessage, Frame, LinkFailure, LinkMessage, TerminalMessage,
+    ViewerMessage,
 };
 
 use crate::audio::Audio;
@@ -24,11 +25,17 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(33);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MESSAGES_PER_TICK: usize = 256;
 const REVOCATION_CHECK_TICKS: u32 = 30;
+const LINK_ATTEMPTS_PER_SESSION: u32 = 12;
+
+pub type LinkFound = ([u8; 16], String);
+pub type LinkResult = Result<(), LinkFailure>;
 
 pub struct Policy<'a> {
     pub revoked: &'a dyn Fn() -> Option<EndReason>,
     pub idle_timeout: Duration,
     pub superseded: &'a dyn Fn() -> bool,
+    pub link_lookup: &'a dyn Fn(&str) -> Option<LinkFound>,
+    pub link_approve: &'a dyn Fn(&[u8; 16], &str) -> LinkResult,
     pub terminal_allowed: &'a dyn Fn() -> bool,
     pub audio_allowed: &'a dyn Fn() -> bool,
     pub file_roots: &'a dyn Fn() -> Vec<PathBuf>,
@@ -41,6 +48,7 @@ struct Services<'a> {
     files: &'a mut Files,
     clipboard: &'a mut Requests,
     audio: &'a mut Audio,
+    link_budget: &'a mut u32,
     policy: &'a Policy<'a>,
 }
 
@@ -75,6 +83,7 @@ fn serve(
     let mut ticks: u32 = 0;
     let mut viewer_decodes_video = false;
     let mut last_activity = Instant::now();
+    let mut link_budget = LINK_ATTEMPTS_PER_SESSION;
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
         ticks = ticks.wrapping_add(1);
@@ -127,6 +136,7 @@ fn serve(
                 files: &mut files,
                 clipboard: &mut clipboard,
                 audio: &mut audio,
+                link_budget: &mut link_budget,
                 policy,
             },
             deadline,
@@ -191,6 +201,39 @@ fn pump_audio(link: &mut Link, audio: &mut Audio, policy: &Policy) -> Result<(),
         (policy.audit)("audio_ended", &reason);
         send_audio(link, &AudioMessage::Failed(AudioFailure::Unavailable))?;
     }
+    Ok(())
+}
+
+fn link_frame(frame: &Frame, services: &mut Services, link: &mut Link) -> Result<(), ServerError> {
+    let reply = match LinkMessage::decode(&frame.payload)? {
+        LinkMessage::Lookup(key) => {
+            if *services.link_budget == 0 {
+                LinkMessage::Failed(LinkFailure::TooManyAttempts)
+            } else {
+                *services.link_budget -= 1;
+                match (services.policy.link_lookup)(&key) {
+                    Some((id, verification)) => LinkMessage::Info { id, verification },
+                    None => LinkMessage::NotFound,
+                }
+            }
+        }
+        LinkMessage::Approve { id, code } => {
+            if *services.link_budget == 0 {
+                LinkMessage::Failed(LinkFailure::TooManyAttempts)
+            } else {
+                *services.link_budget -= 1;
+                match (services.policy.link_approve)(&id, &code) {
+                    Ok(()) => LinkMessage::Approved,
+                    Err(reason) => LinkMessage::Failed(reason),
+                }
+            }
+        }
+        LinkMessage::Info { .. }
+        | LinkMessage::NotFound
+        | LinkMessage::Approved
+        | LinkMessage::Failed(_) => return Err(ServerError::UnexpectedMessage),
+    };
+    link.send_frame(&Frame::new(Channel::Link, 0, reply.encode())?)?;
     Ok(())
 }
 
@@ -263,6 +306,11 @@ fn receive(
             Incoming::Frame(frame) if frame.channel == Channel::Clipboard => {
                 *active = true;
                 clipboard_frame(&frame, services, link)?;
+                handled += 1;
+            }
+            Incoming::Frame(frame) if frame.channel == Channel::Link => {
+                *active = true;
+                link_frame(&frame, services, link)?;
                 handled += 1;
             }
             Incoming::Frame(frame) if frame.channel == Channel::Files => {

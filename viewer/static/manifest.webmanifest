@@ -1,0 +1,19 @@
+{
+  "name": "Wirehaus",
+  "short_name": "Wirehaus",
+  "description": "Remote desktop, files and terminal of your computer from any browser, end-to-end encrypted.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "lang": "es",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

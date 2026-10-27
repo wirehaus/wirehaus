@@ -6,6 +6,12 @@
     <meta name="wirehaus-agent-address" content="own" />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0d1117" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Wirehaus" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="robots" content="noindex" />
     <title>Wirehaus</title>
     <link
@@ -85,16 +91,6 @@
         <button id="shot" type="button" class="tool"></button>
         <button id="record" type="button" class="tool"></button>
         <button id="listen" type="button" class="tool"></button>
-        <span class="menu-wrap">
-          <button id="keys-button" type="button" class="tool" aria-haspopup="true" aria-expanded="false"></button>
-          <div id="keys-menu" class="menu" hidden>
-            <button type="button" class="menu-item" data-combo="AltLeft+F4" id="combo-close"></button>
-            <button type="button" class="menu-item" data-combo="AltLeft+Tab" id="combo-switch"></button>
-            <button type="button" class="menu-item" data-combo="ControlLeft+AltLeft+Delete" id="combo-cad"></button>
-            <button type="button" class="menu-item" data-combo="MetaLeft" id="combo-super"></button>
-            <button type="button" class="menu-item" data-combo="Escape" id="combo-escape"></button>
-          </div>
-        </span>
       </span>
       <button id="reconnect" type="button" class="primary small" hidden></button>
       <div class="menu-wrap">
@@ -116,6 +112,8 @@
               <option value="us">English (US)</option>
             </select>
           </label>
+          <button id="link-open" type="button" class="menu-item" hidden></button>
+          <button id="install-app" type="button" class="menu-item" hidden></button>
           <button id="immersive" type="button" class="menu-item"></button>
           <button id="forget" type="button" class="menu-item danger"></button>
         </div>
@@ -166,8 +164,31 @@
           </label>
           <p id="pair-error" class="error" role="alert"></p>
           <button id="pair-submit" type="submit" class="primary"></button>
+          <div id="link-offer" class="link-offer" hidden>
+            <p class="or"><span id="link-or"></span></p>
+            <button id="link-start" type="button" class="ghost wide"></button>
+          </div>
           <p class="secure"><svg aria-hidden="true"><use href="#i-lock" /></svg><span id="secure-pair"></span></p>
         </form>
+      </section>
+
+      <section id="linkpc" class="stage" hidden>
+        <div class="card">
+          <div class="card-head">
+            <svg class="logo" aria-hidden="true"><use href="#i-mark" /></svg>
+          </div>
+          <h1 id="linkpc-title"></h1>
+          <p id="linkpc-intro" class="lead"></p>
+          <div class="qrbox"><canvas id="linkpc-qr" width="1" height="1"></canvas></div>
+          <dl class="linkcodes">
+            <div><dt id="linkpc-manual-label"></dt><dd id="linkpc-manual" class="mono"></dd></div>
+            <div><dt id="linkpc-verify-label"></dt><dd id="linkpc-verify" class="mono"></dd></div>
+          </dl>
+          <p id="linkpc-status" class="hint" role="status"></p>
+          <p id="linkpc-error" class="error" role="alert"></p>
+          <button id="linkpc-retry" type="button" class="primary" hidden></button>
+          <button id="linkpc-cancel" type="button" class="ghost wide"></button>
+        </div>
       </section>
 
       <section id="code" class="stage" hidden>
@@ -216,6 +237,37 @@
           </div>
         </div>
       </section>
+
+      <dialog id="link-dialog" class="sheet" aria-labelledby="link-title">
+        <div class="card">
+          <h1 id="link-title"></h1>
+          <div id="link-step-find">
+            <p id="link-intro" class="lead"></p>
+            <div id="link-scanbox" class="scanbox" hidden><video id="link-video" muted playsinline></video></div>
+            <button id="link-scan" type="button" class="primary"></button>
+            <label class="field">
+              <span id="link-manual-label"></span>
+              <input id="link-manual" class="mono" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="200" enterkeyhint="go" />
+            </label>
+            <button id="link-find" type="button" class="ghost wide"></button>
+          </div>
+          <div id="link-step-confirm" hidden>
+            <p id="link-verify-text" class="lead"></p>
+            <p id="link-verification" class="verification mono" aria-live="polite"></p>
+            <label class="field">
+              <span id="link-code-label"></span>
+              <input id="link-code" class="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" />
+            </label>
+            <p id="link-code-hint" class="hint"></p>
+            <button id="link-approve" type="button" class="primary"></button>
+          </div>
+          <div id="link-step-done" hidden>
+            <p id="link-done" class="lead"></p>
+          </div>
+          <p id="link-error" class="error" role="alert"></p>
+          <button id="link-close" type="button" class="ghost wide"></button>
+        </div>
+      </dialog>
 
       <footer id="foot" class="foot" hidden>
         <a id="foot-docs" rel="noopener"></a>

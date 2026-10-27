@@ -1,4 +1,13 @@
-import init, { Handshake, Session, generateDeviceKey } from './wirehaus_crypto_wasm.js';
+import init, {
+  Handshake,
+  Session,
+  generateDeviceKey,
+  linkGenerate,
+  linkOpen,
+  linkVerification,
+  qrDecode,
+  qrMatrix,
+} from './wirehaus_crypto_wasm.js';
 import { WASM_SHA256 } from './wasmhash.js';
 import { verifiedModule } from './wasmverify.js';
 
@@ -16,4 +25,4 @@ export function loadCrypto(): Promise<unknown> {
   return ready;
 }
 
-export { Handshake, Session, generateDeviceKey };
+export { Handshake, Session, generateDeviceKey, linkGenerate, linkOpen, linkVerification, qrDecode, qrMatrix };

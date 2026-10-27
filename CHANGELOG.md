@@ -22,8 +22,11 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Al recargar la página la sesión se reanuda sin pedir el segundo factor mientras dure el billete de reanudación (5 minutos tras la desconexión, guardado solo en `sessionStorage`).
 - Aviso en el visor cuando hay una versión nueva publicada, con botón para recargar.
 - La grabación de pantalla admite MP4 cuando el navegador no puede grabar WebM.
+- Vincular otro equipo desde el móvil, como en WhatsApp Web: el equipo nuevo pulsa «Conectar con mi móvil» y muestra un QR, un código corto y un número de comprobación; el móvil ya conectado escanea el QR con la cámara (o se escribe el código), se comprueba el número y se confirma con un código del segundo factor; el agente abre un emparejamiento y se lo entrega cifrado (Noise N) a la clave efímera del equipo nuevo, que pasa solo al paso del segundo factor. Canal nuevo `Link` del protocolo, tres rutas `/link/ping`, `/link/start` y `/link/poll` con origen comprobado y CORS estricto, como máximo cuatro vinculaciones pendientes de tres minutos, y doce consultas o aprobaciones por sesión. El visor solo ofrece la opción si el agente responde a `/link/ping`.
+- QR generado y leído dentro del WebAssembly (`qrcode` y `rqrr`, sin librerías de JavaScript): el visor dibuja el QR en un canvas y lee la cámara fotograma a fotograma.
+- Aplicación instalable (PWA): manifiesto, iconos, service worker mínimo que no guarda nada (el visor se descarga y se verifica siempre), entrada «Instalar la aplicación» en el menú, y la aplicación abre directa el último ordenador. Permiso de cámara solo para el propio origen.
+- El instalador termina con tres pasos claros (escanear el QR del segundo factor, escanear el de emparejamiento con el móvil, escribir los seis dígitos) y recuerda cómo vincular más equipos.
 - El segundo factor se muestra como un QR escaneable en la terminal (`init`) y vuelve a mostrarse en el propio ordenador con `wirehaus-agent totp`; el código de emparejamiento se muestra también como enlace y QR (`#pair=`) que rellena el formulario del visor sin teclearlo y se borra de la barra de direcciones. El instalador recuerda la dirección del visor en `viewer-url`.
-- Menú «Teclas» en el escritorio del visor con Cerrar ventana (Alt+F4), Alt+Tab, Ctrl+Alt+Supr, tecla Super y Escape, para las combinaciones que el sistema o el navegador del usuario no dejan pasar.
 
 ### Corregido
 

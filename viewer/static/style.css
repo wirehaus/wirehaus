@@ -387,10 +387,6 @@ button[aria-busy='true']::after {
   --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
 }
 
-#keys-button {
-  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='6' width='19' height='12' rx='2.5'/%3E%3Cpath d='M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7 14h10'/%3E%3C/svg%3E");
-}
-
 #listen {
   --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 10v4h3.5L12 18V6l-4.5 4z'/%3E%3Cpath d='M15.5 9a4 4 0 0 1 0 6'/%3E%3Cpath d='M18 6.5a8 8 0 0 1 0 11'/%3E%3C/svg%3E");
 }
@@ -2547,4 +2543,111 @@ a.inline:hover {
   #clipboard .cb-clear {
     min-height: 36px;
   }
+}
+
+.link-offer {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.link-offer .or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.link-offer .or::before,
+.link-offer .or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.qrbox {
+  display: grid;
+  place-items: center;
+  margin: 18px 0 8px;
+}
+
+.qrbox canvas {
+  width: min(240px, 70vw);
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: #fff;
+  image-rendering: pixelated;
+}
+
+.linkcodes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.linkcodes div {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.linkcodes dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.linkcodes dd {
+  margin: 4px 0 0;
+  font-size: 18px;
+  letter-spacing: 0.08em;
+}
+
+dialog.sheet {
+  width: min(440px, calc(100vw - 24px));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+}
+
+dialog.sheet::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+dialog.sheet .card {
+  width: 100%;
+  display: grid;
+  gap: 12px;
+}
+
+dialog.sheet h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.scanbox {
+  overflow: hidden;
+  border-radius: 12px;
+  background: #000;
+}
+
+.scanbox video {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+}
+
+.verification {
+  margin: 0;
+  text-align: center;
+  font-size: 40px;
+  letter-spacing: 0.2em;
 }

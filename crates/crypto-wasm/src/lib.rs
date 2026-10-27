@@ -1,6 +1,7 @@
 #![allow(unsafe_code)]
 
 mod core;
+mod qr;
 
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
@@ -9,6 +10,38 @@ use wirehaus_crypto::session::Session as CoreSession;
 
 fn failure(error: &impl std::fmt::Display) -> JsError {
     JsError::new(&error.to_string())
+}
+
+#[wasm_bindgen(js_name = linkGenerate)]
+pub fn link_generate() -> Result<Vec<u8>, JsError> {
+    let (private, public) = wirehaus_crypto::link::generate().map_err(|e| failure(&e))?;
+    let mut out = Vec::with_capacity(private.len() + public.len());
+    out.extend_from_slice(&private);
+    out.extend_from_slice(&public);
+    Ok(out)
+}
+
+#[wasm_bindgen(js_name = linkOpen)]
+pub fn link_open(private: &[u8], sealed: &[u8]) -> Result<String, JsError> {
+    let plain = wirehaus_crypto::link::open(private, sealed).map_err(|e| failure(&e))?;
+    String::from_utf8(plain).map_err(|e| failure(&e))
+}
+
+#[wasm_bindgen(js_name = linkVerification)]
+#[must_use]
+pub fn link_verification(public: &[u8], id: &[u8]) -> String {
+    wirehaus_crypto::link::verification_code(public, id)
+}
+
+#[wasm_bindgen(js_name = qrMatrix)]
+pub fn qr_matrix(text: &str) -> Result<Vec<u8>, JsError> {
+    qr::matrix(text).map_err(|e| JsError::new(&e))
+}
+
+#[wasm_bindgen(js_name = qrDecode)]
+#[must_use]
+pub fn qr_decode(width: u32, height: u32, luma: &[u8]) -> Option<String> {
+    qr::decode(width as usize, height as usize, luma)
 }
 
 #[wasm_bindgen(js_name = generateDeviceKey)]

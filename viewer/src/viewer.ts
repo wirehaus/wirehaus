@@ -1,5 +1,6 @@
 import { ALTGR_WINDOW_MS, AltGrFilter, type KeyChange } from './altgr.js';
 import { AUDIO_CHANNEL, type AudioMessage, decodeAudio } from './audioprotocol.js';
+import { LINK_CHANNEL, type LinkReply, decodeLink } from './linkprotocol.js';
 import { CLIPBOARD_CHANNEL, type ClipboardMessage, decodeClipboard } from './clipboardprotocol.js';
 import { FILES_CHANNEL, type FilesMessage, decodeFiles } from './filesprotocol.js';
 import { HostKey } from './hostkey.js';
@@ -99,6 +100,7 @@ export class Viewer {
   filesListener: FilesListener | null = null;
   clipboardListener: ClipboardListener | null = null;
   audioListener: AudioListener | null = null;
+  linkListener: ((reply: LinkReply) => void) | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -116,17 +118,6 @@ export class Viewer {
     );
     this.listen();
     new ResizeObserver(() => this.fit()).observe(canvas.parentElement ?? canvas);
-  }
-
-  tapCombo(names: readonly string[]): void {
-    const codes = names.map((name) => evdevCode(name));
-    if (codes.some((code) => code === undefined)) {
-      return;
-    }
-    const sequence = codes as number[];
-    this.sendKeys(sequence.map((code) => ({ code, pressed: true, time: performance.now() })));
-    this.sendKeys([...sequence].reverse().map((code) => ({ code, pressed: false, time: performance.now() })));
-    this.canvas.focus();
   }
 
   releaseHostKey(): void {
@@ -382,6 +373,8 @@ export class Viewer {
       this.clipboardListener?.(decodeClipboard(frame.payload));
     } else if (this.phase === 'streaming' && frame.channel === AUDIO_CHANNEL) {
       this.audioListener?.(decodeAudio(frame.payload));
+    } else if (this.phase === 'streaming' && frame.channel === LINK_CHANNEL) {
+      this.linkListener?.(decodeLink(frame.payload));
     } else {
       this.fail(socket);
     }
@@ -606,6 +599,10 @@ export class Viewer {
 
   sendAudio(payload: Uint8Array): void {
     this.send(AUDIO_CHANNEL, payload);
+  }
+
+  sendLink(payload: Uint8Array): void {
+    this.send(LINK_CHANNEL, payload);
   }
 
   sendClipboard(stream: number, payload: Uint8Array): void {

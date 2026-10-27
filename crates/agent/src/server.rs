@@ -11,16 +11,20 @@ use tungstenite::protocol::WebSocketConfig;
 use crate::auth::{self, INBOUND_LIMIT, Outcome};
 use crate::clipboard::Hub;
 use crate::error::ServerError;
-use crate::http::{Exposure, HeadError, MAX_HEAD_LEN, RequestHead, parse_head, response};
+use crate::http::{
+    Exposure, HeadError, MAX_HEAD_LEN, RequestHead, json_response, parse_head, response,
+};
+use crate::linkbox::{Links, Poll, StartError, from_hex, to_hex};
 use crate::pacer::Pacer;
 use crate::platform;
 use crate::session::{self, Policy};
+use crate::state::{AuthError, State};
 use crate::static_files::Viewer;
 use crate::store::{Clock, Store, VaultSource, system_clock, system_vault};
 use crate::stream::Stream;
 use wirehaus_crypto::keys::PublicKey;
 use wirehaus_crypto::ticket::Tickets;
-use wirehaus_protocol::{AuthFailure, ControlMessage, EndReason, TICKET_LEN};
+use wirehaus_protocol::{AuthFailure, ControlMessage, EndReason, LinkFailure, TICKET_LEN};
 
 const ACCEPT_POLL: Duration = Duration::from_millis(20);
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
@@ -72,6 +76,7 @@ pub struct Server {
     clipboard: Arc<Hub>,
     viewer: Viewer,
     tickets: Mutex<Tickets>,
+    links: Mutex<Links>,
     sessions: AtomicUsize,
     connections: AtomicUsize,
     unauthenticated: AtomicUsize,
@@ -133,6 +138,7 @@ impl Server {
             clipboard,
             viewer,
             tickets: Mutex::new(Tickets::new()),
+            links: Mutex::new(Links::default()),
             sessions: AtomicUsize::new(0),
             connections: AtomicUsize::new(0),
             unauthenticated: AtomicUsize::new(0),
@@ -230,12 +236,147 @@ impl Server {
                 b"method not allowed",
             );
         }
+        if head.path == "/link/ping" || head.path.starts_with("/link/") {
+            return self.serve_link(stream, head, head_len);
+        }
         match self.viewer.get(&head.path) {
             Some(file) => {
                 consume(stream, head_len)?;
                 finish(stream, &response("200 OK", file.content_type, &file.body))
             }
             None => reply(stream, head_len, true, "404 Not Found", b"not found"),
+        }
+    }
+
+    fn serve_link(
+        &self,
+        stream: &mut TcpStream,
+        head: &RequestHead,
+        head_len: usize,
+    ) -> Result<(), ServerError> {
+        consume(stream, head_len)?;
+        let port = self.local_addr()?.port();
+        let origin = head.origin.as_deref();
+        if origin.is_some() && !self.config.exposure.origin_allowed(origin, port) {
+            return finish(
+                stream,
+                &json_response("403 Forbidden", r#"{"error":"origin"}"#, None),
+            );
+        }
+        let (status, body) = self.link_answer(&head.path);
+        finish(stream, &json_response(status, &body, origin))
+    }
+
+    fn link_answer(&self, path: &str) -> (&'static str, String) {
+        let (route, query) = path.split_once('?').unwrap_or((path, ""));
+        let param = |name: &str| {
+            query
+                .split('&')
+                .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+        };
+        let now = self.store.read(|_, now| now).unwrap_or(0);
+        let mut links = self.links.lock().unwrap_or_else(PoisonError::into_inner);
+        match route {
+            "/link/ping" => ("200 OK", r#"{"link":1}"#.to_owned()),
+            "/link/start" => {
+                let Some(public) = param("k").and_then(from_hex) else {
+                    return ("400 Bad Request", r#"{"error":"key"}"#.to_owned());
+                };
+                match links.start(&public, now) {
+                    Ok(started) => {
+                        self.store
+                            .log("link_started", "a computer asked to be linked");
+                        (
+                            "200 OK",
+                            format!(
+                                r#"{{"id":"{}","manual":"{}","verify":"{}","ttl":{}}}"#,
+                                to_hex(&started.id),
+                                started.manual,
+                                started.verification,
+                                crate::linkbox::TTL_SECS
+                            ),
+                        )
+                    }
+                    Err(StartError::Busy) => {
+                        ("429 Too Many Requests", r#"{"error":"busy"}"#.to_owned())
+                    }
+                    Err(StartError::TooSoon) => {
+                        ("429 Too Many Requests", r#"{"error":"slow"}"#.to_owned())
+                    }
+                    Err(StartError::Random) => ("400 Bad Request", r#"{"error":"key"}"#.to_owned()),
+                }
+            }
+            "/link/poll" => {
+                let id: Option<[u8; 16]> = param("i")
+                    .and_then(from_hex)
+                    .and_then(|bytes| bytes.try_into().ok());
+                let Some(id) = id else {
+                    return ("400 Bad Request", r#"{"error":"id"}"#.to_owned());
+                };
+                match links.poll(&id, now) {
+                    Poll::Pending => ("200 OK", r#"{"state":"pending"}"#.to_owned()),
+                    Poll::Ready(sealed) => (
+                        "200 OK",
+                        format!(r#"{{"state":"ready","sealed":"{}"}}"#, to_hex(&sealed)),
+                    ),
+                    Poll::Gone => ("200 OK", r#"{"state":"gone"}"#.to_owned()),
+                }
+            }
+            _ => ("404 Not Found", r#"{"error":"not found"}"#.to_owned()),
+        }
+    }
+
+    fn link_lookup(&self, key: &str) -> Option<([u8; 16], String)> {
+        let now = self.store.read(|_, now| now).ok()?;
+        self.links
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .find(key, now)
+    }
+
+    fn link_approve(
+        &self,
+        device: &PublicKey,
+        id: &[u8; 16],
+        code: &str,
+    ) -> Result<(), LinkFailure> {
+        let verdict = self
+            .store
+            .update(|state, now| state.verify_totp(Some(device), code, now))
+            .map_err(|_| LinkFailure::Unavailable)?;
+        match verdict {
+            Ok(()) => {}
+            Err(AuthError::WrongCode) => return Err(LinkFailure::WrongCode),
+            Err(AuthError::Denied(_)) => return Err(LinkFailure::TooManyAttempts),
+        }
+        let now = self
+            .store
+            .read(|_, now| now)
+            .map_err(|_| LinkFailure::Unavailable)?;
+        let public = self
+            .links
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .public_of(id, now)
+            .ok_or(LinkFailure::Gone)?;
+        let pairing = self
+            .store
+            .update(State::open_pairing)
+            .map_err(|_| LinkFailure::Unavailable)?
+            .map_err(|_| LinkFailure::Unavailable)?;
+        let sealed = wirehaus_crypto::link::seal(&public, pairing.to_text().as_bytes())
+            .map_err(|_| LinkFailure::Unavailable)?;
+        let stored = self
+            .links
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .approve(id, sealed, now);
+        if stored {
+            self.store
+                .log("link_approved", "a paired device authorised a new computer");
+            Ok(())
+        } else {
+            Err(LinkFailure::Gone)
         }
     }
 
@@ -339,6 +480,8 @@ impl Server {
                 },
                 idle_timeout: self.config.idle_timeout,
                 superseded: &|| superseded.load(Ordering::SeqCst),
+                link_lookup: &|key| self.link_lookup(key),
+                link_approve: &|id, code| self.link_approve(&identity.device, id, code),
                 terminal_allowed: &|| {
                     self.store
                         .read(|state, _| state.terminal_allowed())

@@ -10,6 +10,7 @@ pub mod integrity;
 #[cfg(any(windows, test))]
 pub mod launcher;
 mod link;
+mod linkbox;
 mod mode;
 mod pacer;
 mod platform;

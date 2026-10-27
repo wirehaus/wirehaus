@@ -10,6 +10,9 @@ import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
 import { UpdateWatcher } from './updates.js';
 import { KeyBar } from './keybar.js';
+import { agentBase } from './linkaddr.js';
+import { initLinkUi } from './linkui.js';
+import { initPwa, launchedAsApp } from './pwa.js';
 import { pairCodeFromHash, withoutPairCode } from './pairlink.js';
 import type { Layout } from './softkeys.js';
 import { TouchLayer } from './touchlayer.js';
@@ -47,6 +50,7 @@ const agentLabel = element<HTMLSpanElement>('agent');
 const forget = element<HTMLButtonElement>('forget');
 const reconnect = element<HTMLButtonElement>('reconnect');
 const pairPanel = element<HTMLElement>('pair');
+const linkPanel = element<HTMLElement>('linkpc');
 const codePanel = element<HTMLElement>('code');
 const screen = element<HTMLCanvasElement>('screen');
 const immersiveExit = element<HTMLButtonElement>('immersive-exit');
@@ -192,42 +196,6 @@ const capture = new DesktopCapture(
   },
 );
 
-const keysButton = element<HTMLButtonElement>('keys-button');
-const keysMenu = element<HTMLElement>('keys-menu');
-keysButton.textContent = messages.keysButton;
-keysButton.setAttribute('aria-label', messages.keysButton);
-keysButton.title = messages.keysButton;
-for (const [id, text] of [
-  ['combo-close', messages.keysClose],
-  ['combo-switch', messages.keysSwitch],
-  ['combo-cad', messages.keysCad],
-  ['combo-super', messages.keysSuper],
-  ['combo-escape', messages.keysEscape],
-] as const) {
-  element<HTMLButtonElement>(id).textContent = text;
-}
-function closeKeysMenu(): void {
-  keysMenu.hidden = true;
-  keysButton.setAttribute('aria-expanded', 'false');
-}
-keysButton.addEventListener('click', (event) => {
-  event.stopPropagation();
-  keysMenu.hidden = !keysMenu.hidden;
-  keysButton.setAttribute('aria-expanded', String(!keysMenu.hidden));
-});
-keysMenu.addEventListener('click', (event) => {
-  const combo = (event.target as HTMLElement).closest<HTMLElement>('[data-combo]')?.dataset['combo'];
-  if (combo !== undefined) {
-    viewer.tapCombo(combo.split('+'));
-    closeKeysMenu();
-  }
-});
-document.addEventListener('click', (event) => {
-  if (!keysMenu.hidden && !keysMenu.contains(event.target as Node)) {
-    closeKeysMenu();
-  }
-});
-
 const audio = new AudioControl(
   element<HTMLButtonElement>('listen'),
   { send: (payload) => viewer.sendAudio(payload) },
@@ -256,7 +224,7 @@ foot.querySelector<HTMLAnchorElement>('#foot-terms')?.setAttribute('href', `${SI
 homeCreate.href = `${SITE}${SITE_PREFIX}/signup/`;
 
 function updateFoot(): void {
-  foot.hidden = pairPanel.hidden && codePanel.hidden && splash.hidden && homePanel.hidden;
+  foot.hidden = pairPanel.hidden && linkPanel.hidden && codePanel.hidden && splash.hidden && homePanel.hidden;
 }
 
 function rememberName(name: string): void {
@@ -335,12 +303,15 @@ function paintSplash(state: ViewerState): void {
 }
 
 function show(state: ViewerState): void {
+  lastState = state;
   lastKind = state.kind;
+  linkUi.kind(state.kind);
   document.body.dataset['state'] = state.kind;
   if (state.kind !== 'connected') {
     phoneStarted = false;
   }
-  pairPanel.hidden = state.kind !== 'needsPairing';
+  pairPanel.hidden = state.kind !== 'needsPairing' || linkUi.active();
+  linkPanel.hidden = !(state.kind === 'needsPairing' && linkUi.active());
   codePanel.hidden = state.kind !== 'needsCode';
   paintSplash(state);
   pairSubmit.removeAttribute('aria-busy');
@@ -504,6 +475,23 @@ const clipboard = new ClipboardPanel(
 );
 viewer.clipboardListener = (message) => clipboard.receive(message);
 viewer.audioListener = (message) => audio.receive(message);
+
+let lastState: ViewerState = { kind: 'loading' };
+const linkUi = initLinkUi({
+  messages,
+  base: () => (typeof target === 'string' ? undefined : agentBase(target.socketUrl)),
+  name: () => namedPath,
+  sendLink: (payload) => viewer.sendLink(payload),
+  pair: (code) => void viewer.pair(code, pairName.value.trim() || messages.pairNameDefault),
+  rerender: () => show(lastState),
+  closeMenu: () => closeMenu(),
+});
+viewer.linkListener = (reply) => linkUi.receive(reply);
+initPwa(
+  element<HTMLButtonElement>('install-app'),
+  { install: messages.installApp, ios: messages.installIos },
+  (text) => showHint(text),
+);
 
 type Panel = 'desktop' | 'files' | 'clipboard';
 
@@ -894,7 +882,7 @@ async function lookup(name: string): Promise<Verdict> {
 }
 
 function hideAll(): void {
-  for (const section of [pairPanel, codePanel, homePanel, splash]) {
+  for (const section of [pairPanel, linkPanel, codePanel, homePanel, splash]) {
     section.hidden = true;
   }
   menuButton.hidden = true;
@@ -955,6 +943,11 @@ homeForm.addEventListener('submit', (event) => {
 async function boot(): Promise<void> {
   if (typeof target === 'string') {
     const asked = nameFromPath(location.pathname);
+    const last = lastName();
+    if (asked === undefined && last !== undefined && launchedAsApp() && location.hash === '') {
+      location.replace(`/${last}`);
+      return;
+    }
     showHome(target === 'invalid' && asked !== undefined ? messages.homeInvalid(asked) : '');
     return;
   }
@@ -966,6 +959,7 @@ async function boot(): Promise<void> {
       return;
     }
   }
+  void linkUi.probe();
   void viewer.start();
 }
 

@@ -125,10 +125,18 @@ if ($TunnelTokenFile) {
 }
 Invoke-Agent @('pairing')
 Write-Host ''
-if ($PublicHost -and $TunnelTokenFile) {
-    Write-Host "The tunnel is connected. Open $ViewerOrigin/$($PublicHost.Split('.')[0]) and enter the pairing code."
-} elseif ($PublicHost) {
-    Write-Host "Next, connect the tunnel (see your dashboard), then open $ViewerOrigin/$($PublicHost.Split('.')[0]) and enter the pairing code."
+if ($PublicHost) {
+    if (-not $TunnelTokenFile) {
+        Write-Host 'First connect the tunnel (see your dashboard).'
+    }
+    $Address = "$ViewerOrigin/$($PublicHost.Split('.')[0])"
+    Write-Host 'Next steps:'
+    Write-Host '  1. Scan the first QR (second factor) with an authenticator app such as 2FAS, Aegis, Google Authenticator or Apple Passwords.'
+    Write-Host "  2. Scan the second QR with your phone: it opens $Address with the pairing code filled in."
+    Write-Host '     On another device, open that address and type the pairing code instead.'
+    Write-Host '  3. Type the six digits your authenticator app shows.'
+    Write-Host 'Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR.'
+    Write-Host 'Show the second factor again on this computer with: wirehaus-agent totp'
 } else {
     Write-Host 'Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code.'
 }
