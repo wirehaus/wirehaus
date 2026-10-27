@@ -5,7 +5,6 @@ Español | [English](README.en.md)
 [![CI](https://github.com/wirehaus/wirehaus/actions/workflows/ci.yml/badge.svg)](https://github.com/wirehaus/wirehaus/actions/workflows/ci.yml)
 [![Licencia](https://img.shields.io/badge/licencia-PolyForm%20Shield%201.0.0-blue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange)](rust-toolchain.toml)
-[![Estado](https://img.shields.io/badge/estado-desarrollo%20temprano-yellow)](#estado)
 
 Acceso remoto a tu ordenador desde cualquier navegador: escritorio, terminal, archivos y portapapeles, con cifrado de extremo a extremo.
 
@@ -34,7 +33,7 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 | Portapapeles de texto | Funciona. Permiso aparte para cada sentido |
 | Capturas y grabación | Funciona. Se hacen en el navegador |
 | Audio del ordenador | Funciona en Linux (PulseAudio o PipeWire), Windows y macOS 14.6 o superior. Apagado hasta que lo activas |
-| Instalación en un solo comando y servicio de registro | Pendiente |
+| Instalación en un solo comando y servicio de registro (`wirehaus.dev`) | Funciona |
 
 ## Seguridad
 
@@ -49,11 +48,19 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 
 El diseño todavía no ha pasado una revisión externa: no lo expongas a Internet en un equipo que te importe. Las vulnerabilidades se informan según [SECURITY.md](SECURITY.md).
 
-## Estado
+## Instalación
 
-Desarrollo temprano. Todavía no hay nada que instalar ni versiones publicadas.
+Crea tu acceso en [wirehaus.dev](https://wirehaus.dev) y pulsa **Conectar** en tu panel: te da un comando con un código de un solo uso.
 
-Lo que falta: audio, soporte de Wayland, el instalador en un comando y el servicio de registro. Se puede publicar detrás de un túnel con `--public-host` y `--viewer-origin`.
+```
+curl -fsSL https://wirehaus.dev/install.sh | sh -s -- XXXX-XXXX-XXXX-XXXX-XXXX
+```
+
+En Windows, en PowerShell: `& ([scriptblock]::Create((irm https://wirehaus.dev/install.ps1))) XXXX-XXXX-XXXX-XXXX-XXXX`.
+
+El instalador descarga el paquete de tu sistema, comprueba su suma SHA-256, lo instala como servicio de tu usuario, descarga `cloudflared` (versión y suma fijadas en el propio script) y lo deja conectado a tu nombre. No pide administrador ni abre puertos. Quítalo con `--uninstall` (y `--purge` para borrar también las claves).
+
+Si prefieres no ejecutar un script descargado, bájate el paquete de [wirehaus.dev/download](https://wirehaus.dev/docs/#descarga), comprueba su firma y ejecuta `install.sh` (o `install.ps1`) desde la carpeta descomprimida. También puedes [compilarlo](#compilar) tú.
 
 ## Plataformas
 

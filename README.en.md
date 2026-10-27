@@ -5,7 +5,6 @@
 [![CI](https://github.com/wirehaus/wirehaus/actions/workflows/ci.yml/badge.svg)](https://github.com/wirehaus/wirehaus/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-PolyForm%20Shield%201.0.0-blue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange)](rust-toolchain.toml)
-[![Status](https://img.shields.io/badge/status-early%20development-yellow)](#status)
 
 Remote access to your computer from any browser: desktop, terminal, files and clipboard, end-to-end encrypted.
 
@@ -34,7 +33,7 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 | Text clipboard | Works. Separate permission for each direction |
 | Screenshots and recording | Works. Done in the browser |
 | Computer audio | Works on Linux (PulseAudio or PipeWire), Windows and macOS 14.6 or later. Off until you enable it |
-| One-command install and registration service | Pending |
+| One-command install and registration service (`wirehaus.dev`) | Works |
 
 ## Security
 
@@ -49,11 +48,19 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 
 The design has not had an external review yet: do not expose it to the Internet on a machine you care about. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-## Status
+## Install
 
-Early development. There is nothing to install and there are no releases yet.
+Create your access at [wirehaus.dev](https://wirehaus.dev) and click **Connect** in your dashboard: it gives you a command with a single-use code.
 
-Still missing: audio, Wayland support, the one-command installer and the registration service. It can be published behind a tunnel with `--public-host` and `--viewer-origin`.
+```
+curl -fsSL https://wirehaus.dev/install.sh | sh -s -- XXXX-XXXX-XXXX-XXXX-XXXX
+```
+
+On Windows, in PowerShell: `& ([scriptblock]::Create((irm https://wirehaus.dev/install.ps1))) XXXX-XXXX-XXXX-XXXX-XXXX`.
+
+The installer downloads the package for your system, checks its SHA-256 sum, installs it as a service for your user, downloads `cloudflared` (version and checksum pinned in the script itself) and leaves it connected to your name. It asks for no administrator rights and opens no ports. Remove it with `--uninstall` (and `--purge` to delete the keys too).
+
+If you would rather not run a downloaded script, download the package from [wirehaus.dev/download](https://wirehaus.dev/docs/#download), check its signature and run `install.sh` (or `install.ps1`) from the extracted folder. You can also [build it](#build) yourself.
 
 ## Platforms
 

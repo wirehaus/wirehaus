@@ -4,7 +4,11 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ## [Sin publicar]
 
+## [0.2.0] - 2026-10-27
+
 ### Añadido
+
+- Instalación en un solo comando: `install.sh` e `install.ps1` aceptan `--tunnel-token-file` / `-TunnelTokenFile`, descargan el conector de túneles (`cloudflared`, versión y suma SHA-256 fijadas en el propio script), lo dejan como servicio de usuario (unidad de systemd, LaunchAgent o tarea programada sin ventana) y lo arrancan. Quitan todo con `--uninstall`. La web publica instaladores de arranque (`install.sh`, `install.ps1`) que canjean un código de un solo uso por el nombre y el token, descargan el paquete y comprueban su suma antes de ejecutar nada.
 
 - Compilación del visor para un origen propio (`npm run build:origin`): la página declara que acepta la dirección del agente en el fragmento, cada hoja de estilo y módulo lleva su huella de integridad (atributo `integrity` y mapa de importación con política de contenido que fija su hash), `_headers` con política `default-src 'none'` y conexiones solo a `'self'` y `wss://*.wirehaus.dev`, `security.txt` y un manifiesto propio de la versión. La orden `wirehaus-agent serve` sigue sirviendo el visor sin esa capacidad.
 
