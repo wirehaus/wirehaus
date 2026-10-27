@@ -347,8 +347,13 @@ impl State {
     }
 
     pub fn add_device(&mut self, key: PublicKey, name: &str, now: u64) -> Result<(), StateError> {
-        if self.device(&key).is_some() {
-            return Err(StateError::DuplicateDevice);
+        if let Some(known) = self.devices.iter_mut().find(|device| device.key == key) {
+            if known.failures.suspended() {
+                return Err(StateError::DuplicateDevice);
+            }
+            known.name = validate_device_name(name)?;
+            known.failures = FailureTracker::default();
+            return Ok(());
         }
         if self.devices.len() >= MAX_DEVICES {
             return Err(StateError::TooManyDevices);
@@ -980,12 +985,12 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_devices_are_refused_in_memory_and_in_the_file() {
+    fn a_known_device_pairing_again_keeps_one_entry() {
         let (mut state, device) = state_with_device();
-        assert_eq!(
-            state.add_device(device, "again", 1),
-            Err(StateError::DuplicateDevice)
-        );
+        let before = state.devices().len();
+        assert_eq!(state.add_device(device, "again", 1), Ok(()));
+        assert_eq!(state.devices().len(), before);
+        assert_eq!(state.device(&device).unwrap().name, "again");
         let text = format!(
             "{}device {} 1 0 0 0 clone\n",
             state.serialize(),

@@ -101,6 +101,7 @@ export class Viewer {
   clipboardListener: ClipboardListener | null = null;
   audioListener: AudioListener | null = null;
   linkListener: ((reply: LinkReply) => void) | null = null;
+  forcePairing = false;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -159,7 +160,7 @@ export class Viewer {
       return;
     }
     const pinned = this.identity?.agents[this.target.origin];
-    if (this.identity !== undefined && pinned !== undefined) {
+    if (!this.forcePairing && this.identity !== undefined && pinned !== undefined) {
       const key = this.identity.deviceKey;
       this.restoreTicket();
       this.open(() => Handshake.reconnect(key, pinned), false);

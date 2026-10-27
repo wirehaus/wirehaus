@@ -114,6 +114,47 @@ function Install-Tunnel {
     Start-ScheduledTask -TaskName $tunnelTask
 }
 
+function Test-TunnelUp {
+    try {
+        $reply = Invoke-WebRequest -UseBasicParsing -TimeoutSec 6 -Uri "https://$PublicHost/link/ping" -Headers @{ Origin = $ViewerOrigin }
+        return $reply.StatusCode -eq 200
+    } catch {
+        return $false
+    }
+}
+
+function Wait-Tunnel([int]$Seconds) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-TunnelUp) { return $true }
+        Start-Sleep -Seconds 2
+    }
+    return $false
+}
+
+function Confirm-Tunnel {
+    Say 'Comprobando que el túnel conecta...' 'Checking that the tunnel connects...'
+    if (Wait-Tunnel 40) {
+        Say 'Túnel conectado.' 'Tunnel connected.'
+        return
+    }
+    $mullvad = @("$env:ProgramFiles\Mullvad VPN\resources\mullvad.exe", "$env:ProgramFiles\Mullvad VPN\mullvad.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($mullvad -and ((& $mullvad status 2>$null) -match '^Connected')) {
+        Say 'Mullvad VPN bloquea la conexión del túnel. Excluyo solo el conector de Wirehaus de la VPN (el resto de tu tráfico sigue por Mullvad)...' 'Mullvad VPN is blocking the tunnel connection. Excluding only the Wirehaus connector from the VPN (the rest of your traffic still goes through Mullvad)...'
+        & $mullvad split-tunnel app add $cloudflared 2>$null | Out-Null
+        & $mullvad split-tunnel set on 2>$null | Out-Null
+        Stop-ScheduledTask -TaskName $tunnelTask -ErrorAction SilentlyContinue
+        Get-Process cloudflared -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $cloudflared } | Stop-Process -Force
+        Start-ScheduledTask -TaskName $tunnelTask
+        if (Wait-Tunnel 40) {
+            Say 'Túnel conectado.' 'Tunnel connected.'
+            return
+        }
+    }
+    Say 'Aviso: el túnel no consigue conectar con Cloudflare (puerto 7844), así que tu ordenador aún no es accesible desde fuera.' 'Warning: the tunnel cannot reach Cloudflare (port 7844), so your computer is not reachable from outside yet.'
+    Say 'Suele ser una VPN (por ejemplo Mullvad: excluye el conector de la VPN) o el cortafuegos de una red de empresa o colegio. Prueba con otra red o desactiva la VPN un momento; el servicio sigue reintentando solo.' 'It is usually a VPN (for example Mullvad: exclude the connector from the VPN) or the firewall of a company or school network. Try another network or turn the VPN off for a moment; the service keeps retrying by itself.'
+}
+
 function Invoke-Agent {
     param([string[]]$Arguments)
     & $agent @Arguments
@@ -192,6 +233,9 @@ if ($PublicHost) {
 Invoke-Agent $serviceArguments | Out-Null
 if ($TunnelTokenFile) {
     Install-Tunnel
+    if ($PublicHost) {
+        Confirm-Tunnel
+    }
 }
 Say '[4/4] Emparejar tu móvil u otro equipo:' '[4/4] Pair your phone or another device:'
 Invoke-Agent @('pairing')

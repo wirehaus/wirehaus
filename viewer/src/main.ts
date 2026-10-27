@@ -10,6 +10,7 @@ import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
 import { UpdateWatcher } from './updates.js';
 import { KeyBar } from './keybar.js';
+import { deviceLabel } from './devicename.js';
 import { agentBase } from './linkaddr.js';
 import { initLinkUi } from './linkui.js';
 import { initPwa, launchedAsApp } from './pwa.js';
@@ -142,7 +143,7 @@ menuButton.setAttribute('aria-label', messages.menu);
 zoomReset.setAttribute('aria-label', messages.zoomReset);
 zoomReset.title = messages.zoomReset;
 reconnect.textContent = messages.reconnect;
-pairName.value = messages.pairNameDefault;
+pairName.value = deviceLabel(navigator.userAgent, navigator.maxTouchPoints) || messages.pairNameDefault;
 homeName.placeholder = messages.homePlaceholder;
 pairCode.placeholder = 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX';
 const linkedPairCode = pairCodeFromHash(window.location.hash);
@@ -375,6 +376,10 @@ function show(state: ViewerState): void {
       if (linkedPairCode !== undefined && pairCode.value === '') {
         pairCode.value = linkedPairCode;
         pairName.focus();
+        if (!autoPaired && state.error === undefined) {
+          autoPaired = true;
+          void viewer.pair(linkedPairCode, pairName.value.trim() || messages.pairNameDefault);
+        }
       } else {
         pairCode.focus();
       }
@@ -502,6 +507,8 @@ const linkUi = initLinkUi({
   closeMenu: () => closeMenu(),
 });
 viewer.linkListener = (reply) => linkUi.receive(reply);
+viewer.forcePairing = linkedPairCode !== undefined;
+let autoPaired = false;
 initPwa(
   element<HTMLButtonElement>('install-app'),
   { install: messages.installApp, ios: messages.installIos },

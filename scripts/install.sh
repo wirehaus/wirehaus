@@ -228,6 +228,57 @@ if [ "$mode" = uninstall ]; then
   exit 0
 fi
 
+tunnel_up() {
+  code=$(curl -s -o /dev/null -w '%{http_code}' -m 6 -H "Origin: $viewer_origin" "https://$public_host/link/ping" 2>/dev/null || true)
+  [ "$code" = 200 ]
+}
+
+wait_tunnel() {
+  waited=0
+  while [ "$waited" -lt "$1" ]; do
+    tunnel_up && return 0
+    sleep 2
+    waited=$((waited + 2))
+  done
+  return 1
+}
+
+mullvad_cli() {
+  for candidate in "$(command -v mullvad 2>/dev/null || true)" "/Applications/Mullvad VPN.app/Contents/Resources/mullvad"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+check_tunnel() {
+  command -v curl >/dev/null 2>&1 || return 0
+  say "Comprobando que el túnel conecta..." "Checking that the tunnel connects..."
+  if wait_tunnel 40; then
+    say "Túnel conectado." "Tunnel connected."
+    return 0
+  fi
+  if [ "$(uname -s)" = Darwin ] && mullvad_bin=$(mullvad_cli) && "$mullvad_bin" status 2>/dev/null | grep -q "^Connected"; then
+    say "Mullvad VPN bloquea la conexión del túnel. Excluyo solo el conector de Wirehaus de la VPN (el resto de tu tráfico sigue por Mullvad)..." "Mullvad VPN is blocking the tunnel connection. Excluding only the Wirehaus connector from the VPN (the rest of your traffic still goes through Mullvad)..."
+    "$mullvad_bin" split-tunnel app add "$cloudflared" >/dev/null 2>&1 || true
+    "$mullvad_bin" split-tunnel set on >/dev/null 2>&1 || true
+    launchctl kickstart -k "gui/$(id -u)/$tunnel_label" >/dev/null 2>&1 || true
+    if wait_tunnel 40; then
+      say "Túnel conectado." "Tunnel connected."
+      return 0
+    fi
+  fi
+  say "Aviso: el túnel no consigue conectar con Cloudflare (puerto 7844), así que tu ordenador aún no es accesible desde fuera." "Warning: the tunnel cannot reach Cloudflare (port 7844), so your computer is not reachable from outside yet." >&2
+  say "Suele ser una VPN (por ejemplo Mullvad: excluye el conector de la VPN) o el cortafuegos de una red de empresa o colegio. Prueba con otra red o desactiva la VPN un momento; el servicio sigue reintentando solo." "It is usually a VPN (for example Mullvad: exclude the connector from the VPN) or the firewall of a company or school network. Try another network or turn the VPN off for a moment; the service keeps retrying by itself." >&2
+  if [ "$(uname -s)" = Darwin ]; then
+    say "Registro del túnel: $HOME/Library/Logs/Wirehaus/tunnel.log" "Tunnel log: $HOME/Library/Logs/Wirehaus/tunnel.log" >&2
+  else
+    say "Registro del túnel: journalctl --user -u wirehaus-tunnel" "Tunnel log: journalctl --user -u wirehaus-tunnel" >&2
+  fi
+}
+
 mac_permissions() {
   log="$HOME/Library/Logs/Wirehaus/agent.log"
   waited=0
@@ -278,6 +329,9 @@ if [ -n "$tunnel_token_file" ]; then
 fi
 if [ "$(uname -s)" = Darwin ]; then
   mac_permissions
+fi
+if [ -n "$tunnel_token_file" ] && [ -n "$public_host" ]; then
+  check_tunnel
 fi
 
 say "[4/4] Emparejar tu móvil u otro equipo:" "[4/4] Pair your phone or another device:"
