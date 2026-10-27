@@ -94,6 +94,7 @@ export type Messages = {
   connected: (width: number, height: number) => string;
   closed: string;
   reconnecting: (attempt: number) => string;
+  reconnectingSoft: string;
   endedIdle: string;
   endedRevoked: string;
   endedLocked: string;
@@ -322,6 +323,7 @@ const catalog: Record<string, Messages> = {
     connected: (width, height) => `Conectado, ${width}x${height}`,
     closed: 'Desconectado.',
     reconnecting: (attempt) => `Conexión perdida. Reconectando, intento ${attempt}.`,
+    reconnectingSoft: 'Reconectando…',
     endedIdle: 'Sesión cerrada por inactividad. Vuelve a entrar con tu código.',
     endedRevoked: 'Este equipo ya no tiene acceso al ordenador remoto.',
     endedLocked: 'El agente se ha bloqueado desde el ordenador de casa.',
@@ -355,12 +357,12 @@ const catalog: Record<string, Messages> = {
     closeTab: 'Cerrar',
     terminalExited: (code) => `[proceso terminado, código ${code}]`,
     terminalNotAllowed:
-      'La terminal está desactivada en el agente. Actívala en el ordenador de casa con "wirehaus-agent terminal allow --code".',
+      'La terminal está desactivada. Actívalo en ese ordenador con "wirehaus-agent allow-all --code 123456" (los seis dígitos de tu app de autenticación).',
     terminalTooMany: 'Hay demasiadas terminales abiertas.',
     terminalSpawnFailed: 'No se pudo iniciar la terminal.',
     tabFiles: 'Archivos',
     filesNoRoots:
-      'No hay carpetas compartidas. Comparte una en el ordenador de casa con "wirehaus-agent files add <carpeta> --code".',
+      'No hay carpetas compartidas. Actívalo en ese ordenador con "wirehaus-agent allow-all --code 123456" (los seis dígitos de tu app de autenticación).',
     filesEmpty: 'Esta carpeta está vacía.',
     filesNoMatches: 'Nada coincide con la búsqueda.',
     filesTruncated: 'Solo se muestran los primeros 1000 elementos.',
@@ -449,7 +451,7 @@ const catalog: Record<string, Messages> = {
     audioUnsupported: 'Este navegador no puede reproducir el audio del ordenador remoto.',
     audioFailure: {
       notAllowed:
-        'El audio está desactivado. Actívalo en el ordenador de casa con "wirehaus-agent audio allow --code".',
+        'El audio está desactivado. Actívalo en ese ordenador con "wirehaus-agent allow-all --code 123456" (los seis dígitos de tu app de autenticación).',
       unavailable: 'El ordenador remoto no puede capturar su audio ahora.',
     },
     tabClipboard: 'Portapapeles',
@@ -466,7 +468,7 @@ const catalog: Record<string, Messages> = {
     clipboardNothingToSend: 'No hay texto que enviar.',
     clipboardFailure: {
       notAllowed:
-        'El portapapeles está desactivado en esa dirección. Actívalo en el ordenador de casa con "wirehaus-agent clipboard allow --code".',
+        'El portapapeles está desactivado. Actívalo en ese ordenador con "wirehaus-agent allow-all --code 123456" (los seis dígitos de tu app de autenticación).',
       tooLarge: 'El texto es demasiado grande.',
       unavailable: 'El portapapeles del ordenador remoto no está disponible ahora.',
       timeout: 'El ordenador remoto no ha respondido a tiempo.',
@@ -576,6 +578,7 @@ const catalog: Record<string, Messages> = {
     connected: (width, height) => `Connected, ${width}x${height}`,
     closed: 'Disconnected.',
     reconnecting: (attempt) => `Connection lost. Reconnecting, attempt ${attempt}.`,
+    reconnectingSoft: 'Reconnecting…',
     endedIdle: 'Session closed after inactivity. Sign in again with your code.',
     endedRevoked: 'This device no longer has access to the remote computer.',
     endedLocked: 'The agent was locked from the home computer.',
@@ -609,12 +612,12 @@ const catalog: Record<string, Messages> = {
     closeTab: 'Close',
     terminalExited: (code) => `[process exited, code ${code}]`,
     terminalNotAllowed:
-      'The terminal is disabled on the agent. Enable it on the home computer with "wirehaus-agent terminal allow --code".',
+      'The terminal is turned off. Turn everything on from that computer with "wirehaus-agent allow-all --code 123456" (the six digits from your authenticator app).',
     terminalTooMany: 'Too many terminals are open.',
     terminalSpawnFailed: 'The terminal could not be started.',
     tabFiles: 'Files',
     filesNoRoots:
-      'No folders are shared. Share one on the home computer with "wirehaus-agent files add <folder> --code".',
+      'No folders are shared. Turn everything on from that computer with "wirehaus-agent allow-all --code 123456" (the six digits from your authenticator app).',
     filesEmpty: 'This folder is empty.',
     filesNoMatches: 'Nothing matches the search.',
     filesTruncated: 'Only the first 1000 items are shown.',
@@ -703,7 +706,7 @@ const catalog: Record<string, Messages> = {
     audioUnsupported: 'This browser cannot play the remote computer audio.',
     audioFailure: {
       notAllowed:
-        'Audio is turned off. Enable it on the home computer with "wirehaus-agent audio allow --code".',
+        'Audio is turned off. Turn everything on from that computer with "wirehaus-agent allow-all --code 123456" (the six digits from your authenticator app).',
       unavailable: 'The remote computer cannot capture its audio right now.',
     },
     tabClipboard: 'Clipboard',
@@ -720,7 +723,7 @@ const catalog: Record<string, Messages> = {
     clipboardNothingToSend: 'There is no text to send.',
     clipboardFailure: {
       notAllowed:
-        'The clipboard is disabled in that direction. Enable it on the home computer with "wirehaus-agent clipboard allow --code".',
+        'The clipboard is turned off. Turn everything on from that computer with "wirehaus-agent allow-all --code 123456" (the six digits from your authenticator app).',
       tooLarge: 'The text is too large.',
       unavailable: 'The remote clipboard is not available right now.',
       timeout: 'The remote computer did not answer in time.',

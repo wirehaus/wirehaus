@@ -33,6 +33,33 @@ fn main() -> ExitCode {
     }
 }
 
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
+fn initialize(
+    dir: &std::path::Path,
+    allow_all: bool,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let home = allow_all.then(home_dir).flatten();
+    commands::init_with(dir, system_clock(), home.as_deref(), out)?;
+    Ok(())
+}
+
+fn allow_everything(
+    store: &Store,
+    code: &str,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let home = home_dir().ok_or("cannot find your home folder")?;
+    commands::allow_all(store, &home, code, out)?;
+    Ok(())
+}
+
 fn run(command: Command, dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut out = stdout().lock();
     let open = || Store::open(dir, system_clock());
@@ -44,7 +71,8 @@ fn run(command: Command, dir: &std::path::Path) -> Result<(), Box<dyn std::error
                 PROTOCOL_VERSION
             );
         }
-        Command::Init => commands::init(dir, system_clock(), &mut out)?,
+        Command::Init { allow_all } => initialize(dir, allow_all, &mut out)?,
+        Command::AllowAll { code } => allow_everything(&open()?, &code, &mut out)?,
         Command::Pairing => {
             commands::pairing_with_link(&open()?, commands::viewer_url(dir).as_deref(), &mut out)?;
         }

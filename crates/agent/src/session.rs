@@ -26,6 +26,7 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MESSAGES_PER_TICK: usize = 256;
 const REVOCATION_CHECK_TICKS: u32 = 30;
 const LINK_ATTEMPTS_PER_SESSION: u32 = 12;
+const PING_INTERVAL: Duration = Duration::from_secs(20);
 
 pub type LinkFound = ([u8; 16], String);
 pub type LinkResult = Result<(), LinkFailure>;
@@ -84,6 +85,7 @@ fn serve(
     let mut viewer_decodes_video = false;
     let mut last_activity = Instant::now();
     let mut link_budget = LINK_ATTEMPTS_PER_SESSION;
+    let mut last_ping = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
         ticks = ticks.wrapping_add(1);
@@ -106,6 +108,11 @@ fn serve(
         if files.active() == 0 && last_activity.elapsed() >= policy.idle_timeout {
             end_session(&mut link, EndReason::Idle);
             return Err(ServerError::IdleTimeout);
+        }
+        if last_ping.elapsed() >= PING_INTERVAL {
+            link.ping()?;
+            link.flush()?;
+            last_ping = Instant::now();
         }
         pacer.tick();
         if pacer.may_send() {

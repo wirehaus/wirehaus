@@ -423,9 +423,18 @@ pub struct Layout {
     pub exe_name: String,
 }
 
+fn real_exe() -> std::io::Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    if cfg!(unix) {
+        Ok(std::fs::canonicalize(&exe).unwrap_or(exe))
+    } else {
+        Ok(exe)
+    }
+}
+
 impl Layout {
     pub fn detect(state_dir: &Path) -> Result<Self, UpdateError> {
-        let exe = std::env::current_exe()?;
+        let exe = real_exe()?;
         let install_dir = exe.parent().ok_or(UpdateError::NotManaged)?;
         let exe_name = exe
             .file_name()

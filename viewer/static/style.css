@@ -2679,3 +2679,68 @@ dialog.sheet h1 {
 .recent-list button:hover {
   border-color: var(--accent);
 }
+
+.boot-note {
+  position: fixed;
+  left: 50%;
+  top: 40%;
+  z-index: 100;
+  max-width: min(420px, calc(100vw - 32px));
+  margin: 0;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.boot-note button {
+  margin-left: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.reconnect-banner {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--safe-top, 0px) + 64px);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 24px);
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 13px;
+  transform: translateX(-50%);
+}
+
+.reconnect-banner[hidden] {
+  display: none;
+}
+
+.reconnect-banner .spinner {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border-width: 2px;
+}
+
+body[data-state='reconnecting'] #screen-area,
+body[data-state='reconnecting'] .fm {
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}

@@ -3,6 +3,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+const CODE_HELP: &str =
+    "The six digits your authenticator app shows right now (not the pairing code)";
+
 #[derive(Debug, Parser)]
 #[command(name = "wirehaus-agent", version, about = "Wirehaus agent")]
 pub struct Cli {
@@ -15,7 +18,14 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Info,
-    Init,
+    Init {
+        #[arg(long)]
+        allow_all: bool,
+    },
+    AllowAll {
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
+        code: String,
+    },
     Pairing,
     Totp,
     #[cfg(target_os = "macos")]
@@ -54,11 +64,11 @@ pub enum Command {
         action: SecretsAction,
     },
     Lock {
-        #[arg(long)]
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
     },
     Unlock {
-        #[arg(long)]
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
     },
     Update {
@@ -136,7 +146,7 @@ pub enum Direction {
 #[derive(Debug, Subcommand)]
 pub enum ClipboardAction {
     Allow {
-        #[arg(long)]
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
         #[arg(long, value_enum, default_value_t = Direction::Both)]
         direction: Direction,
@@ -148,7 +158,7 @@ pub enum ClipboardAction {
 pub enum FilesAction {
     Add {
         folder: PathBuf,
-        #[arg(long)]
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
     },
     Remove {
@@ -160,7 +170,7 @@ pub enum FilesAction {
 #[derive(Debug, Subcommand)]
 pub enum TerminalAction {
     Allow {
-        #[arg(long)]
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
     },
     Deny,
@@ -169,7 +179,7 @@ pub enum TerminalAction {
 #[derive(Debug, Subcommand)]
 pub enum AudioAction {
     Allow {
-        #[arg(long)]
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
     },
     Deny,
@@ -179,12 +189,12 @@ pub enum AudioAction {
 pub enum DeviceAction {
     Revoke {
         device: String,
-        #[arg(long)]
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
     },
     Reactivate {
         device: String,
-        #[arg(long)]
+        #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
     },
 }

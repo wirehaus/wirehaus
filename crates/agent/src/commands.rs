@@ -41,7 +41,10 @@ impl CommandError {
                 format!("{} no es una carpeta", path.display()),
                 format!("{} is not a folder", path.display())
             ),
-            CommandError::WrongCode => tr!("el código es incorrecto", "the code is wrong"),
+            CommandError::WrongCode => tr!(
+                "el código es incorrecto: escribe los seis dígitos que muestra ahora tu aplicación de autenticación (no el código de emparejamiento)",
+                "the code is wrong: type the six digits your authenticator app shows right now (not the pairing code)"
+            ),
             CommandError::TooManyAttempts(seconds) => tr!(
                 format!("demasiados intentos: espera {seconds} segundos"),
                 format!("too many attempts: wait {seconds} seconds")
@@ -57,7 +60,19 @@ impl CommandError {
 }
 
 pub fn init(dir: &Path, clock: Clock, out: &mut impl Write) -> Result<(), CommandError> {
+    init_with(dir, clock, None, out)
+}
+
+pub fn init_with(
+    dir: &Path,
+    clock: Clock,
+    everything_in: Option<&Path>,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
     let store = Store::initialize(dir, clock)?;
+    if let Some(home) = everything_in {
+        apply_all(&store, home, out)?;
+    }
     let (public, secret, uri) = store.read(|state, _| {
         (
             state.agent_key().public().to_text(),
@@ -94,6 +109,42 @@ pub fn init(dir: &Path, clock: Clock, out: &mut impl Write) -> Result<(), Comman
     )?;
     write_totp(out, &secret, &uri)?;
     Ok(())
+}
+
+fn apply_all(store: &Store, home: &Path, out: &mut impl Write) -> Result<(), CommandError> {
+    let share = home.canonicalize().ok().filter(|real| real.is_dir());
+    store.update(|state, _| {
+        state.set_terminal_allowed(true);
+        state.set_audio_allowed(true);
+        state.set_clipboard_mode(ClipboardMode::Both);
+        match &share {
+            Some(real) => state.add_file_root(real).map(|_| ()),
+            None => Ok(()),
+        }
+    })??;
+    store.log(
+        "allowed_everything",
+        "files, terminal, clipboard and audio were turned on",
+    );
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            "Activado: archivos de tu carpeta personal, terminal, portapapeles y audio. Se cambia cuando quieras con `wirehaus-agent terminal deny`, `clipboard deny`, `audio deny` o `files remove`.",
+            "Turned on: files of your home folder, terminal, clipboard and audio. Change it whenever you like with `wirehaus-agent terminal deny`, `clipboard deny`, `audio deny` or `files remove`."
+        )
+    )?;
+    Ok(())
+}
+
+pub fn allow_all(
+    store: &Store,
+    home: &Path,
+    code: &str,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    verify(store, code)?;
+    apply_all(store, home, out)
 }
 
 fn write_totp(out: &mut impl Write, secret: &str, uri: &str) -> Result<(), CommandError> {
@@ -642,6 +693,15 @@ fn host_name() -> String {
         .map(|name| name.trim().to_owned())
         .filter(|name| !name.is_empty())
         .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| String::from_utf8(output.stdout).ok())
+                .map(|name| name.trim().to_owned())
+                .filter(|name| !name.is_empty())
+        })
         .unwrap_or_else(|| "computer".to_owned())
 }
 
@@ -812,12 +872,17 @@ mod tests {
             let mut out = Vec::new();
             let error = revoke(&store, "000", &code(&store, &time), &mut out).unwrap_err();
             assert_eq!(error.to_string(), "ningún dispositivo coincide");
-            assert_eq!(
-                CommandError::WrongCode.to_string(),
-                "el código es incorrecto"
+            assert!(
+                CommandError::WrongCode
+                    .to_string()
+                    .starts_with("el código es incorrecto: escribe los seis dígitos")
             );
         });
-        assert_eq!(CommandError::WrongCode.to_string(), "the code is wrong");
+        assert!(
+            CommandError::WrongCode
+                .to_string()
+                .starts_with("the code is wrong: type the six digits")
+        );
     }
 
     #[test]
@@ -881,6 +946,65 @@ mod tests {
             init(&dir.0, clock(&time), &mut Vec::new()),
             Err(CommandError::Store(StoreError::AlreadyInitialized(_)))
         ));
+    }
+
+    #[test]
+    fn init_with_everything_turns_the_features_on_and_shares_the_home_folder() {
+        let dir = TempDir::new();
+        let home = TempDir::new();
+        std::fs::create_dir_all(&home.0).unwrap();
+        let time = Arc::new(AtomicU64::new(1_000_000));
+        let mut out = Vec::new();
+        init_with(&dir.0, clock(&time), Some(&home.0), &mut out).unwrap();
+        assert!(text(out).contains("Turned on"));
+        let store = Store::open(&dir.0, clock(&time)).unwrap();
+        store
+            .read(|state, _| {
+                assert!(state.terminal_allowed());
+                assert!(state.audio_allowed());
+                assert_eq!(state.clipboard_mode(), ClipboardMode::Both);
+                assert_eq!(state.file_roots(), [home.0.canonicalize().unwrap()]);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn a_plain_init_leaves_every_feature_off() {
+        let (_dir, store, _time) = setup();
+        store
+            .read(|state, _| {
+                assert!(!state.terminal_allowed());
+                assert!(!state.audio_allowed());
+                assert_eq!(state.clipboard_mode(), ClipboardMode::Off);
+                assert_eq!(state.file_roots().len(), 0);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn allow_all_needs_the_current_second_factor_and_a_real_home_folder() {
+        let (_dir, store, time) = setup();
+        let home = TempDir::new();
+        std::fs::create_dir_all(&home.0).unwrap();
+        assert!(matches!(
+            allow_all(&store, &home.0, "000000", &mut Vec::new()),
+            Err(CommandError::WrongCode)
+        ));
+        let right = code(&store, &time);
+        allow_all(&store, &home.0, &right, &mut Vec::new()).unwrap();
+        store
+            .read(|state, _| {
+                assert!(state.terminal_allowed());
+                assert_eq!(state.file_roots().len(), 1);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn the_wrong_code_message_explains_which_code_is_meant() {
+        let shown = CommandError::WrongCode.to_string();
+        assert!(shown.contains("authenticator"));
+        assert!(shown.contains("pairing"));
     }
 
     #[test]

@@ -6,6 +6,7 @@
     <meta name="wirehaus-agent-address" content="own" />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0d1117" />
+    <script src="/boot.js"></script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -24,6 +25,7 @@
     <script type="module" src="/main.js"></script>
   </head>
   <body data-state="loading">
+    <p id="boot-note" class="boot-note" hidden><span></span> <button type="button" hidden></button></p>
     <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
       <symbol id="i-mark" viewBox="0 0 64 64">
         <path
@@ -226,6 +228,11 @@
           <p class="secure"><svg aria-hidden="true"><use href="#i-lock" /></svg><span id="secure-code"></span></p>
         </form>
       </section>
+
+      <div id="reconnect-banner" class="reconnect-banner" role="status" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="reconnect-text"></span>
+      </div>
 
       <section id="splash" class="stage" hidden>
         <div class="card splash">

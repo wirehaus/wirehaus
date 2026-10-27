@@ -312,7 +312,7 @@ if ! run_agent devices >/dev/null 2>&1; then
   mkdir -p "$data_dir"
   chmod 700 "$data_dir"
   say "[2/4] Segundo factor: escanea este QR con una app de autenticación (2FAS, Aegis, Google Authenticator o Contraseñas de Apple)." "[2/4] Second factor: scan this QR with an authenticator app (2FAS, Aegis, Google Authenticator or Apple Passwords)."
-  run_agent init
+  run_agent init --allow-all
   echo
 else
   say "[2/4] El segundo factor ya estaba configurado en este equipo." "[2/4] The second factor was already set up on this computer."
@@ -334,33 +334,37 @@ if [ -n "$tunnel_token_file" ] && [ -n "$public_host" ]; then
   check_tunnel
 fi
 
-say "[4/4] Emparejar tu móvil u otro equipo:" "[4/4] Pair your phone or another device:"
+device_count() {
+  run_agent devices 2>/dev/null | grep -c "(active)" || true
+}
+
+wait_for_pairing() {
+  waited=0
+  while [ "$waited" -lt 600 ]; do
+    if [ "$(device_count)" -gt "$1" ]; then
+      return 0
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
+  return 1
+}
+
+say "[4/4] Empareja tu móvil:" "[4/4] Pair your phone:"
+devices_before=$(device_count)
 run_agent pairing
 echo
 if [ -n "$public_host" ]; then
   address=$viewer_origin/${public_host%%.*}
   [ -n "$tunnel_token_file" ] || say "Antes conecta el túnel (mira tu panel)." "First connect the tunnel (see your dashboard)."
-  if [ "$lang" = es ]; then
-    cat <<STEPS
-Listo. Te quedan tres cosas:
-  1. Escanea con tu móvil el QR de emparejamiento: abre $address con el código ya puesto.
-     En otro equipo, abre esa dirección y escribe el código de emparejamiento.
-  2. Escribe los seis dígitos que muestra tu app de autenticación.
-  3. Si macOS o Windows pide permisos para wirehaus-agent, concédelos.
-Después, desde el móvil: menú > Vincular otro equipo, para dar acceso a cualquier ordenador escaneando un QR.
-Para ver el segundo factor otra vez en este ordenador: wirehaus-agent totp
-STEPS
+  say "Escanea el QR de arriba con tu móvil (abre $address con el código puesto) y escribe los seis dígitos de tu app de autenticación." "Scan the QR above with your phone (it opens $address with the code filled in) and type the six digits from your authenticator app."
+  say "Esperando a tu móvil... (pulsa Ctrl+C para saltar este paso y hacerlo luego con: wirehaus-agent pairing)" "Waiting for your phone... (press Ctrl+C to skip this step and do it later with: wirehaus-agent pairing)"
+  if wait_for_pairing "$devices_before"; then
+    say "Listo: tu móvil está emparejado y conectado. Ya no tienes que tocar nada más en este ordenador." "Done: your phone is paired and connected. You do not need to touch anything else on this computer."
   else
-    cat <<STEPS
-Done. Three things left:
-  1. Scan the pairing QR with your phone: it opens $address with the code already filled in.
-     On another device, open that address and type the pairing code.
-  2. Type the six digits your authenticator app shows.
-  3. If macOS or Windows asks for permissions for wirehaus-agent, grant them.
-Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR.
-Show the second factor again on this computer with: wirehaus-agent totp
-STEPS
+    say "No he visto ningún móvil emparejarse en 10 minutos. Cuando quieras, ejecuta: wirehaus-agent pairing" "I did not see a phone pair in 10 minutes. Whenever you like, run: wirehaus-agent pairing"
   fi
+  say "Más adelante, desde el móvil: menú > Vincular otro equipo, para dar acceso a cualquier ordenador escaneando un QR. Para ver otra vez el segundo factor: wirehaus-agent totp" "Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR. To see the second factor again: wirehaus-agent totp"
 else
   echo "Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code."
 fi

@@ -16,7 +16,7 @@ Dejas el ordenador de casa encendido con el agente de Wirehaus y te conectas des
 - **Dos factores que no se pueden saltar.** Un código de emparejamiento de un solo uso y un TOTP que verifica tu propio agente, no un servidor ajeno.
 - **Nada abierto.** El agente escucha solo en `127.0.0.1` y sale hacia fuera por un túnel.
 - **Un comando para instalarlo**, y otro para quitarlo.
-- **Funciones sensibles apagadas por defecto**: terminal, archivos, portapapeles y audio se activan a mano, en el propio ordenador.
+- **Todo activado al instalar, y apagable**: el instalador activa archivos de tu carpeta personal, terminal, portapapeles y audio; se quita lo que no quieras con un comando local.
 
 ## Instalación
 
@@ -66,7 +66,7 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 - Dispositivo emparejado con un código de un solo uso de 160 bits y segundo factor TOTP que verifica el agente. Ninguna de las dos cosas basta por sí sola.
 - Bloqueo creciente por dispositivo, suspensión tras diez fallos y registro de accesos sin secretos.
 - Clave y secreto del segundo factor opcionalmente en el almacén de claves del sistema, fuera del fichero de estado.
-- Terminal, archivos, portapapeles y audio desactivados por defecto. Activarlos exige un código del segundo factor en el propio ordenador.
+- El instalador activa terminal, archivos (tu carpeta personal), portapapeles y audio; quien conecte necesita igualmente el emparejamiento y el segundo factor. Un `init` a secas los deja apagados; `wirehaus-agent allow-all --code 123456` los enciende de golpe, y activar uno suelto exige un código del segundo factor en el propio ordenador.
 - Cierre automático por inactividad (30 minutos por defecto).
 - Sin `unsafe` en el código propio, entradas validadas antes de reservar memoria y pruebas con datos hostiles en cada canal.
 - El visor se sirve desde memoria, verificado contra un manifiesto de hashes SHA-256 de compilación reproducible.
@@ -119,7 +119,7 @@ El agente guarda su estado en `~/.config/wirehaus` (o en `--state-dir`), solo le
 
 Los secretos del agente (su clave privada y el secreto del segundo factor) viven por defecto en el fichero de estado, con permisos privados. Puedes moverlos al almacén de claves del sistema con `wirehaus-agent secrets use system` y volver con `secrets use file --code 123456`; `secrets status` dice dónde están. En Linux hace falta `secret-tool` (paquete `libsecret-tools`) y un servicio de secretos desbloqueado, normalmente el de tu sesión de escritorio. Es opcional a propósito: si el almacén está bloqueado tras un reinicio, el agente no arranca hasta que lo desbloqueas, y si lo pierdes hay que volver a ejecutar `init` y emparejar de nuevo.
 
-Para activar los demás canales, siempre en el ordenador y con un código del segundo factor:
+Si instalaste con el instalador, ya están activados. Para activarlos de golpe en un agente que no los tenga: `wirehaus-agent allow-all --code 123456` (los seis dígitos de tu app de autenticación, no el código de emparejamiento). Uno a uno, siempre en el ordenador y con ese código:
 
 ```
 wirehaus-agent terminal allow --code 123456

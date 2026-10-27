@@ -270,6 +270,7 @@ struct Client {
     socket: Socket,
     session: Session,
     ticket: Option<[u8; 32]>,
+    pings: usize,
 }
 
 impl Client {
@@ -303,7 +304,8 @@ impl Client {
                         return Received::Got(frame);
                     }
                 }
-                Ok(Message::Ping(_) | Message::Pong(_)) => {}
+                Ok(Message::Ping(_)) => self.pings += 1,
+                Ok(Message::Pong(_)) => {}
                 Ok(Message::Close(_)) => return Received::Closed,
                 Ok(other) => panic!("unexpected message {other:?}"),
                 Err(tungstenite::Error::Io(error))
@@ -415,6 +417,7 @@ fn start_pairing(
         socket,
         session: outcome.session,
         ticket: None,
+        pings: 0,
     })
 }
 
@@ -430,6 +433,7 @@ fn start_reconnect(server: &Running, device: &StaticKey, agent: &PublicKey) -> O
         socket,
         session: outcome.session,
         ticket: None,
+        pings: 0,
     })
 }
 
@@ -2853,4 +2857,22 @@ fn lookups_in_one_session_are_limited() {
         next_link(&mut phone),
         LinkMessage::Failed(LinkFailure::TooManyAttempts)
     );
+}
+
+#[test]
+fn the_agent_pings_an_idle_viewer_so_proxies_keep_the_connection_open() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_millis(300));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while client.pings == 0 && Instant::now() < deadline {
+        if let Received::Got(frame) = client.read_frame()
+            && let Ok(DesktopMessage::FrameEnd { sequence }) =
+                DesktopMessage::decode(&frame.payload)
+        {
+            client.send_viewer(ViewerMessage::FrameAck { sequence });
+        }
+    }
+    assert!(client.pings >= 1, "no ping within 30 seconds");
 }

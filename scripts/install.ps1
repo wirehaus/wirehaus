@@ -216,7 +216,7 @@ Copy-Item -Recurse -Force (Join-Path $source 'viewer') $viewer
 $firstRun = -not (Test-Path $stateFile)
 if ($firstRun) {
     Say '[2/4] Segundo factor: escanea este QR con una app de autenticación (2FAS, Aegis, Google Authenticator o Contraseñas de Apple).' '[2/4] Second factor: scan this QR with an authenticator app (2FAS, Aegis, Google Authenticator or Apple Passwords).'
-    Invoke-Agent @('init')
+    Invoke-Agent @('init', '--allow-all')
     Write-Host ''
 } else {
     Say '[2/4] El segundo factor ya estaba configurado en este equipo.' '[2/4] The second factor was already set up on this computer.'
@@ -237,7 +237,22 @@ if ($TunnelTokenFile) {
         Confirm-Tunnel
     }
 }
-Say '[4/4] Emparejar tu móvil u otro equipo:' '[4/4] Pair your phone or another device:'
+function Get-DeviceCount {
+    $text = (& $agent --state-dir (Join-Path $dataDir 'state') devices 2>$null | Out-String)
+    return ([regex]::Matches($text, '\(active\)')).Count
+}
+
+function Wait-Pairing([int]$Before) {
+    $deadline = (Get-Date).AddSeconds(600)
+    while ((Get-Date) -lt $deadline) {
+        if ((Get-DeviceCount) -gt $Before) { return $true }
+        Start-Sleep -Seconds 3
+    }
+    return $false
+}
+
+Say '[4/4] Empareja tu móvil:' '[4/4] Pair your phone:'
+$devicesBefore = Get-DeviceCount
 Invoke-Agent @('pairing')
 Write-Host ''
 if ($PublicHost) {
@@ -245,23 +260,14 @@ if ($PublicHost) {
         Say 'Antes conecta el túnel (mira tu panel).' 'First connect the tunnel (see your dashboard).'
     }
     $Address = "$ViewerOrigin/$($PublicHost.Split('.')[0])"
-    if ($spanish) {
-        Write-Host 'Listo. Te quedan tres cosas:'
-        Write-Host "  1. Escanea con tu móvil el QR de emparejamiento: abre $Address con el código ya puesto."
-        Write-Host '     En otro equipo, abre esa dirección y escribe el código de emparejamiento.'
-        Write-Host '  2. Escribe los seis dígitos que muestra tu app de autenticación.'
-        Write-Host '  3. Si Windows pide permiso para wirehaus-agent o el conector del túnel, acéptalo.'
-        Write-Host 'Después, desde el móvil: menú > Vincular otro equipo, para dar acceso a cualquier ordenador escaneando un QR.'
-        Write-Host 'Para ver el segundo factor otra vez en este ordenador: wirehaus-agent totp'
+    Say "Escanea el QR de arriba con tu móvil (abre $Address con el código puesto) y escribe los seis dígitos de tu app de autenticación." "Scan the QR above with your phone (it opens $Address with the code filled in) and type the six digits from your authenticator app."
+    Say 'Esperando a tu móvil... (pulsa Ctrl+C para saltar este paso y hacerlo luego con: wirehaus-agent pairing)' 'Waiting for your phone... (press Ctrl+C to skip this step and do it later with: wirehaus-agent pairing)'
+    if (Wait-Pairing $devicesBefore) {
+        Say 'Listo: tu móvil está emparejado y conectado. Ya no tienes que tocar nada más en este ordenador.' 'Done: your phone is paired and connected. You do not need to touch anything else on this computer.'
     } else {
-        Write-Host 'Done. Three things left:'
-        Write-Host "  1. Scan the pairing QR with your phone: it opens $Address with the code already filled in."
-        Write-Host '     On another device, open that address and type the pairing code.'
-        Write-Host '  2. Type the six digits your authenticator app shows.'
-        Write-Host '  3. If Windows asks for permission for wirehaus-agent or the tunnel connector, accept it.'
-        Write-Host 'Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR.'
-        Write-Host 'Show the second factor again on this computer with: wirehaus-agent totp'
+        Say 'No he visto ningún móvil emparejarse en 10 minutos. Cuando quieras, ejecuta: wirehaus-agent pairing' 'I did not see a phone pair in 10 minutes. Whenever you like, run: wirehaus-agent pairing'
     }
+    Say 'Más adelante, desde el móvil: menú > Vincular otro equipo, para dar acceso a cualquier ordenador escaneando un QR. Para ver otra vez el segundo factor: wirehaus-agent totp' 'Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR. To see the second factor again: wirehaus-agent totp'
 } else {
     Write-Host 'Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code.'
 }

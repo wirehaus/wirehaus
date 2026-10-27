@@ -342,6 +342,27 @@ export class FilesPanel {
     }
   }
 
+  suspend(): void {
+    if (this.roots !== null) {
+      this.initial = { root: this.root, path: [...this.path] };
+    }
+    this.generation += 1;
+    for (const transfer of this.transfers.values()) {
+      transfer.cancelled = true;
+      transfer.waiting?.();
+      transfer.settle(false);
+    }
+    this.transfers.clear();
+    for (const resolve of this.pending.values()) {
+      resolve({ kind: 'failed', reason: 'io' });
+    }
+    this.pending.clear();
+    this.dialog.close();
+    this.closeMenu();
+    this.closeModal(false);
+    this.loaded = false;
+  }
+
   reset(): void {
     if (this.roots !== null) {
       this.initial = { root: this.root, path: [...this.path] };

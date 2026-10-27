@@ -57,6 +57,13 @@ impl Link {
         self.send_frame(&Frame::new(Channel::Control, 0, message.encode())?)
     }
 
+    pub fn ping(&mut self) -> Result<(), ServerError> {
+        match self.socket.write(Message::Ping(Vec::new().into())) {
+            Err(WsError::Io(error)) if is_timeout(error.kind()) => Ok(()),
+            other => other.map_err(ServerError::from),
+        }
+    }
+
     pub fn flush(&mut self) -> Result<(), ServerError> {
         match self.socket.flush() {
             Err(WsError::Io(error)) if is_timeout(error.kind()) => Ok(()),

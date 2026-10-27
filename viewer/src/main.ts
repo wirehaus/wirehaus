@@ -34,6 +34,7 @@ function element<T extends HTMLElement>(id: string): T {
 bridgeTerminalStyles();
 
 const messages = messagesFor(preferredLanguage(navigator.language));
+window.dispatchEvent(new Event('wirehaus-ready'));
 document.documentElement.lang = navigator.language.split('-')[0] ?? 'es';
 
 const coarse = window.matchMedia('(pointer: coarse)').matches;
@@ -57,6 +58,8 @@ const screen = element<HTMLCanvasElement>('screen');
 const immersiveExit = element<HTMLButtonElement>('immersive-exit');
 const screenArea = element<HTMLElement>('screen-area');
 const splash = element<HTMLElement>('splash');
+const reconnectBanner = element<HTMLElement>('reconnect-banner');
+const reconnectText = element<HTMLElement>('reconnect-text');
 const splashTitle = element<HTMLElement>('splash-title');
 const splashDetail = element<HTMLElement>('splash-detail');
 const splashSpinner = element<HTMLElement>('splash-spinner');
@@ -213,6 +216,7 @@ const audio = new AudioControl(
 );
 
 let lastKind: ViewerState['kind'] = 'loading';
+let softReconnect = false;
 let everConnected = false;
 const namedPath = namedByPath(location);
 const SITE = 'https://wirehaus.dev';
@@ -321,24 +325,32 @@ function paintSplash(state: ViewerState): void {
 function show(state: ViewerState): void {
   lastState = state;
   lastKind = state.kind;
+  softReconnect =
+    everConnected &&
+    (state.kind === 'reconnecting' || ((state.kind === 'loading' || state.kind === 'connecting') && softReconnect));
   linkUi.kind(state.kind);
   document.body.dataset['state'] = state.kind;
-  if (state.kind !== 'connected') {
+  if (state.kind !== 'connected' && !softReconnect) {
     phoneStarted = false;
   }
   pairPanel.hidden = state.kind !== 'needsPairing' || linkUi.active();
   linkPanel.hidden = !(state.kind === 'needsPairing' && linkUi.active());
   codePanel.hidden = state.kind !== 'needsCode';
   paintSplash(state);
+  if (softReconnect) {
+    splash.hidden = true;
+  }
+  reconnectBanner.hidden = !softReconnect;
+  reconnectText.textContent = messages.reconnectingSoft;
   pairSubmit.removeAttribute('aria-busy');
   codeSubmit.removeAttribute('aria-busy');
-  tabs.hidden = state.kind !== 'connected';
-  if (state.kind !== 'connected') {
+  tabs.hidden = !(state.kind === 'connected' || softReconnect);
+  if (state.kind !== 'connected' && !softReconnect) {
     closeMenu();
     document.body.classList.remove('immersive');
     immersiveExit.hidden = true;
   }
-  if (state.kind !== 'connected') {
+  if (state.kind !== 'connected' && !softReconnect) {
     capture.stop();
     toolsNotice.textContent = '';
   }
@@ -346,9 +358,11 @@ function show(state: ViewerState): void {
   homePanel.hidden = true;
   splashReserve.hidden = true;
   splashOther.hidden = true;
-  if (state.kind === 'connected' && namedPath !== undefined) {
+  if (state.kind === 'connected') {
     everConnected = true;
-    rememberName(namedPath);
+    if (namedPath !== undefined) {
+      rememberName(namedPath);
+    }
   }
   updateFoot();
   const canForget = state.kind !== 'loading' && state.kind !== 'needsPairing' && state.kind !== 'noAgent';
@@ -423,7 +437,11 @@ function show(state: ViewerState): void {
       break;
     case 'reconnecting':
       terminals.endAll();
-      files.reset();
+      if (softReconnect) {
+        files.suspend();
+      } else {
+        files.reset();
+      }
       clipboard.reset();
       audio.reset();
       status.textContent = messages.reconnecting(state.attempt);
@@ -497,6 +515,26 @@ viewer.clipboardListener = (message) => clipboard.receive(message);
 viewer.audioListener = (message) => audio.receive(message);
 
 let lastState: ViewerState = { kind: 'loading' };
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now();
+    return;
+  }
+  const away = hiddenAt === 0 ? 0 : Date.now() - hiddenAt;
+  hiddenAt = 0;
+  if (away > 8000) {
+    viewer.recycle();
+  } else {
+    viewer.retryNow();
+  }
+});
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) {
+    viewer.recycle();
+  }
+});
+window.addEventListener('online', () => viewer.retryNow());
 const linkUi = initLinkUi({
   messages,
   base: () => (typeof target === 'string' ? undefined : agentBase(target.socketUrl)),
@@ -521,7 +559,7 @@ let panel: Panel = phone ? 'files' : 'desktop';
 let phoneStarted = false;
 
 function showView(): void {
-  const connected = lastKind === 'connected';
+  const connected = lastKind === 'connected' || softReconnect;
   const onTerminal = terminals.activeStream() !== null;
   const shows = (wanted: Panel): boolean => connected && !onTerminal && panel === wanted;
   screen.hidden = !shows('desktop');

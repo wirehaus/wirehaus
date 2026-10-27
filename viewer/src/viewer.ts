@@ -121,6 +121,25 @@ export class Viewer {
     new ResizeObserver(() => this.fit()).observe(canvas.parentElement ?? canvas);
   }
 
+  recycle(): void {
+    if (this.phase !== 'streaming' || this.ticketValue === null || this.socket === null) {
+      this.retryNow();
+      return;
+    }
+    this.close();
+    if (!this.scheduleRetry()) {
+      this.report({ kind: 'refused', reason: 'failed', retryAfter: 0 });
+    }
+  }
+
+  retryNow(): void {
+    if (this.retryTimer !== undefined && this.retrying) {
+      window.clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+      void this.start();
+    }
+  }
+
   releaseHostKey(): void {
     this.hostKey.reset();
   }

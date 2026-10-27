@@ -16,7 +16,7 @@ You leave the home computer on with the Wirehaus agent and connect from anywhere
 - **Two factors you cannot skip.** A one-time pairing code and a TOTP verified by your own agent, not by someone else's server.
 - **Nothing open.** The agent listens only on `127.0.0.1` and goes out through a tunnel.
 - **One command to install it**, and one to remove it.
-- **Sensitive features off by default**: terminal, files, clipboard and audio are turned on by hand, on the computer itself.
+- **Everything on at install, and switchable off**: the installer turns on the files of your home folder, terminal, clipboard and audio; remove what you do not want with a local command.
 
 ## Install
 
@@ -66,7 +66,7 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 - A device paired with a one-time 160-bit code, plus a TOTP second factor verified by the agent. Neither is enough on its own.
 - Escalating lockout per device, suspension after ten failures and an access log with no secrets.
 - The key and the second factor secret can optionally live in the system secret store, outside the state file.
-- Terminal, files, clipboard and audio are off by default. Enabling them needs a second factor code on the computer itself.
+- The installer turns on terminal, files (your home folder), clipboard and audio; whoever connects still needs the pairing and the second factor. A bare `init` leaves them off; `wirehaus-agent allow-all --code 123456` turns them all on at once, and enabling a single one needs a second-factor code on the computer itself.
 - Automatic close on inactivity (30 minutes by default).
 - No `unsafe` in our own code, inputs validated before allocating memory and tests with hostile data on every channel.
 - The viewer is served from memory, verified against a manifest of SHA-256 hashes from a reproducible build.
