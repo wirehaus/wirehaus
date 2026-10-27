@@ -85,3 +85,20 @@ test('pieces for a line split multi-line tokens and cover the whole line', () =>
   assert.deepEqual(rebuilt, ['a /* x', 'y */ b', 'last']);
   assert.ok(piecesForLine(text, starts, tokens, 1).some((piece) => piece.text === 'y */' && piece.cls === 'com'));
 });
+
+test('hostile input cannot freeze the highlighter', () => {
+  const cases: [Parameters<typeof tokenize>[1], string][] = [
+    ['js', '=/['.repeat(60_000)],
+    ['shell', '${'.repeat(90_000)],
+    ['rust', 'r#"'.repeat(60_000)],
+    ['markdown', '['.repeat(190_000)],
+    ['markdown', '[a]('.repeat(40_000)],
+    ['c', '1a'.repeat(90_000)],
+    ['html', '<script></script>'.repeat(10_000)],
+  ];
+  for (const [language, text] of cases) {
+    const started = performance.now();
+    tokenize(text, language);
+    assert.ok(performance.now() - started < 1500, `${language} took ${Math.round(performance.now() - started)} ms`);
+  }
+});

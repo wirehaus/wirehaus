@@ -131,6 +131,7 @@ export type Messages = {
   localChoose: string;
   localReopen: (name: string) => string;
   localUpload: string;
+  localForget: string;
   localUnsupported: string;
   localNoFolder: string;
   filesDownloading: (name: string, percent: number) => string;
@@ -325,6 +326,7 @@ const catalog: Record<string, Messages> = {
     localChoose: 'Elegir carpeta',
     localReopen: (name) => `Reabrir «${name}»`,
     localUpload: 'Subir al remoto',
+    localForget: 'Olvidar la carpeta elegida',
     localUnsupported: 'Este navegador no puede explorar carpetas de tu equipo (hace falta Chrome, Edge u Opera). Puedes seguir usando «Subir archivos» y «Descargar».',
     localNoFolder: 'Elige una carpeta de este equipo para empezar a copiar archivos en los dos sentidos.',
     filesDownloading: (name, percent) => `Descargando ${name}: ${percent} %`,
@@ -540,6 +542,7 @@ const catalog: Record<string, Messages> = {
     localChoose: 'Choose folder',
     localReopen: (name) => `Reopen "${name}"`,
     localUpload: 'Upload to remote',
+    localForget: 'Forget the chosen folder',
     localUnsupported: 'This browser cannot browse folders on your computer (Chrome, Edge or Opera are needed). You can still use "Upload files" and "Download".',
     localNoFolder: 'Choose a folder on this computer to start copying files both ways.',
     filesDownloading: (name, percent) => `Downloading ${name}: ${percent} %`,

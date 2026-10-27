@@ -43,7 +43,10 @@ const LABELS: Record<Language, string> = {
 
 export const languageLabel = (language: Language): string => LABELS[language];
 
-export const MAX_HIGHLIGHT_CHARS = 400_000;
+export const MAX_HIGHLIGHT_CHARS = 200_000;
+const TIME_BUDGET_MS = 120;
+let deadline = Number.POSITIVE_INFINITY;
+const expired = (): boolean => performance.now() > deadline;
 
 const BY_EXTENSION: Record<string, Language> = {
   html: 'html', htm: 'html', xml: 'html', svg: 'html', vue: 'html', svelte: 'html', xhtml: 'html',
@@ -213,7 +216,12 @@ const NUMBER = rule(/(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.
 function scan(text: string, matchers: Matcher[], out: Out, from = 0, to = text.length): void {
   let pos = from;
   const limit = to;
+  let steps = 0;
   while (pos < limit) {
+    steps += 1;
+    if ((steps & 63) === 0 && expired()) {
+      return;
+    }
     let hit: { length: number; cls: string } | null = null;
     for (const matcher of matchers) {
       hit = matcher(text, pos);
@@ -452,12 +460,18 @@ function lexCss(text: string, out: Out, from = 0, to = text.length): void {
 function lexHtml(text: string, out: Out): void {
   const length = text.length;
   let pos = 0;
+  let lowered: string | null = null;
+  let guard = 0;
   const push = (from: number, to: number, cls: string): void => {
     if (to > from) out.push({ from, to, cls });
   };
   const name = /[A-Za-z][\w:.-]*/y;
   const attr = /[^\s=>/"'<]+/y;
   while (pos < length) {
+    guard += 1;
+    if ((guard & 63) === 0 && expired()) {
+      return;
+    }
     const open = text.indexOf('<', pos);
     const amp = text.indexOf('&', pos);
     const next = [open, amp].filter((index) => index >= 0).sort((a, b) => a - b)[0];
@@ -531,7 +545,8 @@ function lexHtml(text: string, out: Out): void {
     }
     const lower = tag[0].toLowerCase();
     if (!closing && (lower === 'script' || lower === 'style')) {
-      const end = text.toLowerCase().indexOf(`</${lower}`, pos);
+      lowered ??= text.toLowerCase();
+      const end = lowered.indexOf(`</${lower}`, pos);
       const stop = end < 0 ? length : end;
       if (lower === 'script') lexJs(text, out, pos, stop);
       else lexCss(text, out, pos, stop);
@@ -545,6 +560,7 @@ export function tokenize(text: string, language: Language): Token[] {
     return [];
   }
   const out: Out = [];
+  deadline = performance.now() + TIME_BUDGET_MS;
   switch (language) {
     case 'html': lexHtml(text, out); break;
     case 'css': lexCss(text, out); break;
@@ -562,6 +578,7 @@ export function tokenize(text: string, language: Language): Token[] {
     case 'toml': lexToml(text, out); break;
     case 'markdown': lexMarkdown(text, out); break;
   }
+  deadline = Number.POSITIVE_INFINITY;
   return out;
 }
 

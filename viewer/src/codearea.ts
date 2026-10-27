@@ -234,7 +234,7 @@ export class CodeArea {
   private keydown(event: KeyboardEvent): void {
     const area = this.textarea;
     const mod = event.ctrlKey || event.metaKey;
-    if (event.isComposing) {
+    if (event.isComposing || event.keyCode === 229) {
       return;
     }
     if (mod && event.key.toLowerCase() === 's') {

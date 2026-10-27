@@ -90,6 +90,7 @@ export class Viewer {
   private ticketValue: Uint8Array | null = null;
   private resumeSent = false;
   private resumeRetries = 0;
+  private videoRetries: number[] = [];
   private retrying = false;
   private retries = 0;
   private retryTimer: number | undefined;
@@ -252,7 +253,10 @@ export class Viewer {
     if (socket === null) {
       return;
     }
-    if (this.ticketValue !== null && this.phase === 'streaming') {
+    const now = Date.now();
+    this.videoRetries = this.videoRetries.filter((time) => now - time < 120_000);
+    if (this.ticketValue !== null && this.phase === 'streaming' && this.videoRetries.length < 3) {
+      this.videoRetries.push(now);
       this.close();
       if (!this.scheduleRetry()) {
         this.report({ kind: 'refused', reason: 'failed', retryAfter: 0 });

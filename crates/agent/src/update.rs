@@ -349,6 +349,16 @@ fn sha256_file(path: &Path) -> Result<String, UpdateError> {
     Ok(hex(&hasher.finalize()))
 }
 
+fn tar_program() -> PathBuf {
+    if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot")
+            .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+        root.join("System32").join("tar.exe")
+    } else {
+        PathBuf::from("tar")
+    }
+}
+
 pub fn stage(
     fetch: &dyn Fetch,
     base: &str,
@@ -366,7 +376,7 @@ pub fn stage(
     fs::File::create(&archive)?.write_all(&package)?;
     let extracted = staging.join("files");
     fs::create_dir_all(&extracted)?;
-    let status = Command::new("tar")
+    let status = Command::new(tar_program())
         .arg("-xf")
         .arg(&archive)
         .arg("-C")
@@ -397,7 +407,10 @@ pub fn stage(
     } else {
         "wirehaus-agent"
     };
-    if !root.join(binary).is_file() || !root.join("viewer").is_dir() {
+    if !root.join(binary).is_file()
+        || !root.join("viewer").is_dir()
+        || !root.join("viewer").join("manifest.sha256").is_file()
+    {
         return Err(UpdateError::Package("agent or viewer missing"));
     }
     Ok(root)
@@ -413,19 +426,26 @@ pub struct Layout {
 impl Layout {
     pub fn detect(state_dir: &Path) -> Result<Self, UpdateError> {
         let exe = std::env::current_exe()?;
-        let install_dir = exe.parent().ok_or(UpdateError::NotManaged)?.to_path_buf();
-        if !install_dir.join("viewer").is_dir() {
-            return Err(UpdateError::NotManaged);
-        }
+        let install_dir = exe.parent().ok_or(UpdateError::NotManaged)?;
         let exe_name = exe
             .file_name()
             .and_then(|name| name.to_str())
-            .ok_or(UpdateError::NotManaged)?
-            .to_owned();
+            .ok_or(UpdateError::NotManaged)?;
+        Self::detect_in(install_dir, state_dir, exe_name)
+    }
+
+    pub fn detect_in(
+        install_dir: &Path,
+        state_dir: &Path,
+        exe_name: &str,
+    ) -> Result<Self, UpdateError> {
+        if !install_dir.join("viewer").is_dir() && !install_dir.join("viewer.prev").is_dir() {
+            return Err(UpdateError::NotManaged);
+        }
         Ok(Self {
-            install_dir,
+            install_dir: install_dir.to_path_buf(),
             state_dir: state_dir.to_path_buf(),
-            exe_name,
+            exe_name: exe_name.to_owned(),
         })
     }
 
@@ -456,7 +476,45 @@ fn remove_any(path: &Path) {
     let _ = fs::remove_dir_all(path);
 }
 
+pub fn smoke_test(root: &Path, exe_name: &str, expected: Version) -> Result<(), UpdateError> {
+    let output = Command::new(root.join(exe_name))
+        .arg("info")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|_| UpdateError::Package("the new agent does not run"))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let reported = text
+        .strip_prefix("wirehaus-agent ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(Version::parse);
+    if output.status.success() && reported == Some(expected) {
+        Ok(())
+    } else {
+        Err(UpdateError::Package(
+            "the new agent reports another version",
+        ))
+    }
+}
+
+pub fn recover(layout: &Layout) {
+    if !layout.viewer().is_dir() && layout.viewer_prev().is_dir() {
+        let _ = fs::rename(layout.viewer_prev(), layout.viewer());
+    }
+}
+
 pub fn swap(layout: &Layout, root: &Path, from: Version, to: Version) -> Result<(), UpdateError> {
+    write_pending(&layout.state_dir, from, to, 0)?;
+    let outcome = swap_files(layout, root);
+    if outcome.is_err() {
+        mark_healthy(&layout.state_dir);
+    } else {
+        let _ = fs::remove_dir_all(layout.staging());
+    }
+    outcome
+}
+
+fn swap_files(layout: &Layout, root: &Path) -> Result<(), UpdateError> {
     let new_exe = layout.side("new");
     remove_any(&new_exe);
     fs::copy(root.join(&layout.exe_name), &new_exe)?;
@@ -477,17 +535,19 @@ pub fn swap(layout: &Layout, root: &Path, from: Version, to: Version) -> Result<
         return Err(error.into());
     }
     remove_any(&layout.side("prev"));
-    if let Err(error) = fs::rename(layout.exe(), layout.side("prev")) {
+    let kept = fs::hard_link(layout.exe(), layout.side("prev")).is_ok()
+        || fs::copy(layout.exe(), layout.side("prev")).is_ok();
+    if !kept {
         revert_viewer(layout);
-        return Err(error.into());
+        return Err(UpdateError::Package("could not keep the previous agent"));
     }
     if let Err(error) = fs::rename(&new_exe, layout.exe()) {
-        let _ = fs::rename(layout.side("prev"), layout.exe());
+        if !layout.exe().exists() {
+            let _ = fs::rename(layout.side("prev"), layout.exe());
+        }
         revert_viewer(layout);
         return Err(error.into());
     }
-    write_pending(&layout.state_dir, from, to, 0)?;
-    let _ = fs::remove_dir_all(layout.staging());
     Ok(())
 }
 
@@ -537,7 +597,8 @@ pub fn mark_healthy(state_dir: &Path) {
 }
 
 pub fn rollback(layout: &Layout) -> Result<Option<Version>, UpdateError> {
-    let failed = read_pending(&layout.state_dir).map(|pending| pending.to);
+    let failed =
+        read_pending(&layout.state_dir).map_or_else(Version::current, |pending| pending.to);
     if !layout.side("prev").is_file() {
         mark_healthy(&layout.state_dir);
         return Ok(None);
@@ -546,11 +607,9 @@ pub fn rollback(layout: &Layout) -> Result<Option<Version>, UpdateError> {
     fs::rename(layout.exe(), layout.side("bad"))?;
     fs::rename(layout.side("prev"), layout.exe())?;
     revert_viewer(layout);
-    if let Some(version) = failed {
-        fs::write(layout.state_dir.join(SKIP), version.to_string())?;
-    }
+    fs::write(layout.state_dir.join(SKIP), failed.to_string())?;
     mark_healthy(&layout.state_dir);
-    Ok(failed)
+    Ok(Some(failed))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -626,6 +685,7 @@ pub fn apply_now(
         return Ok(None);
     };
     let root = stage(fetch, base, &release, &layout.staging())?;
+    smoke_test(&root, &layout.exe_name, release.version)?;
     swap(layout, &root, current, release.version)?;
     Ok(Some(release.version))
 }
@@ -661,9 +721,20 @@ pub fn run_background(
                     eprintln!("update: version {} is available", release.version);
                     match stage(&fetch, &base, &release, &layout.staging()) {
                         Ok(root) => {
-                            wait_until_idle(is_busy, stop, &sleep);
-                            if stop.load(AtomicOrdering::Relaxed) {
-                                return;
+                            if let Err(error) = smoke_test(&root, &layout.exe_name, release.version)
+                            {
+                                eprintln!("update: {} was refused: {error}", release.version);
+                                sleep(interval);
+                                continue;
+                            }
+                            loop {
+                                wait_until_idle(is_busy, stop, &sleep);
+                                if stop.load(AtomicOrdering::Relaxed) {
+                                    return;
+                                }
+                                if !is_busy() {
+                                    break;
+                                }
                             }
                             match swap(layout, &root, Version::current(), release.version) {
                                 Ok(()) => {
@@ -936,6 +1007,70 @@ mod tests {
         assert_eq!(begin_probation(&layout).unwrap(), Probation::Started);
         mark_healthy(&layout.state_dir);
         assert_eq!(begin_probation(&layout).unwrap(), Probation::None);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_failed_swap_leaves_the_installation_and_no_probation_behind() {
+        let (base, layout) = layout("failswap");
+        let root = base.join("empty-pkg");
+        fs::create_dir_all(root.join("viewer")).unwrap();
+        assert!(swap(&layout, &root, Version(0, 3, 0), Version(0, 3, 1)).is_err());
+        assert_eq!(fs::read(layout.install_dir.join("agent")).unwrap(), b"old");
+        assert_eq!(
+            fs::read(layout.install_dir.join("viewer/index.html")).unwrap(),
+            b"old viewer"
+        );
+        assert_eq!(read_pending(&layout.state_dir), None);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_manual_rollback_discards_the_running_version_so_it_is_not_reinstalled() {
+        let (base, layout) = layout("manual");
+        let root = package(&base);
+        swap(&layout, &root, Version(0, 3, 0), Version(0, 3, 1)).unwrap();
+        mark_healthy(&layout.state_dir);
+        assert_eq!(rollback(&layout).unwrap(), Some(Version::current()));
+        assert_eq!(fs::read(layout.install_dir.join("agent")).unwrap(), b"old");
+        assert_eq!(skipped(&layout.state_dir), Some(Version::current()));
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_viewer_left_aside_by_an_interrupted_swap_is_put_back() {
+        let (base, layout) = layout("recover");
+        fs::rename(
+            layout.install_dir.join("viewer"),
+            layout.install_dir.join("viewer.prev"),
+        )
+        .unwrap();
+        assert!(Layout::detect_in(&layout.install_dir, &layout.state_dir, "agent").is_ok());
+        recover(&layout);
+        assert!(layout.install_dir.join("viewer/index.html").is_file());
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_smoke_test_refuses_binaries_that_do_not_run_or_report_another_version() {
+        use std::os::unix::fs::PermissionsExt;
+        let (base, _layout) = layout("smoke");
+        let dir = base.join("candidate");
+        fs::create_dir_all(&dir).unwrap();
+        let script = |body: &str| {
+            fs::write(dir.join("agent"), format!("#!/bin/sh\n{body}\n")).unwrap();
+            fs::set_permissions(dir.join("agent"), fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        script("echo 'wirehaus-agent 0.3.1 (protocol 1)'");
+        assert!(smoke_test(&dir, "agent", Version(0, 3, 1)).is_ok());
+        assert!(smoke_test(&dir, "agent", Version(0, 3, 2)).is_err());
+        script("exit 3");
+        assert!(smoke_test(&dir, "agent", Version(0, 3, 1)).is_err());
+        script("echo garbage");
+        assert!(smoke_test(&dir, "agent", Version(0, 3, 1)).is_err());
+        fs::write(dir.join("agent"), b"not a program").unwrap();
+        assert!(smoke_test(&dir, "agent", Version(0, 3, 1)).is_err());
         let _ = fs::remove_dir_all(base);
     }
 

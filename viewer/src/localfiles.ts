@@ -4,14 +4,15 @@ import type { Sink } from './files.js';
 import type { Messages } from './strings.js';
 
 export type RemoteBridge = {
+  root(): number;
   dir(): string[];
   names(): string[];
   selection(): FileEntry[];
   draggedNames(): string[] | null;
-  list(dir: string[]): Promise<FileEntry[] | null>;
-  upload(dir: string[], blob: Blob, name: string): Promise<boolean>;
-  mkdir(dir: string[], name: string): Promise<boolean>;
-  download(dir: string[], entry: FileEntry, sink: Sink): Promise<boolean>;
+  list(root: number, dir: string[]): Promise<FileEntry[] | null>;
+  upload(root: number, dir: string[], blob: Blob, name: string): Promise<boolean>;
+  mkdir(root: number, dir: string[], name: string): Promise<boolean>;
+  download(root: number, dir: string[], entry: FileEntry, sink: Sink): Promise<boolean>;
   refresh(): Promise<boolean>;
   say(text: string): void;
   confirm(message: string, okLabel: string, danger: boolean): Promise<boolean>;
@@ -127,6 +128,7 @@ export class LocalPane {
   private pending: FileSystemDirectoryHandle | null = null;
   private entries: LocalEntry[] = [];
   private notice = '';
+  private loadToken = 0;
 
   constructor(
     host: HTMLElement,
@@ -138,7 +140,8 @@ export class LocalPane {
     this.buttons['choose'] = this.tool('i-folder', texts.localChoose, () => void this.choose(), true);
     this.buttons['up'] = this.tool('i-up', texts.filesUp, () => void this.up());
     this.buttons['refresh'] = this.tool('i-refresh', texts.filesRefresh, () => void this.load());
-    bar.append(this.buttons['choose'], this.buttons['up'], this.buttons['refresh'], this.crumbs);
+    this.buttons['forget'] = this.tool('i-close', texts.localForget, () => void this.forget());
+    bar.append(this.buttons['choose'], this.buttons['up'], this.buttons['refresh'], this.crumbs, this.buttons['forget']);
     const actions = node('div', 'fm-actions');
     this.buttons['send'] = this.tool('i-upload', texts.localUpload, () => void this.sendToRemote(), true);
     this.buttons['send'].classList.add('primary');
@@ -175,12 +178,14 @@ export class LocalPane {
       return;
     }
     this.busy = true;
+    const root = this.remote.root();
+    const from = this.remote.dir();
     try {
       const taken = new Set(this.entries.map((entry) => entry.name));
       for (const entry of entries) {
         const name = uniqueName(taken, entry.name);
         taken.add(name);
-        if (!(await this.downloadEntry(dir, entry, name, this.remote.dir()))) {
+        if (!(await this.downloadEntry(dir, entry, name, from, root))) {
           break;
         }
       }
@@ -255,6 +260,17 @@ export class LocalPane {
     await this.load();
   }
 
+  private async forget(): Promise<void> {
+    await rememberHandle(null);
+    this.trail = [];
+    this.pending = null;
+    this.entries = [];
+    this.byName.clear();
+    this.selected.clear();
+    this.loadToken += 1;
+    this.render();
+  }
+
   private async up(): Promise<void> {
     if (this.trail.length > 1) {
       this.trail.pop();
@@ -271,6 +287,7 @@ export class LocalPane {
   }
 
   private async load(): Promise<void> {
+    const token = (this.loadToken += 1);
     const dir = this.current();
     this.selected.clear();
     this.byName.clear();
@@ -295,6 +312,9 @@ export class LocalPane {
     } catch {
       this.say(this.texts.filesFailure.io);
     }
+    if (token !== this.loadToken) {
+      return;
+    }
     const order = new Map(found.map((entry) => [entry.name, entry]));
     this.entries = sortEntries(found, 'name', false).flatMap((entry) => {
       const full = order.get(entry.name);
@@ -310,6 +330,7 @@ export class LocalPane {
     const ready = this.current() !== null;
     this.buttons['up']!.disabled = this.trail.length <= 1;
     this.buttons['refresh']!.disabled = !ready;
+    this.buttons['forget']!.disabled = !ready && this.pending === null;
     this.buttons['newFolder']!.disabled = !ready;
     this.buttons['send']!.disabled = !ready || this.selected.size === 0;
     this.buttons['remove']!.disabled = !ready || this.selected.size === 0;
@@ -506,13 +527,14 @@ export class LocalPane {
       const entry = this.byName.get(name);
       return entry === undefined ? [] : [entry];
     });
+    const root = this.remote.root();
     try {
       const taken = new Set(this.remote.names());
       const target = this.remote.dir();
       for (const entry of picked) {
         const name = uniqueName(taken, entry.name);
         taken.add(name);
-        if (!(await this.uploadEntry(entry, target, name))) {
+        if (!(await this.uploadEntry(entry, target, name, root))) {
           break;
         }
       }
@@ -522,12 +544,12 @@ export class LocalPane {
     await this.remote.refresh();
   }
 
-  private async uploadEntry(entry: LocalEntry, dir: string[], name: string): Promise<boolean> {
+  private async uploadEntry(entry: LocalEntry, dir: string[], name: string, root: number): Promise<boolean> {
     if (entry.kind === 'file') {
       const file = await (entry.handle as FileSystemFileHandle).getFile().catch(() => null);
-      return file !== null && (await this.remote.upload(dir, file, name));
+      return file !== null && (await this.remote.upload(root, dir, file, name));
     }
-    if (!(await this.remote.mkdir(dir, name))) {
+    if (!(await this.remote.mkdir(root, dir, name))) {
       return false;
     }
     const child = entry.handle as FileSystemDirectoryHandle;
@@ -536,23 +558,46 @@ export class LocalPane {
         handle.kind === 'directory'
           ? { name: childName, kind: 'directory', size: 0, modified: 0, handle }
           : { name: childName, kind: 'file', size: 0, modified: 0, handle };
-      if (!(await this.uploadEntry(next, [...dir, name], childName))) {
+      if (!(await this.uploadEntry(next, [...dir, name], childName, root))) {
         return false;
       }
     }
     return true;
   }
 
-  private async downloadEntry(into: FileSystemDirectoryHandle, entry: FileEntry, name: string, from: string[]): Promise<boolean> {
+  private async freshName(into: FileSystemDirectoryHandle, base: string): Promise<string> {
+    const dot = base.lastIndexOf('.');
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext = dot > 0 ? base.slice(dot) : '';
+    for (let n = 1; n < 10_000; n += 1) {
+      const candidate = n === 1 ? base : `${stem} ${n}${ext}`;
+      const taken =
+        (await into.getFileHandle(candidate).then(() => true, () => false)) ||
+        (await into.getDirectoryHandle(candidate).then(() => true, () => false));
+      if (!taken) {
+        return candidate;
+      }
+    }
+    return `${stem}-${Date.now()}${ext}`;
+  }
+
+  private async downloadEntry(
+    into: FileSystemDirectoryHandle,
+    entry: FileEntry,
+    wanted: string,
+    from: string[],
+    root: number,
+  ): Promise<boolean> {
+    const name = await this.freshName(into, wanted);
     if (entry.kind === 'directory') {
       const folder = await into.getDirectoryHandle(name, { create: true }).catch(() => null);
-      const children = await this.remote.list([...from, entry.name]);
+      const children = await this.remote.list(root, [...from, entry.name]);
       if (folder === null || children === null) {
         return false;
       }
       for (const child of children) {
         if (child.kind === 'other') continue;
-        if (!(await this.downloadEntry(folder, child, child.name, [...from, entry.name]))) {
+        if (!(await this.downloadEntry(folder, child, child.name, [...from, entry.name], root))) {
           return false;
         }
       }
@@ -561,10 +606,9 @@ export class LocalPane {
     if (entry.kind !== 'file') {
       return true;
     }
-    let handle: FileSystemFileHandle;
     let writable: FileSystemWritableFileStream;
     try {
-      handle = await into.getFileHandle(name, { create: true });
+      const handle = await into.getFileHandle(name, { create: true });
       writable = await handle.createWritable();
     } catch {
       this.remote.say(`${name}: ${this.texts.filesFailure.io}`);
@@ -575,7 +619,7 @@ export class LocalPane {
       close: () => writable.close(),
       abort: () => writable.abort().then(() => into.removeEntry(name).catch(() => undefined)),
     };
-    return this.remote.download(from, entry, sink);
+    return this.remote.download(root, from, entry, sink);
   }
 }
 

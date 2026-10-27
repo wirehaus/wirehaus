@@ -566,14 +566,15 @@ export class FilesPanel {
 
   private bridge(): RemoteBridge {
     return {
+      root: () => this.root,
       dir: () => [...this.path],
       names: () => [...this.entryByName.keys()],
       selection: () => this.selectedEntries(),
       draggedNames: () => this.dragging?.names ?? null,
-      list: async (dir) => (await this.listDir(this.root, dir))?.entries ?? null,
-      upload: (dir, blob, name) => this.upload(blob, joinPath(dir, name), name),
-      mkdir: (dir, name) => this.must(encodeMkdir(this.root, joinPath(dir, name))),
-      download: (dir, entry, sink) => this.fetchToSink(joinPath(dir, entry.name), entry.name, entry.size, sink),
+      list: async (root, dir) => (await this.listDir(root, dir))?.entries ?? null,
+      upload: (root, dir, blob, name) => this.upload(blob, joinPath(dir, name), name, false, root),
+      mkdir: (root, dir, name) => this.must(encodeMkdir(root, joinPath(dir, name))),
+      download: (root, dir, entry, sink) => this.fetchToSink(joinPath(dir, entry.name), entry.name, entry.size, sink, root),
       refresh: () => this.refresh(),
       say: (text) => this.say(text),
       confirm: (message, ok, danger) => this.confirm(message, ok, danger),
@@ -1332,9 +1333,10 @@ export class FilesPanel {
   private downloadSelected(): void {
     const files = this.selectedEntries().filter((entry) => entry.kind === 'file');
     const path = [...this.path];
+    const root = this.root;
     void (async () => {
       for (const entry of files) {
-        await this.saveToDisk(joinPath(path, entry.name), entry);
+        await this.saveToDisk(joinPath(path, entry.name), entry, root);
       }
     })();
   }
@@ -1628,19 +1630,19 @@ export class FilesPanel {
     return false;
   }
 
-  private async saveToDisk(path: string, entry: FileEntry): Promise<void> {
+  private async saveToDisk(path: string, entry: FileEntry, root = this.root): Promise<void> {
     if (entry.size > MAX_MEMORY_DOWNLOAD) {
       this.say(this.texts.filesTooBig(entry.name));
       return;
     }
-    const parts = await this.fetch(path, entry.name, entry.size);
+    const parts = await this.fetch(path, entry.name, entry.size, root);
     if (parts !== null) {
       saveBlob(new Blob(parts as BlobPart[]), entry.name);
       this.say(this.texts.filesFinished(entry.name));
     }
   }
 
-  private fetch(path: string, name: string, size: number): Promise<Uint8Array[] | null> {
+  private fetch(path: string, name: string, size: number, root = this.root): Promise<Uint8Array[] | null> {
     const stream = this.next;
     this.next += 1;
     return new Promise((resolve) => {
@@ -1659,12 +1661,12 @@ export class FilesPanel {
         settle: (ok) => resolve(ok ? transfer.parts : null),
       };
       this.transfers.set(stream, transfer);
-      this.io.send(stream, encodeDownload(this.root, path));
+      this.io.send(stream, encodeDownload(root, path));
       this.renderProgress();
     });
   }
 
-  private fetchToSink(path: string, name: string, size: number, sink: Sink): Promise<boolean> {
+  private fetchToSink(path: string, name: string, size: number, sink: Sink, root = this.root): Promise<boolean> {
     const stream = this.next;
     this.next += 1;
     return new Promise((resolve) => {
@@ -1683,12 +1685,12 @@ export class FilesPanel {
         settle: (ok) => resolve(ok),
       };
       this.transfers.set(stream, transfer);
-      this.io.send(stream, encodeDownload(this.root, path));
+      this.io.send(stream, encodeDownload(root, path));
       this.renderProgress();
     });
   }
 
-  private upload(source: Blob, path: string, name: string, quiet = false): Promise<boolean> {
+  private upload(source: Blob, path: string, name: string, quiet = false, root = this.root): Promise<boolean> {
     const stream = this.next;
     this.next += 1;
     return new Promise((resolve) => {
@@ -1711,7 +1713,7 @@ export class FilesPanel {
           resolve(ok);
         },
       });
-      this.io.send(stream, encodeUpload(this.root, path, source.size));
+      this.io.send(stream, encodeUpload(root, path, source.size));
       this.renderProgress();
     });
   }

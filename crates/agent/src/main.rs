@@ -212,6 +212,19 @@ fn serve(
     options: ServeOptions,
     out: &mut impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let layout = if options.auto_update {
+        wirehaus_agent::update::Layout::detect(dir).ok()
+    } else {
+        None
+    };
+    if let Some(layout) = &layout {
+        wirehaus_agent::update::recover(layout);
+        if let wirehaus_agent::update::Probation::RolledBack(version) =
+            wirehaus_agent::update::begin_probation(layout)?
+        {
+            return Err(format!("version {version} did not start and was rolled back").into());
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         let screen = wirehaus_capture::screen_capture_allowed()
@@ -238,20 +251,6 @@ fn serve(
     })?;
     println!("listening on http://{}", server.local_addr()?);
     let stop = AtomicBool::new(false);
-    let layout = if options.auto_update {
-        wirehaus_agent::update::Layout::detect(dir).ok()
-    } else {
-        None
-    };
-    if let Some(layout) = &layout {
-        match wirehaus_agent::update::begin_probation(layout)? {
-            wirehaus_agent::update::Probation::RolledBack(version) => {
-                return Err(format!("version {version} did not start and was rolled back").into());
-            }
-            wirehaus_agent::update::Probation::Started
-            | wirehaus_agent::update::Probation::None => {}
-        }
-    }
     std::thread::scope(|scope| {
         if let Some(layout) = &layout {
             let server = &server;
