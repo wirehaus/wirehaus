@@ -2,69 +2,190 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="wirehaus-agent-address" content="own" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0d1117" />
     <title>Wirehaus</title>
-    <link rel="icon" href="data:," />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%232f81f7'/%3E%3Cpath d='M14.67 26.38 L22.14 44.08 Q23.5 47.3 24.86 44.07 L30.84 29.87 Q32 27.1 33.16 29.87 L39.14 44.07 Q40.5 47.3 41.86 44.08 L49.33 26.38' fill='none' stroke='%23fff' stroke-width='6.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='12.1' cy='20.3' r='5.2' fill='none' stroke='%23fff' stroke-width='3.4'/%3E%3Ccircle cx='51.9' cy='20.3' r='5.2' fill='none' stroke='%23fff' stroke-width='3.4'/%3E%3C/svg%3E"
+    />
     <link rel="stylesheet" href="/xterm.css" />
     <link rel="stylesheet" href="/style.css" />
     <script type="module" src="/main.js"></script>
   </head>
-  <body>
-    <header>
-      <span class="brand">Wirehaus</span>
-      <span id="agent" hidden></span>
-      <span id="status" role="status"></span>
+  <body data-state="loading">
+    <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+      <symbol id="i-mark" viewBox="0 0 64 64">
+        <path
+          d="M14.24 25.37 L22.14 44.08 Q23.5 47.3 24.86 44.07 L30.84 29.87 Q32 27.1 33.16 29.87 L39.14 44.07 Q40.5 47.3 41.86 44.08 L49.76 25.37"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <circle cx="12.1" cy="20.3" r="4.4" fill="none" stroke="currentColor" stroke-width="2.8" />
+        <circle cx="51.9" cy="20.3" r="4.4" fill="none" stroke="currentColor" stroke-width="2.8" />
+      </symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5" /><path d="M12 16.5h.01" /></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6" /><path d="M20 5v6h-6" /></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" /><circle cx="12" cy="13" r="3.5" /></symbol>
+      <symbol id="i-record" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></symbol>
+      <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 10v4h3.5L12 18V6l-4.5 4z" /><path d="M15.5 9a4 4 0 0 1 0 6" /><path d="M18 6.5a8 8 0 0 1 0 11" /></symbol>
+      <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5" /><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7 14h10" /></symbol>
+      <symbol id="i-dots" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01" /></symbol>
+      <symbol id="i-desktop" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M9 20h6M12 16v4" /></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></symbol>
+      <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4.5" width="14" height="16.5" rx="2" /><path d="M9 4.5V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v.5M9 11h6M9 15h4" /></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2" /><path d="M7 10l3 2.5L7 15M12.5 15H17" /></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" /></symbol>
+      <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6" /></symbol>
+      <symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6" /></symbol>
+      <symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
+      <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></symbol>
+      <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /></symbol>
+      <symbol id="i-fit" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2" /><path d="M9 12h6" /></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 13h8l1-13" /></symbol>
+    </svg>
+
+    <header id="top">
+      <a class="brand" href="https://wirehaus.dev" rel="noopener" aria-label="Wirehaus">
+        <svg class="mark" aria-hidden="true"><use href="#i-mark" /></svg>
+        <span class="wordmark">Wirehaus</span>
+      </a>
+      <span id="agent" class="chip" hidden></span>
+      <span class="state"><span id="dot" class="dot" aria-hidden="true"></span><span id="status" role="status"></span></span>
       <span id="tools-notice" role="status"></span>
-      <span id="tools" hidden>
-        <button id="shot" type="button"></button>
-        <button id="record" type="button"></button>
-        <button id="listen" type="button"></button>
+      <span id="tools" class="tools" hidden>
+        <button id="shot" type="button" class="tool"></button>
+        <button id="record" type="button" class="tool"></button>
+        <button id="listen" type="button" class="tool"></button>
       </span>
-      <button id="forget" type="button" hidden></button>
-      <button id="reconnect" type="button" hidden></button>
-    </header>
-    <nav id="tabs" aria-label="Tabs" hidden></nav>
-    <main>
-      <section id="pair" class="panel" hidden>
-        <form id="pair-form" autocomplete="off">
-          <h1 id="pair-title"></h1>
-          <p id="pair-intro"></p>
-          <label>
-            <span id="pair-code-label"></span>
-            <input id="pair-code" name="code" required autocomplete="off" spellcheck="false" />
+      <button id="reconnect" type="button" class="primary small" hidden></button>
+      <div class="menu-wrap">
+        <button id="menu-button" type="button" class="icon" aria-haspopup="true" aria-expanded="false" hidden>
+          <svg aria-hidden="true"><use href="#i-dots" /></svg>
+        </button>
+        <div id="menu" class="menu" hidden>
+          <label class="menu-field">
+            <span id="layout-label"></span>
+            <select id="layout">
+              <option value="es">Español</option>
+              <option value="us">English (US)</option>
+            </select>
           </label>
-          <label>
+          <button id="immersive" type="button" class="menu-item"></button>
+          <button id="forget" type="button" class="menu-item danger"></button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="pair" class="stage" hidden>
+        <form id="pair-form" class="card" autocomplete="off">
+          <div class="card-head">
+            <svg class="logo" aria-hidden="true"><use href="#i-mark" /></svg>
+            <ol class="steps" aria-hidden="true">
+              <li class="on" id="step-pair"><span>1</span><em id="step-pair-label"></em></li>
+              <li id="step-verify"><span>2</span><em id="step-verify-label"></em></li>
+            </ol>
+          </div>
+          <h1 id="pair-title"></h1>
+          <p id="pair-intro" class="lead"></p>
+          <label class="field">
+            <span id="pair-code-label"></span>
+            <input id="pair-code" name="code" class="mono" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="next" />
+          </label>
+          <p id="pair-hint" class="hint"></p>
+          <label class="field">
             <span id="pair-name-label"></span>
-            <input id="pair-name" name="name" required maxlength="64" autocomplete="off" />
+            <input id="pair-name" name="name" required maxlength="64" autocomplete="off" enterkeyhint="go" />
           </label>
           <p id="pair-error" class="error" role="alert"></p>
-          <button id="pair-submit" type="submit"></button>
+          <button id="pair-submit" type="submit" class="primary"></button>
+          <p class="secure"><svg aria-hidden="true"><use href="#i-lock" /></svg><span id="secure-pair"></span></p>
         </form>
       </section>
-      <section id="code" class="panel" hidden>
-        <form id="code-form" autocomplete="off">
+
+      <section id="code" class="stage" hidden>
+        <form id="code-form" class="card" autocomplete="off">
+          <div class="card-head">
+            <svg class="logo" aria-hidden="true"><use href="#i-mark" /></svg>
+            <ol class="steps" aria-hidden="true">
+              <li class="done" id="step-pair-done"><span>1</span><em id="step-pair-done-label"></em></li>
+              <li class="on"><span>2</span><em id="step-verify-on-label"></em></li>
+            </ol>
+          </div>
           <h1 id="code-title"></h1>
-          <label>
+          <p id="code-hint" class="lead"></p>
+          <label class="field">
             <span id="code-label"></span>
             <input
               id="code-input"
               name="otp"
+              class="otp"
               inputmode="numeric"
               pattern="[0-9]{6}"
               maxlength="6"
               autocomplete="one-time-code"
+              enterkeyhint="go"
+              placeholder="000000"
               required
             />
           </label>
           <p id="code-error" class="error" role="alert"></p>
-          <button id="code-submit" type="submit"></button>
+          <button id="code-submit" type="submit" class="primary"></button>
+          <p class="secure"><svg aria-hidden="true"><use href="#i-lock" /></svg><span id="secure-code"></span></p>
         </form>
       </section>
-      <canvas id="screen" tabindex="0" hidden></canvas>
+
+      <section id="splash" class="stage" hidden>
+        <div class="card splash">
+          <div id="splash-spinner" class="spinner" aria-hidden="true"></div>
+          <svg id="splash-icon" class="splash-icon" aria-hidden="true" hidden><use href="#i-alert" /></svg>
+          <h1 id="splash-title"></h1>
+          <p id="splash-detail" class="lead"></p>
+          <div class="splash-actions">
+            <button id="splash-reconnect" type="button" class="primary" hidden></button>
+            <button id="splash-forget" type="button" class="ghost" hidden></button>
+          </div>
+        </div>
+      </section>
+
+      <div id="screen-area" class="screen-area" hidden>
+        <canvas id="screen" tabindex="0" hidden></canvas>
+        <button type="button" id="zoom-reset" class="overlay" hidden aria-label="Fit"><svg aria-hidden="true"><use href="#i-fit" /></svg></button>
+      </div>
       <div id="terminals" hidden></div>
       <div id="files" hidden></div>
       <div id="clipboard" hidden></div>
     </main>
+
+    <div id="keys" class="keys" hidden>
+      <button type="button" id="keyboard" class="accent"><svg aria-hidden="true"><use href="#i-keyboard" /></svg><span id="keyboard-label"></span></button>
+      <div class="keys-row">
+        <button type="button" data-key="Escape">Esc</button>
+        <button type="button" data-key="Tab">Tab</button>
+        <button type="button" data-mod="Control" aria-pressed="false">Ctrl</button>
+        <button type="button" data-mod="Alt" aria-pressed="false">Alt</button>
+        <button type="button" data-mod="Shift" aria-pressed="false">Shift</button>
+        <button type="button" data-mod="Meta" aria-pressed="false">Win</button>
+        <button type="button" data-key="ArrowLeft" class="sq" aria-label="Left"><svg aria-hidden="true"><use href="#i-left" /></svg></button>
+        <button type="button" data-key="ArrowUp" class="sq" aria-label="Up"><svg aria-hidden="true"><use href="#i-up" /></svg></button>
+        <button type="button" data-key="ArrowDown" class="sq" aria-label="Down"><svg aria-hidden="true"><use href="#i-down" /></svg></button>
+        <button type="button" data-key="ArrowRight" class="sq" aria-label="Right"><svg aria-hidden="true"><use href="#i-right" /></svg></button>
+        <button type="button" data-key="PageUp">PgUp</button>
+        <button type="button" data-key="PageDown">PgDn</button>
+        <button type="button" data-key="Delete">Supr</button>
+      </div>
+    </div>
+    <textarea id="softkeys" class="softkeys" aria-label="Keyboard" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" tabindex="-1"></textarea>
+    <nav id="tabs" aria-label="Tabs" hidden></nav>
+    <button id="immersive-exit" type="button" class="floating icon" hidden><svg aria-hidden="true"><use href="#i-collapse" /></svg></button>
   </body>
 </html>

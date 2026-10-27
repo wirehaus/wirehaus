@@ -3,6 +3,25 @@ import type { ClipboardFailure } from './clipboardprotocol.js';
 import type { FileFailure } from './filesprotocol.js';
 
 export type Messages = {
+  stepPair: string;
+  connectedBasic: string;
+  stepVerify: string;
+  pairHint: string;
+  codeHint: string;
+  secureNote: string;
+  problemTitle: string;
+  endedTitle: string;
+  reconnectingTitle: string;
+  loadingDetail: string;
+  connectingDetail: string;
+  keyboard: string;
+  immersiveOn: string;
+  immersiveOff: string;
+  layoutLabel: string;
+  menu: string;
+  typeUnsupported: string;
+  zoomReset: string;
+  touchTip: string;
   loading: string;
   connecting: string;
   connected: (width: number, height: number) => string;
@@ -92,6 +111,25 @@ export type Messages = {
 
 const catalog: Record<string, Messages> = {
   es: {
+    stepPair: 'Emparejar',
+    connectedBasic: 'Conectado',
+    stepVerify: 'Verificar',
+    pairHint: 'El código sale al ejecutar «wirehaus-agent pairing» en tu ordenador y caduca a los 10 minutos.',
+    codeHint: 'Abre tu aplicación de autenticación y escribe el código de seis dígitos que muestra.',
+    secureNote: 'Cifrado de extremo a extremo. El túnel solo ve datos cifrados.',
+    problemTitle: 'No se puede conectar',
+    endedTitle: 'Sesión terminada',
+    reconnectingTitle: 'Reconectando',
+    loadingDetail: 'Preparando el cifrado en tu navegador.',
+    connectingDetail: 'Estableciendo una conexión cifrada con tu ordenador.',
+    keyboard: 'Teclado',
+    immersiveOn: 'Pantalla completa',
+    immersiveOff: 'Salir de pantalla completa',
+    layoutLabel: 'Teclado del ordenador remoto',
+    menu: 'Menú',
+    typeUnsupported: 'Ese carácter no se puede escribir con el teclado táctil. Usa la pestaña Portapapeles.',
+    zoomReset: 'Ajustar a la pantalla',
+    touchTip: 'Toca para hacer clic, mantén pulsado para arrastrar, dos dedos para desplazarte o ampliar.',
     loading: 'Cargando',
     connecting: 'Conectando',
     connected: (width, height) => `Conectado, ${width}x${height}`,
@@ -206,6 +244,25 @@ const catalog: Record<string, Messages> = {
     },
   },
   en: {
+    stepPair: 'Pair',
+    connectedBasic: 'Connected',
+    stepVerify: 'Verify',
+    pairHint: 'The code appears when you run "wirehaus-agent pairing" on your computer and expires after 10 minutes.',
+    codeHint: 'Open your authenticator app and enter the six-digit code it shows.',
+    secureNote: 'End-to-end encrypted. The tunnel only sees encrypted data.',
+    problemTitle: 'Cannot connect',
+    endedTitle: 'Session ended',
+    reconnectingTitle: 'Reconnecting',
+    loadingDetail: 'Preparing encryption in your browser.',
+    connectingDetail: 'Setting up an encrypted connection to your computer.',
+    keyboard: 'Keyboard',
+    immersiveOn: 'Full screen',
+    immersiveOff: 'Leave full screen',
+    layoutLabel: 'Remote computer keyboard',
+    menu: 'Menu',
+    typeUnsupported: 'That character cannot be typed with the touch keyboard. Use the Clipboard tab.',
+    zoomReset: 'Fit to screen',
+    touchTip: 'Tap to click, press and hold to drag, use two fingers to scroll or zoom.',
     loading: 'Loading',
     connecting: 'Connecting',
     connected: (width, height) => `Connected, ${width}x${height}`,

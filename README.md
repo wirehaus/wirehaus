@@ -57,6 +57,7 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 | Portapapeles de texto | Funciona. Permiso aparte para cada sentido |
 | Capturas y grabación | Funciona. Se hacen en el navegador |
 | Audio del ordenador | Funciona en Linux (PulseAudio o PipeWire), Windows y macOS 14.6 o superior. Apagado hasta que lo activas |
+| Visor en el móvil | Archivos y terminal (sin escritorio, casi sin datos). En tabletas, escritorio táctil con teclado en pantalla |
 | Instalación en un solo comando y servicio de registro (`wirehaus.dev`) | Funciona |
 
 ## Seguridad

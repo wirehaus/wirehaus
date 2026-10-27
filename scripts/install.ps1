@@ -32,7 +32,6 @@ function Remove-Tunnel {
 }
 
 function Install-Tunnel {
-    Remove-Tunnel
     $url = "https://github.com/cloudflare/cloudflared/releases/download/$cloudflaredVersion/cloudflared-windows-amd64.exe"
     $download = Join-Path ([IO.Path]::GetTempPath()) "cloudflared-$([guid]::NewGuid()).exe"
     $ProgressPreference = 'SilentlyContinue'
@@ -41,6 +40,7 @@ function Install-Tunnel {
         Remove-Item -Force $download
         throw 'cloudflared-windows-amd64.exe does not match the expected checksum.'
     }
+    Remove-Tunnel
     Move-Item -Force $download $cloudflared
     New-Item -ItemType Directory -Force $dataDir | Out-Null
     (Get-Content -Raw $TunnelTokenFile).Trim() | Set-Content -NoNewline -Encoding ascii $tunnelToken
@@ -65,7 +65,7 @@ function Test-Package {
     if (-not (Test-Path $sums)) {
         throw 'SHA256SUMS is missing from the package.'
     }
-    foreach ($line in Get-Content $sums) {
+    foreach ($line in Get-Content $sums | Where-Object { $_.Trim() }) {
         $hash, $name = $line -split '\s+', 2
         $path = Join-Path $source ($name.Trim() -replace '/', '\')
         if (-not (Test-Path $path)) {

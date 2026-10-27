@@ -4,6 +4,18 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ## [Sin publicar]
 
+## [0.2.1] - 2026-10-27
+
+### Añadido
+
+- Visor rediseñado: pantallas de emparejamiento, segundo factor y estado con tema claro y oscuro, pasos, envío automático de los seis dígitos y mensajes de error con detalle; menú de cuenta, iconos y barra de pestañas.
+- Versión móvil: en teléfonos el visor ofrece solo Archivos (descarga y subida) y Terminal, sin escritorio remoto, y no decodifica ni confirma fotogramas para gastar casi nada de datos. En tabletas y pantallas táctiles el escritorio admite toque para hacer clic, pulsación larga para arrastrar, dos dedos para clic derecho, desplazamiento y zoom, y un teclado táctil con barra de teclas (Esc, Tab, Ctrl, Alt, Shift, flechas) y distribución española o inglesa. La barra de teclas sirve también al terminal.
+- Los estilos que inyecta xterm se aplican con una hoja construida por código, de modo que el terminal se ve bien bajo la política de contenido estricta del origen.
+
+### Corregido
+
+- Los instaladores descargan y verifican `cloudflared` antes de quitar el túnel que ya funcionaba, activan `linger` en Linux para que el túnel arranque con el equipo, aceptan líneas en blanco en `SHA256SUMS` y descargan solo por HTTPS.
+
 ## [0.2.0] - 2026-10-27
 
 ### Añadido

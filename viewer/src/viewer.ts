@@ -58,6 +58,7 @@ const BUTTONS: Record<number, MouseButton> = { 0: 'left', 1: 'middle', 2: 'right
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 const PIXELS_PER_NOTCH = 100;
 const MAX_NOTCHES = 10;
+const MAX_ZOOM = 5;
 
 export class Viewer {
   private readonly context: CanvasRenderingContext2D;
@@ -74,6 +75,11 @@ export class Viewer {
   private readonly altGr = new AltGrFilter();
   private readonly pressedButtons = new Set<MouseButton>();
   private pendingMove: { x: number; y: number } | null = null;
+  private zoom = 1;
+  private panX = 0;
+  private panY = 0;
+  zoomListener: ((zoomed: boolean) => void) | null = null;
+  desktopEnabled = true;
   private ticket: Uint8Array | null = null;
   private resumeSent = false;
   private retrying = false;
@@ -215,7 +221,7 @@ export class Viewer {
   }
 
   private async announceCapabilities(): Promise<void> {
-    this.send(DESKTOP_CHANNEL, encodeCapabilities(await videoSupported()));
+    this.send(DESKTOP_CHANNEL, encodeCapabilities(this.desktopEnabled && (await videoSupported())));
   }
 
   private closed(socket: WebSocket): void {
@@ -394,7 +400,12 @@ export class Viewer {
       this.canvas.height = message.height;
       this.fit();
       this.report({ kind: 'connected', width: message.width, height: message.height });
-      this.canvas.focus();
+      if (this.desktopEnabled) {
+        this.canvas.focus();
+      }
+      return;
+    }
+    if (!this.desktopEnabled) {
       return;
     }
     if (message.kind === 'video') {
@@ -433,8 +444,89 @@ export class Viewer {
       return;
     }
     const scale = Math.min(area.clientWidth / this.canvas.width, area.clientHeight / this.canvas.height);
-    this.canvas.style.width = `${Math.floor(this.canvas.width * scale)}px`;
-    this.canvas.style.height = `${Math.floor(this.canvas.height * scale)}px`;
+    const width = Math.floor(this.canvas.width * scale * this.zoom);
+    const height = Math.floor(this.canvas.height * scale * this.zoom);
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+    const limitX = Math.max(0, (width - area.clientWidth) / 2);
+    const limitY = Math.max(0, (height - area.clientHeight) / 2);
+    this.panX = Math.min(Math.max(this.panX, -limitX), limitX);
+    this.panY = Math.min(Math.max(this.panY, -limitY), limitY);
+    this.canvas.style.transform = this.zoom === 1 ? '' : `translate(${this.panX}px, ${this.panY}px)`;
+  }
+
+  isZoomed(): boolean {
+    return this.zoom > 1;
+  }
+
+  zoomBy(factor: number, clientX: number, clientY: number): void {
+    const area = this.canvas.parentElement;
+    if (area === null) {
+      return;
+    }
+    const next = Math.min(Math.max(this.zoom * factor, 1), MAX_ZOOM);
+    const box = area.getBoundingClientRect();
+    const offsetX = clientX - (box.left + box.width / 2 + this.panX);
+    const offsetY = clientY - (box.top + box.height / 2 + this.panY);
+    const ratio = next / this.zoom;
+    const was = this.zoom > 1;
+    this.panX += offsetX * (1 - ratio);
+    this.panY += offsetY * (1 - ratio);
+    this.zoom = next;
+    if (this.zoom === 1) {
+      this.panX = 0;
+      this.panY = 0;
+    }
+    this.fit();
+    if (was !== this.zoom > 1) {
+      this.zoomListener?.(this.zoom > 1);
+    }
+  }
+
+  panBy(dx: number, dy: number): void {
+    if (this.zoom === 1) {
+      return;
+    }
+    this.panX += dx;
+    this.panY += dy;
+    this.fit();
+  }
+
+  resetZoom(): void {
+    const was = this.zoom > 1;
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+    this.fit();
+    if (was) {
+      this.zoomListener?.(false);
+    }
+  }
+
+  touchHover(clientX: number, clientY: number): void {
+    const position = this.position({ clientX, clientY });
+    if (position !== null) {
+      this.pendingMove = null;
+      this.sendInput({ kind: 'pointer', ...position });
+    }
+  }
+
+  touchButton(button: MouseButton, pressed: boolean, clientX: number, clientY: number): void {
+    this.touchHover(clientX, clientY);
+    if (pressed) {
+      this.pressedButtons.add(button);
+    } else {
+      this.pressedButtons.delete(button);
+    }
+    this.sendInput({ kind: 'button', button, pressed });
+  }
+
+  touchScroll(horizontal: number, vertical: number): void {
+    this.sendInput({ kind: 'wheel', horizontal, vertical });
+  }
+
+  sendKeyChanges(changes: readonly { code: number; pressed: boolean }[]): void {
+    this.sendKeys(changes.map((change) => ({ ...change, time: 0 })));
   }
 
   sendTerminal(stream: number, payload: Uint8Array): void {
@@ -475,7 +567,7 @@ export class Viewer {
     }
   }
 
-  private position(event: MouseEvent): { x: number; y: number } | null {
+  private position(event: { clientX: number; clientY: number }): { x: number; y: number } | null {
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       return null;
@@ -494,7 +586,11 @@ export class Viewer {
     canvas.addEventListener('pointermove', (event) => this.queueMove(event));
     canvas.addEventListener('pointerdown', (event) => this.pointerButton(event, true));
     canvas.addEventListener('pointerup', (event) => this.pointerButton(event, false));
-    canvas.addEventListener('pointercancel', () => this.releaseButtons());
+    canvas.addEventListener('pointercancel', (event) => {
+      if (event.pointerType !== 'touch') {
+        this.releaseButtons();
+      }
+    });
     canvas.addEventListener('wheel', (event) => this.wheel(event), { passive: false });
     canvas.addEventListener('keydown', (event) => this.key(event, true));
     canvas.addEventListener('keyup', (event) => this.key(event, false));
@@ -502,6 +598,9 @@ export class Viewer {
   }
 
   private queueMove(event: PointerEvent): void {
+    if (event.pointerType === 'touch') {
+      return;
+    }
     const position = this.position(event);
     if (position === null) {
       return;
@@ -519,6 +618,9 @@ export class Viewer {
   }
 
   private pointerButton(event: PointerEvent, pressed: boolean): void {
+    if (event.pointerType === 'touch') {
+      return;
+    }
     const button = BUTTONS[event.button];
     event.preventDefault();
     if (button === undefined) {

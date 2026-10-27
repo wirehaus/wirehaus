@@ -66,7 +66,7 @@ tunnel_label=wirehaus.tunnel
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "$2" "$1"
+    curl -fsSL --proto '=https' --proto-redir '=https' -o "$2" "$1"
   else
     wget -q -O "$2" "$1"
   fi
@@ -74,20 +74,20 @@ fetch() {
 
 download_cloudflared() {
   base=https://github.com/cloudflare/cloudflared/releases/download/$cf_version
-  work=$(mktemp -d)
   case "$(uname -s)-$(uname -m)" in
     Linux-x86_64) asset=cloudflared-linux-amd64; want=$cf_linux_amd64_sha256 ;;
     Darwin-arm64) asset=cloudflared-darwin-arm64.tgz; want=$cf_darwin_arm64_sha256 ;;
-    *) echo "No tunnel connector is available for $(uname -s) $(uname -m)." >&2; rm -rf "$work"; exit 1 ;;
+    *) echo "No tunnel connector is available for $(uname -s) $(uname -m)." >&2; exit 1 ;;
   esac
-  fetch "$base/$asset" "$work/$asset"
-  [ "$(checksum "$work/$asset")" = "$want" ] || { echo "$asset does not match the expected checksum." >&2; rm -rf "$work"; exit 1; }
+  cf_work=$(mktemp -d)
+  trap 'rm -rf "$cf_work"' EXIT
+  fetch "$base/$asset" "$cf_work/$asset" || { echo "Could not download the tunnel connector." >&2; exit 1; }
+  [ "$(checksum "$cf_work/$asset")" = "$want" ] || { echo "$asset does not match the expected checksum." >&2; exit 1; }
   case "$asset" in
-    *.tgz) tar -xzf "$work/$asset" -C "$work" cloudflared; cp "$work/cloudflared" "$cloudflared" ;;
-    *) cp "$work/$asset" "$cloudflared" ;;
+    *.tgz) tar -xzf "$cf_work/$asset" -C "$cf_work" cloudflared; cf_binary=$cf_work/cloudflared ;;
+    *) cf_binary=$cf_work/$asset ;;
   esac
-  chmod 755 "$cloudflared"
-  rm -rf "$work"
+  chmod 755 "$cf_binary"
 }
 
 remove_tunnel() {
@@ -103,8 +103,10 @@ remove_tunnel() {
 }
 
 install_tunnel() {
-  remove_tunnel
   download_cloudflared
+  remove_tunnel
+  cp "$cf_binary" "$cloudflared"
+  chmod 755 "$cloudflared"
   mkdir -p "$data_dir"
   chmod 700 "$data_dir"
   ( umask 077; tr -d '\r\n' < "$tunnel_token_file" > "$tunnel_token" )
@@ -155,7 +157,8 @@ NoNewPrivileges=yes
 [Install]
 WantedBy=default.target
 EOF
-    systemctl --user daemon-reload
+    loginctl enable-linger "$(id -un)" >/dev/null 2>&1 || true
+    systemctl --user daemon-reload || { echo "systemctl --user is not available in this session: sign in to the desktop (not over a bare SSH session) and run the installer again." >&2; exit 1; }
     systemctl --user enable --now wirehaus-tunnel.service
   fi
 }

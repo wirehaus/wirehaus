@@ -96,6 +96,18 @@ export class Terminals {
     }
   }
 
+  sendToActive(text: string): void {
+    if (this.active !== null) {
+      this.entries.get(this.active)?.terminal.input(text, true);
+    }
+  }
+
+  focusActive(): void {
+    if (this.active !== null) {
+      this.entries.get(this.active)?.terminal.focus();
+    }
+  }
+
   receive(stream: number, message: TerminalMessage): void {
     const entry = this.entries.get(stream);
     if (entry === undefined) {

@@ -57,6 +57,7 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 | Text clipboard | Works. Separate permission for each direction |
 | Screenshots and recording | Works. Done in the browser |
 | Computer audio | Works on Linux (PulseAudio or PipeWire), Windows and macOS 14.6 or later. Off until you enable it |
+| Viewer on a phone | Files and terminal (no desktop, almost no data). On tablets, touch desktop with an on-screen keyboard |
 | One-command install and registration service (`wirehaus.dev`) | Works |
 
 ## Security
