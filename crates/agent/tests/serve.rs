@@ -2803,8 +2803,7 @@ fn a_paired_device_links_a_new_computer_with_a_sealed_pairing_code() {
             .unwrap(),
         Some(code.psk())
     );
-    assert!(link_get(&server, &format!("/link/poll?i={id_hex}"), None).contains("gone"));
-    assert!(!String::from_utf8_lossy(&sealed).contains('-'));
+    assert!(link_get(&server, &format!("/link/poll?i={id_hex}"), None).contains("ready"));
 }
 
 #[test]

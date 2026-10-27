@@ -149,30 +149,34 @@ export class ComputerLink {
 }
 
 export class LinkApprover {
-  private waiting: ((reply: LinkReply) => void) | null = null;
+  private waiting: { accepts: (reply: LinkReply) => boolean; resolve: (reply: LinkReply) => void } | null = null;
 
   constructor(private readonly send: (payload: Uint8Array) => void) {}
 
   receive(reply: LinkReply): void {
     const waiting = this.waiting;
+    if (waiting === null || !waiting.accepts(reply)) {
+      return;
+    }
     this.waiting = null;
-    waiting?.(reply);
+    waiting.resolve(reply);
   }
 
   lookup(key: string): Promise<LinkReply> {
-    return this.ask(encodeLookup(key));
+    return this.ask(encodeLookup(key), (reply) => reply.kind === 'info' || reply.kind === 'notFound' || reply.kind === 'failed');
   }
 
   approve(id: Uint8Array, code: string): Promise<LinkReply> {
-    return this.ask(encodeApprove(id, code));
+    return this.ask(encodeApprove(id, code), (reply) => reply.kind === 'approved' || reply.kind === 'failed');
   }
 
-  private ask(payload: Uint8Array): Promise<LinkReply> {
+  private ask(payload: Uint8Array, accepts: (reply: LinkReply) => boolean): Promise<LinkReply> {
     return new Promise((resolve, reject) => {
-      this.waiting = resolve;
+      const entry = { accepts, resolve };
+      this.waiting = entry;
       this.send(payload);
       window.setTimeout(() => {
-        if (this.waiting === resolve) {
+        if (this.waiting === entry) {
           this.waiting = null;
           reject(new Error('timeout'));
         }

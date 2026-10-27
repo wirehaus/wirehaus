@@ -340,6 +340,12 @@ impl Server {
         id: &[u8; 16],
         code: &str,
     ) -> Result<(), LinkFailure> {
+        let now = self
+            .store
+            .read(|_, now| now)
+            .map_err(|_| LinkFailure::Unavailable)?;
+        let mut links = self.links.lock().unwrap_or_else(PoisonError::into_inner);
+        let public = links.public_of(id, now).ok_or(LinkFailure::Gone)?;
         let verdict = self
             .store
             .update(|state, now| state.verify_totp(Some(device), code, now))
@@ -349,16 +355,13 @@ impl Server {
             Err(AuthError::WrongCode) => return Err(LinkFailure::WrongCode),
             Err(AuthError::Denied(_)) => return Err(LinkFailure::TooManyAttempts),
         }
-        let now = self
+        let already_open = self
             .store
-            .read(|_, now| now)
+            .read(|state, now| state.pairing_psk(now).is_some())
             .map_err(|_| LinkFailure::Unavailable)?;
-        let public = self
-            .links
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .public_of(id, now)
-            .ok_or(LinkFailure::Gone)?;
+        if already_open {
+            return Err(LinkFailure::Unavailable);
+        }
         let pairing = self
             .store
             .update(State::open_pairing)
@@ -366,12 +369,7 @@ impl Server {
             .map_err(|_| LinkFailure::Unavailable)?;
         let sealed = wirehaus_crypto::link::seal(&public, pairing.to_text().as_bytes())
             .map_err(|_| LinkFailure::Unavailable)?;
-        let stored = self
-            .links
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .approve(id, sealed, now);
-        if stored {
+        if links.approve(id, sealed, now) {
             self.store
                 .log("link_approved", "a paired device authorised a new computer");
             Ok(())

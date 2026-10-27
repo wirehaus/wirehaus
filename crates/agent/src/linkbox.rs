@@ -147,6 +147,7 @@ impl Links {
         {
             Some(entry) => {
                 entry.sealed = Some(sealed);
+                entry.created = now;
                 true
             }
             None => false,
@@ -155,15 +156,12 @@ impl Links {
 
     pub fn poll(&mut self, id: &[u8; ID_BYTES], now: u64) -> Poll {
         self.prune(now);
-        let Some(index) = self.entries.iter().position(|e| e.id == *id) else {
-            return Poll::Gone;
-        };
-        if self.entries[index].sealed.is_none() {
-            return Poll::Pending;
-        }
-        match self.entries.remove(index).sealed {
-            Some(sealed) => Poll::Ready(sealed),
+        match self.entries.iter().find(|e| e.id == *id) {
             None => Poll::Gone,
+            Some(entry) => match &entry.sealed {
+                None => Poll::Pending,
+                Some(sealed) => Poll::Ready(sealed.clone()),
+            },
         }
     }
 
@@ -196,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn approving_hands_the_sealed_text_over_exactly_once() {
+    fn approving_hands_the_sealed_text_over_until_the_link_expires() {
         let mut links = Links::default();
         let started = links.start(&key(2), 0).unwrap();
         assert_eq!(links.poll(&started.id, 1), Poll::Pending);
@@ -205,7 +203,12 @@ mod tests {
         assert!(!links.approve(&started.id, vec![9], 2));
         assert!(links.find(&to_hex(&started.id), 2).is_none());
         assert_eq!(links.poll(&started.id, 3), Poll::Ready(vec![1, 2, 3]));
-        assert_eq!(links.poll(&started.id, 3), Poll::Gone);
+        assert_eq!(links.poll(&started.id, 4), Poll::Ready(vec![1, 2, 3]));
+        assert_eq!(
+            links.poll(&started.id, 2 + TTL_SECS),
+            Poll::Ready(vec![1, 2, 3])
+        );
+        assert_eq!(links.poll(&started.id, 2 + TTL_SECS + 1), Poll::Gone);
     }
 
     #[test]

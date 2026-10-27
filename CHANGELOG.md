@@ -30,6 +30,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- Tras la revisión independiente de la vinculación: consultar el estado de una vinculación ya no la borra (el sello sigue disponible hasta que caduca, y aprobar renueva los tres minutos); aprobar comprueba que la petición sigue viva antes de gastar el código del segundo factor, no pisa un emparejamiento que ya estuviera abierto y mantiene el candado durante todo el proceso; una respuesta tardía del agente ya no se entrega a la petición siguiente del móvil.
 - Abrir una segunda pestaña o recargar ya no obliga a volver a escribir el segundo factor: presentar el billete de una sesión que el agente aún cree viva la reanuda y cierra la antigua (antes el billete se rechazaba hasta que la sesión vieja caía por tiempo), y una sesión que acaba por un fallo del propio equipo (captura, codificación, entrada) ya no revoca el billete. El agente permite hasta 5 sesiones, espera 45 s antes de dar por atascado a un visor y anota la causa al cerrar cada sesión.
 
 ## [0.2.1] - 2026-10-27
