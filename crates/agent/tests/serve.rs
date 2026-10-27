@@ -920,7 +920,7 @@ fn a_revoked_device_is_cut_off_while_connected_and_cannot_return() {
 }
 
 #[test]
-fn an_idle_unauthenticated_connection_does_not_take_the_viewer_slot() {
+fn a_second_viewer_can_connect_while_the_first_is_connected() {
     let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (first, device_a) = pair_and_login(&server, "A");
@@ -934,12 +934,9 @@ fn an_idle_unauthenticated_connection_does_not_take_the_viewer_slot() {
     idle.expect_auth_required();
     let _owner = reconnect_and_login(&server, &device_a);
     match idle.login(&server.fresh_totp()) {
-        Received::Got(ControlMessage::AuthFailed {
-            reason: AuthFailure::Busy,
-            ..
-        }) => {}
+        Received::Got(ControlMessage::AuthOk) => {}
         other => panic!(
-            "a second viewer was not told it is busy: {}",
+            "a second viewer was not let in next to the first: {}",
             describe(&other)
         ),
     }

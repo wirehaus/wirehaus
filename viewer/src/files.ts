@@ -6,6 +6,7 @@ import {
   type FilesMessage,
   MAX_FILE_CHUNK,
   WINDOW_BYTES,
+  FEATURE_RENAME,
   encodeAck,
   encodeCancel,
   encodeData,
@@ -146,7 +147,10 @@ export class FilesPanel {
   private readonly forward: Place[] = [];
   private readonly selection = new Set<string>();
   private preferences = loadPreferences();
+  onLocation: ((root: number, path: string[]) => void) | null = null;
+  private initial: { root: number; path: string[] } | null = null;
   private roots: string[] | null = null;
+  private features = 0;
   private root = 0;
   private path: string[] = [];
   private entries: FileEntry[] = [];
@@ -306,6 +310,10 @@ export class FilesPanel {
     this.render();
   }
 
+  restore(root: number, path: string[]): void {
+    this.initial = { root, path };
+  }
+
   show(): void {
     if (!this.loaded) {
       this.loaded = true;
@@ -314,6 +322,9 @@ export class FilesPanel {
   }
 
   reset(): void {
+    if (this.roots !== null) {
+      this.initial = { root: this.root, path: [...this.path] };
+    }
     this.generation += 1;
     for (const transfer of this.transfers.values()) {
       transfer.cancelled = true;
@@ -329,6 +340,7 @@ export class FilesPanel {
     this.closeMenu();
     this.closeModal(false);
     this.roots = null;
+    this.features = 0;
     this.loaded = false;
     this.path = [];
     this.root = 0;
@@ -399,24 +411,36 @@ export class FilesPanel {
       return;
     }
     this.roots = reply.names;
-    this.root = 0;
-    this.path = [];
-    this.say(reply.names.length === 0 ? this.texts.filesNoRoots : '', reply.names.length === 0);
+    this.features = reply.features;
+    const wanted = this.initial;
+    this.initial = null;
+    const usable = wanted !== null && wanted.root >= 0 && wanted.root < reply.names.length;
+    this.root = usable ? wanted.root : 0;
+    this.path = usable ? wanted.path : [];
+    this.say(
+      reply.names.length === 0 ? this.texts.filesNoRoots : this.canRename ? '' : this.texts.filesAgentOld,
+      reply.names.length === 0 || !this.canRename,
+    );
     this.render();
-    if (reply.names.length > 0) {
+    if (reply.names.length > 0 && !(await this.refresh()) && this.path.length > 0) {
+      this.path = [];
+      this.say('');
       await this.refresh();
     }
   }
 
-  private async refresh(): Promise<void> {
+  private async refresh(): Promise<boolean> {
     if (this.roots === null || this.roots.length === 0) {
-      return;
+      return true;
     }
     const token = (this.loadToken += 1);
     const generation = this.generation;
     const listing = await this.listDir(this.root, this.path);
-    if (token !== this.loadToken || generation !== this.generation || listing === null) {
-      return;
+    if (token !== this.loadToken || generation !== this.generation) {
+      return true;
+    }
+    if (listing === null) {
+      return false;
     }
     this.entries = listing.entries;
     this.truncated = listing.truncated;
@@ -436,6 +460,8 @@ export class FilesPanel {
       this.say(this.texts.filesTruncated);
     }
     this.render();
+    this.onLocation?.(this.root, [...this.path]);
+    return true;
   }
 
   private async navigate(root: number, path: string[], record = true): Promise<void> {
@@ -454,6 +480,7 @@ export class FilesPanel {
     this.entries = [];
     this.entryByName.clear();
     this.render();
+    this.onLocation?.(this.root, [...this.path]);
     await this.refresh();
   }
 
@@ -477,6 +504,10 @@ export class FilesPanel {
     if (this.path.length > 0) {
       void this.navigate(this.root, this.path.slice(0, -1));
     }
+  }
+
+  private get canRename(): boolean {
+    return (this.features & FEATURE_RENAME) !== 0;
   }
 
   private visible(): FileEntry[] {
@@ -569,9 +600,9 @@ export class FilesPanel {
     set('upload', has);
     set('refresh', has);
     set('open', single !== undefined);
-    set('edit', single !== undefined && isEditable(single));
+    set('edit', single !== undefined && isEditable(single) && this.canRename);
     set('download', files.length > 0);
-    set('rename', single !== undefined);
+    set('rename', single !== undefined && this.canRename);
     set('remove', selected.length > 0);
     const grid = this.preferences.view === 'grid';
     this.host.classList.toggle('fm-view-grid', grid);
@@ -699,7 +730,7 @@ export class FilesPanel {
     const item = node('div', `fm-item cat-${category}`);
     item.dataset['name'] = entry.name;
     item.setAttribute('role', 'option');
-    item.draggable = this.renaming !== entry.name;
+    item.draggable = this.renaming !== entry.name && this.canRename;
     const icon = node('span', 'fm-icon');
     icon.append(svg(CATEGORY_ICON[category]));
     item.append(icon);
@@ -1123,14 +1154,14 @@ export class FilesPanel {
     const items: MenuItem[] = [];
     if (single !== undefined) {
       items.push({ label: t.filesOpen, icon: 'i-folder', run: () => this.openSelected() });
-      if (isEditable(single)) {
+      if (isEditable(single) && this.canRename) {
         items.push({ label: t.filesEdit, icon: 'i-edit', run: () => this.editSelected() });
       }
     }
     if (selected.some((entry) => entry.kind === 'file')) {
       items.push({ label: t.filesDownload, icon: 'i-down', run: () => this.downloadSelected() });
     }
-    if (single !== undefined) {
+    if (single !== undefined && this.canRename) {
       items.push({ label: t.filesRename, icon: 'i-edit', run: () => this.startRename() });
     }
     items.push('separator', { label: t.filesRemove, icon: 'i-trash', run: () => void this.deleteSelected(), danger: true });
@@ -1219,7 +1250,7 @@ export class FilesPanel {
       void this.navigate(this.root, [...this.path, name]);
     } else if (entry.kind === 'file' && isPreviewable(entry)) {
       void this.dialog.preview(path, entry);
-    } else if (entry.kind === 'file' && isEditable(entry)) {
+    } else if (entry.kind === 'file' && isEditable(entry) && this.canRename) {
       void this.dialog.edit(path, entry);
     } else if (entry.kind === 'file') {
       void this.saveToDisk(path, entry);
@@ -1235,7 +1266,7 @@ export class FilesPanel {
 
   private editSelected(): void {
     const [entry] = this.selectedEntries();
-    if (this.selection.size === 1 && entry !== undefined && isEditable(entry)) {
+    if (this.selection.size === 1 && entry !== undefined && isEditable(entry) && this.canRename) {
       void this.dialog.edit(joinPath(this.path, entry.name), entry);
     }
   }
@@ -1252,7 +1283,7 @@ export class FilesPanel {
 
   private startRename(): void {
     const [name] = [...this.selection];
-    if (this.selection.size !== 1 || name === undefined) {
+    if (this.selection.size !== 1 || name === undefined || !this.canRename) {
       return;
     }
     this.renaming = name;

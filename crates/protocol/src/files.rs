@@ -5,6 +5,8 @@ pub const MAX_NAME_LEN: usize = 255;
 pub const MAX_CHUNK: usize = 32 * 1024;
 pub const MAX_ENTRIES: usize = 1000;
 pub const MAX_ROOTS: usize = 16;
+pub const FEATURE_RENAME: u8 = 1;
+pub const FEATURES: u8 = FEATURE_RENAME;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -184,6 +186,7 @@ impl FilesMessage {
                 for name in names {
                     put_text(&mut out, name);
                 }
+                out.push(FEATURES);
                 out
             }
             FilesMessage::Listing { entries, truncated } => {
@@ -260,6 +263,9 @@ impl FilesMessage {
                 let names = (0..count)
                     .map(|_| reader.text(MAX_PATH_LEN))
                     .collect::<Result<_, _>>()?;
+                if !reader.rest.is_empty() {
+                    reader.u8()?;
+                }
                 FilesMessage::Roots(names)
             }
             LISTING => {
@@ -499,6 +505,14 @@ mod tests {
         );
         assert_eq!(FilesMessage::Data(vec![9]).encode(), [10, 9]);
         assert_eq!(
+            FilesMessage::Roots(vec!["a".to_owned()]).encode(),
+            [7, 1, 0, 1, b'a', FEATURES]
+        );
+        assert_eq!(
+            FilesMessage::decode(&[7, 1, 0, 1, b'a']).unwrap(),
+            FilesMessage::Roots(vec!["a".to_owned()])
+        );
+        assert_eq!(
             FilesMessage::Rename {
                 root: 1,
                 from: "a".to_owned(),
@@ -531,6 +545,9 @@ mod tests {
             longer.push(0);
             assert!(FilesMessage::decode(&longer).is_err(), "{message:?}");
             for cut in 1..bytes.len() {
+                if matches!(message, FilesMessage::Roots(_)) && cut == bytes.len() - 1 {
+                    continue;
+                }
                 assert!(FilesMessage::decode(&bytes[..cut]).is_err(), "{message:?}");
             }
         }

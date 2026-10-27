@@ -30,6 +30,7 @@ const HEAD_POLL: Duration = Duration::from_millis(5);
 const MAX_INBOUND_MESSAGE: usize = INBOUND_LIMIT + 64;
 const MAX_CONNECTIONS: usize = 64;
 const MAX_UNAUTHENTICATED: usize = 16;
+const MAX_SESSIONS: usize = 3;
 const HEAD_END: &[u8] = b"\r\n\r\n";
 const TEXT: &str = "text/plain; charset=utf-8";
 
@@ -71,6 +72,7 @@ pub struct Server {
     clipboard: Arc<Hub>,
     viewer: Viewer,
     tickets: Mutex<Tickets>,
+    sessions: AtomicUsize,
     connections: AtomicUsize,
     unauthenticated: AtomicUsize,
 }
@@ -107,14 +109,6 @@ impl AcceptFailures {
     }
 }
 
-struct BusyGuard<'a>(&'a AtomicBool);
-
-impl Drop for BusyGuard<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
-    }
-}
-
 impl Server {
     pub fn bind(config: ServerConfig) -> Result<Self, ServerError> {
         if !config.listen.ip().is_loopback() {
@@ -139,9 +133,14 @@ impl Server {
             clipboard,
             viewer,
             tickets: Mutex::new(Tickets::new()),
+            sessions: AtomicUsize::new(0),
             connections: AtomicUsize::new(0),
             unauthenticated: AtomicUsize::new(0),
         })
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.sessions.load(Ordering::SeqCst) > 0
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, ServerError> {
@@ -149,7 +148,6 @@ impl Server {
     }
 
     pub fn run(&self, stop: &AtomicBool) -> Result<(), ServerError> {
-        let busy = AtomicBool::new(false);
         let port = self.local_addr()?.port();
         let mut failures = AcceptFailures::default();
         thread::scope(|scope| {
@@ -157,14 +155,13 @@ impl Server {
                 match self.listener.accept() {
                     Ok((stream, peer)) if peer.ip().is_loopback() => {
                         failures.reset();
-                        let busy = &busy;
                         let Some(guard) = CountGuard::enter(&self.connections, MAX_CONNECTIONS)
                         else {
                             continue;
                         };
                         scope.spawn(move || {
                             let _guard = guard;
-                            if let Err(error) = self.serve_connection(stream, port, busy, stop) {
+                            if let Err(error) = self.serve_connection(stream, port, stop) {
                                 eprintln!("connection ended: {error}");
                             }
                         });
@@ -191,7 +188,6 @@ impl Server {
         &self,
         mut stream: TcpStream,
         port: u16,
-        busy: &AtomicBool,
         stop: &AtomicBool,
     ) -> Result<(), ServerError> {
         stream.set_nonblocking(false)?;
@@ -213,7 +209,7 @@ impl Server {
             );
         }
         if head.wants_websocket {
-            self.upgrade(stream, &head, port, busy, stop)
+            self.upgrade(stream, &head, port, stop)
         } else {
             self.serve_file(&mut stream, &head, head_len)
         }
@@ -248,7 +244,6 @@ impl Server {
         mut stream: TcpStream,
         head: &RequestHead,
         port: u16,
-        busy: &AtomicBool,
         stop: &AtomicBool,
     ) -> Result<(), ServerError> {
         if head.path != "/ws" {
@@ -281,7 +276,7 @@ impl Server {
         match outcome {
             Outcome::Refused => Ok(()),
             Outcome::Authenticated(link, identity) => {
-                self.serve_authenticated(*link, &identity, busy, stop)
+                self.serve_authenticated(*link, &identity, stop)
             }
         }
     }
@@ -290,11 +285,10 @@ impl Server {
         &self,
         mut link: crate::link::Link,
         identity: &auth::Identity,
-        busy: &AtomicBool,
         stop: &AtomicBool,
     ) -> Result<(), ServerError> {
         let name = identity.name.as_str();
-        if busy.swap(true, Ordering::SeqCst) {
+        let Some(_slot) = CountGuard::enter(&self.sessions, MAX_SESSIONS) else {
             self.store.log("busy", name);
             let _ = link.send_control(ControlMessage::AuthFailed {
                 reason: AuthFailure::Busy,
@@ -303,8 +297,7 @@ impl Server {
             let _ = link.flush();
             link.close();
             return Ok(());
-        }
-        let _guard = BusyGuard(busy);
+        };
         let backend = match platform::connect(self.config.display.as_deref()) {
             Ok(backend) => backend,
             Err(error) => {
@@ -369,7 +362,7 @@ impl Server {
             },
         );
         self.store.log("session_end", name);
-        self.settle_ticket(&identity.device, &result);
+        self.settle_ticket(&identity.device, &ticket, &result);
         result
     }
 
@@ -382,7 +375,12 @@ impl Server {
             .issue(*device, now)?)
     }
 
-    fn settle_ticket(&self, device: &PublicKey, result: &Result<(), ServerError>) {
+    fn settle_ticket(
+        &self,
+        device: &PublicKey,
+        ticket: &[u8; TICKET_LEN],
+        result: &Result<(), ServerError>,
+    ) {
         let keeps_grace = matches!(
             result,
             Ok(())
@@ -391,9 +389,9 @@ impl Server {
         let now = self.store.read(|_, now| now).unwrap_or(0);
         let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);
         if keeps_grace {
-            tickets.suspend(device, now);
+            tickets.suspend(device, ticket, now);
         } else {
-            tickets.revoke(device);
+            tickets.revoke(device, ticket);
         }
     }
 }

@@ -12,7 +12,7 @@ import { UpdateWatcher } from './updates.js';
 import { KeyBar } from './keybar.js';
 import type { Layout } from './softkeys.js';
 import { TouchLayer } from './touchlayer.js';
-import { type Messages, messagesFor } from './strings.js';
+import { type Messages, messagesFor, preferredLanguage } from './strings.js';
 import { bridgeTerminalStyles } from './stylebridge.js';
 import { Terminals } from './terminals.js';
 import { cleanName, nameFromPath, namedByPath, resolveTarget, validAccessName } from './target.js';
@@ -28,7 +28,7 @@ function element<T extends HTMLElement>(id: string): T {
 
 bridgeTerminalStyles();
 
-const messages = messagesFor(navigator.language);
+const messages = messagesFor(preferredLanguage(navigator.language));
 document.documentElement.lang = navigator.language.split('-')[0] ?? 'es';
 
 const coarse = window.matchMedia('(pointer: coarse)').matches;
@@ -60,6 +60,7 @@ const splashForget = element<HTMLButtonElement>('splash-forget');
 const menuButton = element<HTMLButtonElement>('menu-button');
 const menu = element<HTMLElement>('menu');
 const layoutSelect = element<HTMLSelectElement>('layout');
+const langSelect = element<HTMLSelectElement>('lang');
 const immersive = element<HTMLButtonElement>('immersive');
 type KeyboardLock = { lock(codes?: string[]): Promise<void>; unlock(): void };
 const keyboardLock = (navigator as Navigator & { keyboard?: KeyboardLock }).keyboard;
@@ -113,6 +114,7 @@ const labels: [string, string][] = [
   ['secure-pair', messages.secureNote],
   ['secure-code', messages.secureNote],
   ['layout-label', messages.layoutLabel],
+  ['lang-label', messages.languageName],
   ['keyboard-label', messages.keyboard],
   ['home-title', messages.homeTitle],
   ['home-lead', messages.homeLead],
@@ -363,6 +365,10 @@ function show(state: ViewerState): void {
       } else {
         maybeTip();
       }
+      restoreUi();
+      if (panel === 'files') {
+        files.show();
+      }
       break;
     case 'refused':
       terminals.endAll();
@@ -436,6 +442,14 @@ const files = new FilesPanel(
   messages,
 );
 viewer.filesListener = (stream, message) => files.receive(stream, message);
+files.onLocation = (root, path) => {
+  savedUi = { ...savedUi, root, path };
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify(savedUi));
+  } catch {
+    return;
+  }
+};
 
 const clipboard = new ClipboardPanel(
   clipboardHost,
@@ -479,9 +493,46 @@ function showView(): void {
   syncKeyboardCapture();
 }
 
+const UI_KEY = 'wirehaus.ui';
+type SavedUi = { panel?: Panel; root?: number; path?: string[] };
+let savedUi: SavedUi = (() => {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(UI_KEY) ?? '{}');
+    return typeof parsed === 'object' && parsed !== null ? (parsed as SavedUi) : {};
+  } catch {
+    return {};
+  }
+})();
+let uiRestored = false;
+
+function persistUi(): void {
+  savedUi = { ...savedUi, panel };
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify(savedUi));
+  } catch {
+    return;
+  }
+}
+
+function restoreUi(): void {
+  if (uiRestored) {
+    return;
+  }
+  uiRestored = true;
+  const path = Array.isArray(savedUi.path) && savedUi.path.every((part) => typeof part === 'string') ? savedUi.path : [];
+  files.restore(typeof savedUi.root === 'number' ? savedUi.root : 0, path);
+  const wanted = savedUi.panel;
+  if (!phone && (wanted === 'files' || wanted === 'clipboard' || wanted === 'desktop')) {
+    selectPanel(wanted);
+  } else if (phone || wanted === 'files') {
+    files.show();
+  }
+}
+
 function selectPanel(wanted: Panel): void {
   panel = wanted;
   terminals.activate(null);
+  persistUi();
   if (wanted === 'files') {
     files.show();
   }
@@ -568,6 +619,19 @@ function savedLayout(): Layout {
   }
   return navigator.language.toLowerCase().startsWith('es') ? 'es' : 'us';
 }
+
+const activeLanguage = preferredLanguage(navigator.language).toLowerCase().startsWith('en') ? 'en' : 'es';
+document.documentElement.lang = activeLanguage;
+langSelect.value = activeLanguage;
+langSelect.addEventListener('change', () => {
+  try {
+    localStorage.setItem('wirehaus.lang', langSelect.value === 'en' ? 'en' : 'es');
+  } catch {
+    return;
+  }
+  window.location.reload();
+});
+element('layout-field').hidden = !coarse;
 
 let layout: Layout = savedLayout();
 layoutSelect.value = layout;

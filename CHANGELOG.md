@@ -6,6 +6,12 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Añadido
 
+- Actualización automática del agente: comprueba cada seis horas la lista de versiones firmada de `wirehaus.dev`, verifica la firma SSH con la clave fijada en el binario, nunca baja de versión, comprueba el hash del paquete, espera a que no haya sesión, cambia el binario y el visor de forma atómica y se reinicia por el gestor del sistema. Si la versión nueva no llega a arrancar tres veces, vuelve a la anterior y la descarta. Comandos `update status`, `check`, `apply`, `enable`, `disable` y `rollback`. Solo actúa en instalaciones con el diseño del instalador (`serve --no-auto-update` la desactiva).
+- El conector del túnel de Cloudflare vuelve a usar su actualizador propio (los instaladores ya no pasan `--no-autoupdate`).
+- Varias sesiones a la vez (hasta 3) y varios billetes de reanudación por dispositivo, de un solo uso: se puede abrir el visor en dos pestañas.
+- El agente anuncia sus capacidades en el listado de carpetas compartidas y el visor desactiva renombrar, mover y editar con agentes anteriores.
+- Editor con colores por tipo de archivo (HTML con scripts y estilos incrustados, CSS, JavaScript y TypeScript, JSON, Python, shell, Rust, Go, C y derivados, Java y Kotlin, PHP, SQL, YAML, TOML y Markdown), números de línea, línea actual resaltada, sangría automática, cierre de paréntesis y comillas, comentar con Ctrl+/ y tabuladores de bloque.
+- El visor recuerda la pestaña y la carpeta de Archivos al recargar, el idioma se elige en el menú, y el decodificador de vídeo liberado por el navegador en segundo plano provoca una reconexión automática en vez de un error.
 - Gestor de archivos del visor al estilo de un escritorio: carpetas compartidas y acceso rápido, migas, vistas de lista y de iconos, orden y filtro, selección múltiple, menú contextual, teclado completo, arrastrar para mover y para subir (también carpetas), creación y renombrado en línea, borrado recursivo con confirmación, vista previa de imágenes y editor de texto integrado que conserva fin de línea, BOM y permisos.
 - Operación `Rename` en el protocolo de archivos para mover y renombrar dentro de la carpeta compartida; reemplazar solo vale entre archivos normales y conserva los permisos del destino. Un agente anterior no la entiende.
 - Captura de todo el teclado del escritorio remoto con pantalla completa (Keyboard Lock en Chromium); un toque suelto de Ctrl derecho la suelta.

@@ -1,4 +1,6 @@
 import type { FileEntry } from './filesprotocol.js';
+import { CodeArea } from './codearea.js';
+import { type Language, LANGUAGES, detectLanguage, languageLabel } from './highlight.js';
 import { looksBinary, mimeFor } from './filetypes.js';
 import type { Messages } from './strings.js';
 
@@ -58,7 +60,8 @@ export class FileDialog {
   private baseline: FileEntry | null = null;
   private saving = false;
   private generation = 0;
-  private textarea: HTMLTextAreaElement | null = null;
+  private code: CodeArea | null = null;
+  private lines: HTMLElement | null = null;
   private saveButton: HTMLButtonElement | null = null;
   private dirtyBadge: HTMLElement | null = null;
   private position: HTMLElement | null = null;
@@ -194,85 +197,57 @@ export class FileDialog {
     if (body === null || actions === null) {
       return;
     }
-    const area = document.createElement('textarea');
-    area.className = 'fm-textarea';
-    area.value = text;
-    area.spellcheck = false;
-    area.autocapitalize = 'off';
-    area.autocomplete = 'off';
-    area.setAttribute('wrap', 'off');
-    area.setAttribute('aria-label', entry.name);
-    this.textarea = area;
+    const language = detectLanguage(entry.name, text);
+    const code = new CodeArea(text, language, entry.name, {
+      changed: () => this.markDirty(true),
+      caret: (line, column, selected) => this.updatePosition(line, column, selected),
+      save: () => void this.save(),
+    });
+    this.code = code;
     this.position = document.createElement('span');
-    const footer = document.createElement('div');
-    footer.className = 'fm-dialog-foot';
+    this.position.className = 'fm-pos';
+    const select = document.createElement('select');
+    select.className = 'fm-lang';
+    select.setAttribute('aria-label', this.texts.editorLanguage);
+    for (const option of LANGUAGES) {
+      const item = document.createElement('option');
+      item.value = option;
+      item.textContent = languageLabel(option);
+      select.append(item);
+    }
+    select.value = language;
+    select.addEventListener('change', () => {
+      code.setLanguage(select.value as Language);
+      code.focus();
+    });
     const encoding = document.createElement('span');
     encoding.textContent = `UTF-8${this.bom ? ' BOM' : ''} · ${this.crlf ? 'CRLF' : 'LF'}`;
-    footer.append(this.position, encoding);
-    body.replaceChildren(area, footer);
+    const footer = document.createElement('div');
+    footer.className = 'fm-dialog-foot';
+    const right = document.createElement('span');
+    right.className = 'fm-foot-right';
+    this.lines = document.createElement('span');
+    right.append(this.lines, select, encoding);
+    footer.append(this.position, right);
+    body.replaceChildren(code.root, footer);
+    code.mount();
+    this.lines.textContent = this.texts.editorLines(text === '' ? 1 : text.split('\n').length);
 
-    const wrap = iconButton('i-list', this.texts.editorWrap, this.texts.editorWrap);
-    wrap.setAttribute('aria-pressed', 'false');
-    wrap.addEventListener('click', () => {
-      const on = area.getAttribute('wrap') === 'off';
-      area.setAttribute('wrap', on ? 'soft' : 'off');
-      wrap.setAttribute('aria-pressed', String(on));
-      wrap.classList.toggle('on', on);
-    });
     this.saveButton = iconButton('i-save', this.texts.editorSave, this.texts.editorSave);
     this.saveButton.classList.add('primary');
     this.saveButton.disabled = true;
     this.saveButton.addEventListener('click', () => void this.save());
-    actions.prepend(wrap, this.saveButton);
-
-    area.addEventListener('input', () => this.markDirty(true));
-    for (const name of ['keyup', 'click', 'focus'] as const) {
-      area.addEventListener(name, () => this.updatePosition());
-    }
-    area.addEventListener('keydown', (event) => this.areaKey(event, area));
-    this.updatePosition();
-    area.focus();
-    area.setSelectionRange(0, 0);
+    actions.prepend(this.saveButton);
+    code.focus();
+    code.textarea.setSelectionRange(0, 0);
   }
 
-  private areaKey(event: KeyboardEvent, area: HTMLTextAreaElement): void {
-    if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-      event.preventDefault();
-      this.insert(area, '\t');
-    } else if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.isComposing) {
-      const before = area.value.slice(0, area.selectionStart);
-      const line = before.slice(before.lastIndexOf('\n') + 1);
-      const indent = /^[ \t]*/u.exec(line)?.[0] ?? '';
-      if (indent !== '') {
-        event.preventDefault();
-        this.insert(area, `\n${indent}`);
-      }
-    }
-  }
-
-  private insert(area: HTMLTextAreaElement, text: string): void {
-    area.focus();
-    let done = false;
-    try {
-      done = document.execCommand('insertText', false, text);
-    } catch {
-      done = false;
-    }
-    if (!done) {
-      area.setRangeText(text, area.selectionStart, area.selectionEnd, 'end');
-      area.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }
-
-  private updatePosition(): void {
-    const area = this.textarea;
-    if (area === null || this.position === null) {
+  private updatePosition(line: number, column: number, selected: number): void {
+    if (this.position === null) {
       return;
     }
-    const before = area.value.slice(0, area.selectionStart);
-    const line = before.split('\n').length;
-    const column = before.length - before.lastIndexOf('\n');
-    this.position.textContent = this.texts.editorPosition(line, column);
+    const base = this.texts.editorPosition(line, column);
+    this.position.textContent = selected > 0 ? `${base} · ${this.texts.editorSelected(selected)}` : base;
   }
 
   private markDirty(value: boolean): void {
@@ -288,7 +263,7 @@ export class FileDialog {
   private keydown(event: KeyboardEvent): void {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
-      if (this.textarea !== null) {
+      if (this.code !== null) {
         void this.save();
       }
     } else if (event.key === 'Escape') {
@@ -301,7 +276,7 @@ export class FileDialog {
   }
 
   private async save(): Promise<void> {
-    const area = this.textarea;
+    const area = this.code;
     const current = this.current;
     if (area === null || current === null || this.saving || !this.dirty) {
       return;
@@ -343,7 +318,9 @@ export class FileDialog {
     this.generation += 1;
     this.opened = false;
     this.dirty = false;
-    this.textarea = null;
+    this.code?.dispose();
+    this.code = null;
+    this.lines = null;
     this.saveButton = null;
     this.dirtyBadge = null;
     this.position = null;

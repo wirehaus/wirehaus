@@ -213,7 +213,11 @@ fn anything_that_decodes_encodes_back_to_the_same_bytes() {
                 assert_eq!(message.encode(), bytes);
             }
             if let Ok(message) = FilesMessage::decode(&bytes) {
-                assert_eq!(message.encode(), bytes);
+                if matches!(message, FilesMessage::Roots(_)) {
+                    assert_eq!(FilesMessage::decode(&message.encode()).unwrap(), message);
+                } else {
+                    assert_eq!(message.encode(), bytes);
+                }
             }
             if let Ok(message) = ClipboardMessage::decode(&bytes) {
                 assert_eq!(message.encode(), bytes);

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <rect width="1280" height="640" fill="#0b0f14"/>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="glow" cx="22%" cy="30%" r="60%">
+      <stop offset="0" stop-color="#2f81f7" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#2f81f7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+  <g transform="translate(96 92) scale(2.5)">
+    <rect width="64" height="64" rx="15" fill="#2f81f7"/>
+    <path d="M14.67 26.38 L22.14 44.08 Q23.5 47.3 24.86 44.07 L30.84 29.87 Q32 27.1 33.16 29.87 L39.14 44.07 Q40.5 47.3 41.86 44.08 L49.33 26.38" fill="none" stroke="#fff" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="12.1" cy="20.3" r="5.2" fill="none" stroke="#fff" stroke-width="3.4"/>
+    <circle cx="51.9" cy="20.3" r="5.2" fill="none" stroke="#fff" stroke-width="3.4"/>
+  </g>
+  <text x="94" y="376" font-family="Inter, 'DejaVu Sans', Helvetica, Arial, sans-serif" font-size="112" font-weight="700" fill="#e6edf3" letter-spacing="-3">Wirehaus</text>
+  <text x="98" y="440" font-family="Inter, 'DejaVu Sans', Helvetica, Arial, sans-serif" font-size="38" fill="#8b98a7">Your computer, in any browser. End-to-end encrypted.</text>
+  <g font-family="Inter, 'DejaVu Sans', Helvetica, Arial, sans-serif" font-size="26" fill="#e6edf3">
+    <g transform="translate(98 492)"><rect width="150" height="46" rx="23" fill="#151b23" stroke="#2a333f"/><text x="75" y="31" text-anchor="middle">Desktop</text></g>
+    <g transform="translate(264 492)"><rect width="150" height="46" rx="23" fill="#151b23" stroke="#2a333f"/><text x="75" y="31" text-anchor="middle">Terminal</text></g>
+    <g transform="translate(430 492)"><rect width="150" height="46" rx="23" fill="#151b23" stroke="#2a333f"/><text x="75" y="31" text-anchor="middle">Files</text></g>
+    <g transform="translate(596 492)"><rect width="150" height="46" rx="23" fill="#151b23" stroke="#2a333f"/><text x="75" y="31" text-anchor="middle">Audio</text></g>
+  </g>
+  <g transform="translate(800 96)" opacity="0.95">
+    <rect width="400" height="300" rx="18" fill="#151b23" stroke="#2a333f" stroke-width="2"/>
+    <rect width="400" height="46" rx="18" fill="#1b232d"/>
+    <rect y="28" width="400" height="18" fill="#1b232d"/>
+    <circle cx="28" cy="23" r="6" fill="#f85149"/><circle cx="50" cy="23" r="6" fill="#d29922"/><circle cx="72" cy="23" r="6" fill="#3fb950"/>
+    <g font-family="'DejaVu Sans Mono', monospace" font-size="21">
+      <text x="28" y="92" fill="#8b98a7">$ sh install.sh CODE</text>
+      <text x="28" y="134" fill="#3fb950">Tunnel connected</text>
+      <text x="28" y="168" fill="#e6edf3">app.wirehaus.dev/you</text>
+      <text x="28" y="214" fill="#8b98a7">pairing code</text>
+      <text x="28" y="248" fill="#2f81f7">7B6S-4HG3-NBVZ</text>
+    </g>
+  </g>
+</svg>

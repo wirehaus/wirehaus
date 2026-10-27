@@ -249,9 +249,17 @@ export class Viewer {
 
   private videoFailed(): void {
     const socket = this.socket;
-    if (socket !== null) {
-      this.fail(socket);
+    if (socket === null) {
+      return;
     }
+    if (this.ticketValue !== null && this.phase === 'streaming') {
+      this.close();
+      if (!this.scheduleRetry()) {
+        this.report({ kind: 'refused', reason: 'failed', retryAfter: 0 });
+      }
+      return;
+    }
+    this.fail(socket);
   }
 
   private async announceCapabilities(): Promise<void> {

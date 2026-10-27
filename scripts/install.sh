@@ -123,7 +123,6 @@ install_tunnel() {
     <array>
         <string>$cloudflared</string>
         <string>tunnel</string>
-        <string>--no-autoupdate</string>
         <string>run</string>
         <string>--token-file</string>
         <string>$tunnel_token</string>
@@ -149,7 +148,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart="$cloudflared" tunnel --no-autoupdate run --token-file "$tunnel_token"
+ExecStart="$cloudflared" tunnel run --token-file "$tunnel_token"
 Restart=always
 RestartSec=5
 NoNewPrivileges=yes

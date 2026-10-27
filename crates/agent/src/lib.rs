@@ -30,6 +30,7 @@ mod taskxml;
 pub mod terminal;
 #[cfg(test)]
 mod testing;
+pub mod update;
 #[cfg(windows)]
 mod winacl;
 

@@ -6,6 +6,7 @@ use crate::random;
 
 pub const TICKET_BYTES: usize = 32;
 pub const GRACE_SECONDS: u64 = 300;
+pub const MAX_PER_DEVICE: usize = 4;
 const MAX_ENTRIES: usize = 64;
 
 #[derive(Clone, Copy)]
@@ -40,7 +41,17 @@ impl Tickets {
         now: u64,
     ) -> Result<[u8; TICKET_BYTES], CryptoError> {
         self.prune(now);
-        self.entries.retain(|entry| entry.device != device);
+        while self
+            .entries
+            .iter()
+            .filter(|entry| entry.device == device)
+            .count()
+            >= MAX_PER_DEVICE
+        {
+            if let Some(oldest) = self.entries.iter().position(|entry| entry.device == device) {
+                self.entries.remove(oldest);
+            }
+        }
         if self.entries.len() >= MAX_ENTRIES {
             self.entries.remove(0);
         }
@@ -54,26 +65,39 @@ impl Tickets {
         Ok(secret)
     }
 
-    pub fn suspend(&mut self, device: &PublicKey, now: u64) {
+    pub fn suspend(&mut self, device: &PublicKey, secret: &[u8; TICKET_BYTES], now: u64) {
         if let Some(entry) = self
             .entries
             .iter_mut()
-            .find(|entry| entry.device == *device)
+            .find(|entry| entry.device == *device && bool::from(entry.secret.ct_eq(secret)))
         {
             entry.valid_until = Some(now.saturating_add(GRACE_SECONDS));
         }
     }
 
-    pub fn revoke(&mut self, device: &PublicKey) {
+    pub fn revoke(&mut self, device: &PublicKey, secret: &[u8; TICKET_BYTES]) {
+        self.entries
+            .retain(|entry| !(entry.device == *device && bool::from(entry.secret.ct_eq(secret))));
+    }
+
+    pub fn revoke_device(&mut self, device: &PublicKey) {
         self.entries.retain(|entry| entry.device != *device);
     }
 
     pub fn verify(&mut self, device: &PublicKey, presented: &[u8; TICKET_BYTES], now: u64) -> bool {
         self.prune(now);
-        self.entries
-            .iter()
-            .find(|entry| entry.device == *device && entry.valid_until.is_some())
-            .is_some_and(|entry| entry.secret.ct_eq(presented).into())
+        let found = self.entries.iter().position(|entry| {
+            entry.device == *device
+                && entry.valid_until.is_some()
+                && bool::from(entry.secret.ct_eq(presented))
+        });
+        match found {
+            Some(index) => {
+                self.entries.remove(index);
+                true
+            }
+            None => false,
+        }
     }
 
     fn prune(&mut self, now: u64) {
@@ -110,18 +134,16 @@ mod tests {
         assert!(!tickets.verify(&key, &first, 100));
         let second = tickets.issue(key, 100).unwrap();
         assert_ne!(first, second);
-        assert_eq!(tickets.len(), 1);
+        assert_eq!(tickets.len(), 2);
     }
 
     #[test]
-    fn a_suspended_ticket_verifies_within_the_grace_period_until_a_new_one_replaces_it() {
+    fn a_suspended_ticket_verifies_once_within_the_grace_period() {
         let mut tickets = Tickets::new();
         let key = device();
         let ticket = tickets.issue(key, 100).unwrap();
-        tickets.suspend(&key, 1000);
+        tickets.suspend(&key, &ticket, 1000);
         assert!(tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS));
-        assert!(tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS));
-        tickets.issue(key, 1000 + GRACE_SECONDS).unwrap();
         assert!(!tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS));
     }
 
@@ -130,7 +152,7 @@ mod tests {
         let mut tickets = Tickets::new();
         let key = device();
         let ticket = tickets.issue(key, 100).unwrap();
-        tickets.suspend(&key, 1000);
+        tickets.suspend(&key, &ticket, 1000);
         assert!(!tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS + 1));
         assert!(tickets.is_empty());
     }
@@ -140,7 +162,7 @@ mod tests {
         let mut tickets = Tickets::new();
         let (key, other) = (device(), device());
         let ticket = tickets.issue(key, 0).unwrap();
-        tickets.suspend(&key, 0);
+        tickets.suspend(&key, &ticket, 0);
         let mut wrong = ticket;
         wrong[0] ^= 1;
         assert!(!tickets.verify(&key, &wrong, 1));
@@ -149,25 +171,48 @@ mod tests {
     }
 
     #[test]
-    fn revoking_removes_the_ticket() {
+    fn revoking_removes_only_that_ticket() {
         let mut tickets = Tickets::new();
         let key = device();
-        let ticket = tickets.issue(key, 0).unwrap();
-        tickets.suspend(&key, 0);
-        tickets.revoke(&key);
-        assert!(!tickets.verify(&key, &ticket, 1));
+        let one = tickets.issue(key, 0).unwrap();
+        let two = tickets.issue(key, 0).unwrap();
+        tickets.suspend(&key, &one, 0);
+        tickets.suspend(&key, &two, 0);
+        tickets.revoke(&key, &one);
+        assert!(!tickets.verify(&key, &one, 1));
+        assert!(tickets.verify(&key, &two, 1));
+        let three = tickets.issue(key, 2).unwrap();
+        tickets.suspend(&key, &three, 2);
+        tickets.revoke_device(&key);
+        assert!(tickets.is_empty());
     }
 
     #[test]
-    fn a_new_login_replaces_the_previous_ticket_of_the_device() {
+    fn two_sessions_of_the_same_device_keep_their_own_tickets() {
         let mut tickets = Tickets::new();
         let key = device();
-        let old = tickets.issue(key, 0).unwrap();
-        tickets.suspend(&key, 0);
-        let new = tickets.issue(key, 10).unwrap();
-        tickets.suspend(&key, 10);
-        assert!(!tickets.verify(&key, &old, 11));
-        assert!(tickets.verify(&key, &new, 11));
+        let tab_a = tickets.issue(key, 0).unwrap();
+        let tab_b = tickets.issue(key, 1).unwrap();
+        tickets.suspend(&key, &tab_a, 10);
+        tickets.suspend(&key, &tab_b, 10);
+        assert!(tickets.verify(&key, &tab_a, 11));
+        assert!(tickets.verify(&key, &tab_b, 11));
+    }
+
+    #[test]
+    fn a_device_keeps_at_most_a_few_tickets_and_the_oldest_goes_first() {
+        let mut tickets = Tickets::new();
+        let key = device();
+        let issued: Vec<_> = (0..=MAX_PER_DEVICE as u64)
+            .map(|index| {
+                let ticket = tickets.issue(key, index).unwrap();
+                tickets.suspend(&key, &ticket, index);
+                ticket
+            })
+            .collect();
+        assert_eq!(tickets.len(), MAX_PER_DEVICE);
+        assert!(!tickets.verify(&key, &issued[0], 10));
+        assert!(tickets.verify(&key, &issued[MAX_PER_DEVICE], 10));
     }
 
     #[test]
@@ -176,8 +221,9 @@ mod tests {
         let keys: Vec<PublicKey> = (0..MAX_ENTRIES + 10).map(|_| device()).collect();
         let mut issued = Vec::new();
         for key in &keys {
-            issued.push(tickets.issue(*key, 0).unwrap());
-            tickets.suspend(key, 0);
+            let ticket = tickets.issue(*key, 0).unwrap();
+            tickets.suspend(key, &ticket, 0);
+            issued.push(ticket);
         }
         assert_eq!(tickets.len(), MAX_ENTRIES);
         assert!(!tickets.verify(&keys[0], &issued[0], 1));

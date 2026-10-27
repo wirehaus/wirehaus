@@ -45,6 +45,7 @@ export type Messages = {
   captureUnsupported: string;
   captureExit: string;
   layoutLabel: string;
+  languageName: string;
   menu: string;
   typeUnsupported: string;
   zoomReset: string;
@@ -123,6 +124,7 @@ export type Messages = {
   filesRemoving: (name: string) => string;
   filesMoved: (count: number) => string;
   filesInvalidName: string;
+  filesAgentOld: string;
   filesDownloading: (name: string, percent: number) => string;
   filesUploading: (name: string, percent: number) => string;
   filesFinished: (name: string) => string;
@@ -132,7 +134,9 @@ export type Messages = {
   editorSave: string;
   editorSaved: (name: string) => string;
   editorClose: string;
-  editorWrap: string;
+  editorLines: (count: number) => string;
+  editorSelected: (count: number) => string;
+  editorLanguage: string;
   editorModified: string;
   editorUnsaved: string;
   editorPosition: (line: number, column: number) => string;
@@ -209,7 +213,8 @@ const catalog: Record<string, Messages> = {
     captureOn: 'Teclado capturado. Pulsa Ctrl derecho para soltarlo.',
     captureUnsupported: 'Este navegador no puede capturar todo el teclado: Esc y algunos atajos seguirán siendo del navegador. Ctrl derecho sale.',
     captureExit: 'Salir (Ctrl derecho)',
-    layoutLabel: 'Teclado del ordenador remoto',
+    layoutLabel: 'Teclado táctil',
+    languageName: 'Idioma',
     menu: 'Menú',
     typeUnsupported: 'Ese carácter no se puede escribir con el teclado táctil. Usa la pestaña Portapapeles.',
     zoomReset: 'Ajustar a la pantalla',
@@ -293,6 +298,7 @@ const catalog: Record<string, Messages> = {
     filesRemoving: (name) => `Borrando ${name}...`,
     filesMoved: (count) => (count === 1 ? 'Movido.' : `${count} elementos movidos.`),
     filesInvalidName: 'Ese nombre no es válido.',
+    filesAgentOld: 'Este agente es de una versión anterior: actualízalo para mover, renombrar y editar archivos.',
     filesDownloading: (name, percent) => `Descargando ${name}: ${percent} %`,
     filesUploading: (name, percent) => `Subiendo ${name}: ${percent} %`,
     filesFinished: (name) => `${name}: terminado.`,
@@ -314,7 +320,9 @@ const catalog: Record<string, Messages> = {
     editorSave: 'Guardar',
     editorSaved: (name) => `${name}: guardado.`,
     editorClose: 'Cerrar',
-    editorWrap: 'Ajustar líneas',
+    editorLines: (count) => (count === 1 ? '1 línea' : `${count} líneas`),
+    editorSelected: (count) => (count === 1 ? '1 seleccionado' : `${count} seleccionados`),
+    editorLanguage: 'Lenguaje',
     editorModified: 'Sin guardar',
     editorUnsaved: 'Hay cambios sin guardar. ¿Cerrar y descartarlos?',
     editorPosition: (line, column) => `Línea ${line}, columna ${column}`,
@@ -400,7 +408,8 @@ const catalog: Record<string, Messages> = {
     captureOn: 'Keyboard captured. Press right Ctrl to release it.',
     captureUnsupported: 'This browser cannot capture the whole keyboard: Esc and some shortcuts stay with the browser. Right Ctrl leaves.',
     captureExit: 'Leave (right Ctrl)',
-    layoutLabel: 'Remote computer keyboard',
+    layoutLabel: 'Touch keyboard',
+    languageName: 'Language',
     menu: 'Menu',
     typeUnsupported: 'That character cannot be typed with the touch keyboard. Use the Clipboard tab.',
     zoomReset: 'Fit to screen',
@@ -484,6 +493,7 @@ const catalog: Record<string, Messages> = {
     filesRemoving: (name) => `Deleting ${name}...`,
     filesMoved: (count) => (count === 1 ? 'Moved.' : `${count} items moved.`),
     filesInvalidName: 'That name is not valid.',
+    filesAgentOld: 'This agent is an older version: update it to move, rename and edit files.',
     filesDownloading: (name, percent) => `Downloading ${name}: ${percent} %`,
     filesUploading: (name, percent) => `Uploading ${name}: ${percent} %`,
     filesFinished: (name) => `${name}: done.`,
@@ -505,7 +515,9 @@ const catalog: Record<string, Messages> = {
     editorSave: 'Save',
     editorSaved: (name) => `${name}: saved.`,
     editorClose: 'Close',
-    editorWrap: 'Wrap lines',
+    editorLines: (count) => (count === 1 ? '1 line' : `${count} lines`),
+    editorSelected: (count) => `${count} selected`,
+    editorLanguage: 'Language',
     editorModified: 'Unsaved',
     editorUnsaved: 'There are unsaved changes. Close and discard them?',
     editorPosition: (line, column) => `Line ${line}, column ${column}`,
@@ -551,6 +563,18 @@ const catalog: Record<string, Messages> = {
 };
 
 const fallback = 'es';
+
+export function preferredLanguage(browser: string): string {
+  try {
+    const stored = localStorage.getItem('wirehaus.lang');
+    if (stored === 'es' || stored === 'en') {
+      return stored;
+    }
+  } catch {
+    return browser;
+  }
+  return browser;
+}
 
 export function messagesFor(language: string): Messages {
   const base = language.toLowerCase().split('-')[0] ?? fallback;

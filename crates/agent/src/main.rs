@@ -14,14 +14,17 @@ use wirehaus_agent::state::{ClipboardMode, SecretStorage};
 
 use crate::cli::{
     AudioAction, Cli, ClipboardAction, Command, DeviceAction, Direction, FilesAction,
-    SecretsAction, SecretsTarget, TerminalAction, ViewerAction,
+    SecretsAction, SecretsTarget, TerminalAction, UpdateAction, ViewerAction,
 };
 
 fn main() -> ExitCode {
     wirehaus_agent::i18n::init(wirehaus_agent::i18n::Language::from_environment());
     let cli = Cli::parse();
     let dir = cli.state_dir.clone().unwrap_or_else(default_dir);
-    match run(cli.command, dir) {
+    match run(cli.command, &dir) {
+        Ok(()) if wirehaus_agent::update::restart_requested() => {
+            ExitCode::from(wirehaus_agent::update::RESTART_EXIT_CODE)
+        }
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("wirehaus-agent: {error}");
@@ -30,9 +33,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn run(command: Command, dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut out = stdout().lock();
-    let open = || Store::open(&dir, system_clock());
+    let open = || Store::open(dir, system_clock());
     match command {
         Command::Info => {
             println!(
@@ -41,7 +44,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
                 PROTOCOL_VERSION
             );
         }
-        Command::Init => commands::init(&dir, system_clock(), &mut out)?,
+        Command::Init => commands::init(dir, system_clock(), &mut out)?,
         Command::Pairing => commands::pairing(&open()?, &mut out)?,
         #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         Command::Service { action } => match action {
@@ -53,7 +56,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
             } => {
                 wirehaus_agent::Exposure::new(&public_hosts, &viewer_origins)?;
                 wirehaus_agent::service::install(
-                    &dir,
+                    dir,
                     &viewer_dir,
                     listen,
                     &public_hosts,
@@ -96,7 +99,9 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         Command::Secrets { action } => run_secrets(&open()?, action, &mut out)?,
         Command::Lock { code } => commands::lock(&open()?, true, &code, &mut out)?,
         Command::Unlock { code } => commands::lock(&open()?, false, &code, &mut out)?,
+        Command::Update { action } => run_update(dir, action)?,
         Command::Serve {
+            no_auto_update,
             listen,
             display,
             viewer_dir,
@@ -108,6 +113,7 @@ fn run(command: Command, dir: std::path::PathBuf) -> Result<(), Box<dyn std::err
         } => serve(
             dir,
             ServeOptions {
+                auto_update: !no_auto_update,
                 listen,
                 display,
                 viewer_dir,
@@ -190,6 +196,7 @@ fn run_secrets(
 }
 
 struct ServeOptions {
+    auto_update: bool,
     listen: std::net::SocketAddr,
     display: Option<String>,
     viewer_dir: std::path::PathBuf,
@@ -201,7 +208,7 @@ struct ServeOptions {
 }
 
 fn serve(
-    dir: std::path::PathBuf,
+    dir: &std::path::Path,
     options: ServeOptions,
     out: &mut impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -222,7 +229,7 @@ fn serve(
         display: options.display,
         viewer_dir: options.viewer_dir,
         jpeg_quality: options.quality,
-        state_dir: dir,
+        state_dir: dir.to_path_buf(),
         clock: None,
         vault: None,
         idle_timeout: Duration::from_secs(u64::from(options.idle_minutes) * 60),
@@ -230,6 +237,118 @@ fn serve(
         exposure,
     })?;
     println!("listening on http://{}", server.local_addr()?);
-    server.run(&AtomicBool::new(false))?;
+    let stop = AtomicBool::new(false);
+    let layout = if options.auto_update {
+        wirehaus_agent::update::Layout::detect(dir).ok()
+    } else {
+        None
+    };
+    if let Some(layout) = &layout {
+        match wirehaus_agent::update::begin_probation(layout)? {
+            wirehaus_agent::update::Probation::RolledBack(version) => {
+                return Err(format!("version {version} did not start and was rolled back").into());
+            }
+            wirehaus_agent::update::Probation::Started
+            | wirehaus_agent::update::Probation::None => {}
+        }
+    }
+    std::thread::scope(|scope| {
+        if let Some(layout) = &layout {
+            let server = &server;
+            let stop = &stop;
+            scope.spawn(move || {
+                let mut waited = 0;
+                while waited < 90 && !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_secs(1));
+                    waited += 1;
+                }
+                if !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    wirehaus_agent::update::mark_healthy(&layout.state_dir);
+                }
+                wirehaus_agent::update::run_background(
+                    layout,
+                    &|| server.is_busy(),
+                    stop,
+                    Duration::from_secs(6 * 3600),
+                    Duration::from_secs(60),
+                );
+            });
+        }
+        let result = server.run(&stop);
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        result
+    })?;
+    Ok(())
+}
+
+fn run_update(
+    dir: &std::path::Path,
+    action: UpdateAction,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use wirehaus_agent::update;
+    let version = update::Version::current();
+    match action {
+        UpdateAction::Status => {
+            let managed = update::Layout::detect(dir).is_ok();
+            println!("version: {version}");
+            println!(
+                "managed installation: {}",
+                if managed { "yes" } else { "no" }
+            );
+            println!(
+                "automatic updates: {}",
+                if update::enabled(dir) { "on" } else { "off" }
+            );
+            if let Some(skipped) = update::skipped(dir) {
+                println!("skipped version: {skipped}");
+            }
+            if let Some(pending) = update::read_pending(dir) {
+                println!(
+                    "probation: {} to {} (start {} of {})",
+                    pending.from,
+                    pending.to,
+                    pending.attempts,
+                    update::MAX_ATTEMPTS
+                );
+            }
+        }
+        UpdateAction::Check => {
+            let fetch = update::fetcher();
+            match update::check(
+                &fetch,
+                &update::base_url(),
+                version,
+                update::skipped(dir),
+                &update::trusted_keys(),
+            )? {
+                Some(release) => println!("{} is available (current {version})", release.version),
+                None => println!("{version} is the latest version"),
+            }
+        }
+        UpdateAction::Apply => {
+            let layout = update::Layout::detect(dir)?;
+            match update::apply_now(&layout, &update::fetcher(), &update::base_url())? {
+                Some(next) => println!(
+                    "{next} is installed; the service restarts when you stop the agent (systemctl --user restart wirehaus-agent)"
+                ),
+                None => println!("{version} is the latest version"),
+            }
+        }
+        UpdateAction::Enable => {
+            update::set_enabled(dir, true)?;
+            println!("automatic updates are on");
+        }
+        UpdateAction::Disable => {
+            update::set_enabled(dir, false)?;
+            println!("automatic updates are off");
+        }
+        UpdateAction::Rollback => {
+            let layout = update::Layout::detect(dir)?;
+            match update::rollback(&layout)? {
+                Some(failed) => println!("rolled back from {failed}"),
+                None => println!("nothing to roll back to"),
+            }
+        }
+    }
     Ok(())
 }

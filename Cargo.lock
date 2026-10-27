@@ -501,6 +501,7 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "curve25519-dalek-derive",
+ "digest 0.10.7",
  "fiat-crypto",
  "rustc_version",
  "subtle",
@@ -575,6 +576,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6de10d1bf70b70bd126ed38f8850c87b8b252aa72dd4ef62d56fe81edb4788a2"
 dependencies = [
  "windows 0.61.3",
+]
+
+[[package]]
+name = "ed25519"
+version = "2.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
+dependencies = [
+ "signature",
+]
+
+[[package]]
+name = "ed25519-dalek"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
+dependencies = [
+ "curve25519-dalek",
+ "ed25519",
+ "sha2",
+ "subtle",
 ]
 
 [[package]]
@@ -1533,6 +1555,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "signature"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
+
+[[package]]
 name = "simd_cesu8"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2083,9 +2111,10 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-agent"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "clap",
+ "ed25519-dalek",
  "httparse",
  "openh264",
  "portable-pty",
@@ -2105,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-audio"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "cpal",
  "opus-pure",
@@ -2114,7 +2143,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-capture"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "core-graphics",
  "dxgi-capture-rs",
@@ -2124,7 +2153,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-clipboard"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "arboard",
  "thiserror 2.0.21",
@@ -2133,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-crypto"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "blake2 0.11.0",
  "getrandom 0.4.3",
@@ -2147,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-crypto-wasm"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "getrandom 0.3.4",
  "getrandom 0.4.3",
@@ -2159,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-encode"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "jpeg-encoder",
  "openh264",
@@ -2170,7 +2199,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-input"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "core-graphics",
  "enigo",
@@ -2182,14 +2211,14 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-protocol"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "wirehaus-vault"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",

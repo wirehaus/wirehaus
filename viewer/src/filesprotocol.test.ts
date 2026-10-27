@@ -50,6 +50,12 @@ test('decodes the messages the agent sends', () => {
   assert.deepEqual(decodeFiles(Uint8Array.of(7, 2, 0, 1, 97, 0, 2, 98, 99)), {
     kind: 'roots',
     names: ['a', 'bc'],
+    features: 0,
+  });
+  assert.deepEqual(decodeFiles(Uint8Array.of(7, 1, 0, 1, 97, 1)), {
+    kind: 'roots',
+    names: ['a'],
+    features: 1,
   });
   const listing = Uint8Array.of(8, 1, 0, 1, 0, 1, 120, 1, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 9);
   assert.deepEqual(decodeFiles(listing), {

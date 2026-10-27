@@ -60,7 +60,13 @@ pub enum Command {
         #[arg(long)]
         code: String,
     },
+    Update {
+        #[command(subcommand)]
+        action: UpdateAction,
+    },
     Serve {
+        #[arg(long)]
+        no_auto_update: bool,
         #[arg(long, default_value = "127.0.0.1:7878")]
         listen: SocketAddr,
         #[arg(long)]
@@ -95,6 +101,16 @@ pub enum ServiceAction {
     },
     Uninstall,
     Status,
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+pub enum UpdateAction {
+    Status,
+    Check,
+    Apply,
+    Enable,
+    Disable,
+    Rollback,
 }
 
 #[derive(Debug, Subcommand)]

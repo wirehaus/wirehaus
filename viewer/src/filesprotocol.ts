@@ -5,6 +5,7 @@ export const MAX_FILE_CHUNK = 32 * 1024;
 export const MAX_PATH_LEN = 4096;
 export const MAX_NAME_LEN = 255;
 export const WINDOW_BYTES = 1 << 20;
+export const FEATURE_RENAME = 1;
 
 export type EntryKind = 'file' | 'directory' | 'other';
 
@@ -29,7 +30,7 @@ export type FileFailure =
   | 'io';
 
 export type FilesMessage =
-  | { kind: 'roots'; names: string[] }
+  | { kind: 'roots'; names: string[]; features: number }
   | { kind: 'listing'; entries: FileEntry[]; truncated: boolean }
   | { kind: 'ready'; size: number }
   | { kind: 'data'; data: Uint8Array }
@@ -111,6 +112,10 @@ class Reader {
     return value === 1;
   }
 
+  atEnd(): boolean {
+    return this.at === this.bytes.length;
+  }
+
   finish(): void {
     if (this.at !== this.bytes.length) {
       throw new ProtocolError('trailing bytes in files message');
@@ -132,7 +137,7 @@ export function decodeFiles(payload: Uint8Array): FilesMessage {
       for (let index = 0; index < count; index += 1) {
         names.push(reader.text(MAX_PATH_LEN));
       }
-      message = { kind: 'roots', names };
+      message = { kind: 'roots', names, features: reader.atEnd() ? 0 : reader.u8() };
       break;
     }
     case 8: {
