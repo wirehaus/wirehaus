@@ -120,3 +120,24 @@ test('the path is ignored when the agent serves its own viewer', () => {
   const target = resolveTarget({ protocol: 'http:', host: '127.0.0.1:7878', pathname: '/x', hash: '' }, false);
   assert.ok(typeof target === 'object' && !target.foreign);
 });
+
+test('access names follow the same rules as the registry', async () => {
+  const { validAccessName, cleanName, nameFromPath, namedByPath } = await import('./target.js');
+  assert.equal(validAccessName('cristobal'), true);
+  assert.equal(validAccessName('a-b-c'), true);
+  assert.equal(validAccessName('ab'), false);
+  assert.equal(validAccessName('123'), false);
+  assert.equal(validAccessName('-ab'), false);
+  assert.equal(validAccessName('a--b'), false);
+  assert.equal(validAccessName('Maria'), false);
+  assert.equal(validAccessName('admin'), false);
+  assert.equal(validAccessName('x'.repeat(33)), false);
+  assert.equal(cleanName('  Maria.wirehaus.dev/ '), 'maria');
+  assert.equal(cleanName('https://app.wirehaus.dev/cristobal'), 'cristobal');
+  assert.equal(nameFromPath('/Ana/'), 'ana');
+  assert.equal(nameFromPath('/'), undefined);
+  const page = { protocol: 'https:', host: 'app.wirehaus.dev', pathname: '/ana', hash: '' };
+  assert.equal(namedByPath(page), 'ana');
+  assert.equal(namedByPath({ ...page, hash: '#agent=ana.wirehaus.dev' }), undefined);
+  assert.equal(namedByPath({ ...page, pathname: '/' }), undefined);
+});

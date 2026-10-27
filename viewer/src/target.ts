@@ -113,3 +113,33 @@ export function resolveTarget(page: PageLocation, configurable: boolean): Target
   const authority = requested.length === 1 ? parseAgentAddress(requested[0] ?? '') : undefined;
   return authority === undefined ? 'invalid' : foreignTarget(authority);
 }
+
+const NAME = /^(?!\d+$)[a-z0-9]+(-[a-z0-9]+)*$/;
+
+export function validAccessName(name: string): boolean {
+  return name.length >= 3 && name.length <= 32 && NAME.test(name) && !RESERVED_NAMES.has(name);
+}
+
+export function cleanName(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^app\.wirehaus\.dev\//, '')
+    .replace(/\.wirehaus\.dev.*$/, '')
+    .replace(/\/+$/, '');
+}
+
+export function nameFromPath(pathname: string): string | undefined {
+  const first = pathname.split('/').filter((part) => part !== '')[0];
+  return first === undefined ? undefined : decodeURIComponent(first).toLowerCase();
+}
+
+export function namedByPath(page: PageLocation): string | undefined {
+  const hasHash = new URLSearchParams(page.hash.replace(/^#/, '')).getAll('agent').length > 0;
+  if (hasHash) {
+    return undefined;
+  }
+  const match = /^\/([A-Za-z0-9-]+)\/?$/.exec(page.pathname);
+  return match?.[1]?.toLowerCase();
+}

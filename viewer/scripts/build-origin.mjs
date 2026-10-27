@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, write
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  DEFAULT_API,
   DEFAULT_CONNECT,
   contentSecurityPolicy,
   headersFile,
@@ -24,6 +25,7 @@ const arg = (name, fallback) => {
   return index === -1 ? fallback : process.argv[index + 1];
 };
 const connect = arg('--connect', DEFAULT_CONNECT);
+const api = arg('--api', connect === DEFAULT_CONNECT ? DEFAULT_API : '');
 const target = arg('--out', join(root, 'dist-origin'));
 
 if (!existsSync(join(source, 'index.html'))) {
@@ -45,9 +47,9 @@ const files = new Map(
   readdirSync(target).map((name) => [name, readFileSync(join(target, name))]),
 );
 const importMapText = moduleIntegrity(files);
-const page = rewriteIndex(files.get('index.html').toString('utf8'), files, importMapText);
+const page = rewriteIndex(files.get('index.html').toString('utf8'), files, importMapText, api);
 writeFileSync(join(target, 'index.html'), page);
-writeFileSync(join(target, '_headers'), headersFile(contentSecurityPolicy(importMapText, connect)));
+writeFileSync(join(target, '_headers'), headersFile(contentSecurityPolicy(importMapText, api === '' ? connect : `${connect} ${api}`)));
 writeFileSync(join(target, '_redirects'), redirectsFile());
 mkdirSync(join(target, '.well-known'));
 writeFileSync(join(target, '.well-known/security.txt'), securityTxt(new Date(), SECURITY_TXT_VALID_DAYS));

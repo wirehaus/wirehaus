@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 export const DEFAULT_CONNECT = 'wss://*.wirehaus.dev';
+export const DEFAULT_API = 'https://api.wirehaus.dev';
 
 const MODULE_EXTENSIONS = ['.js', '.mjs'];
 
@@ -71,7 +72,7 @@ function replaceExactly(html, pattern, replacement, expected) {
   return html.replace(pattern, replacement);
 }
 
-export function rewriteIndex(html, files, importMapText) {
+export function rewriteIndex(html, files, importMapText, api = '') {
   const integrity = (path) => {
     const bytes = files.get(path.slice(1));
     if (bytes === undefined) {
@@ -81,8 +82,8 @@ export function rewriteIndex(html, files, importMapText) {
   };
   let page = replaceExactly(
     html,
-    /content="own"/g,
-    'content="configurable"',
+    /content="own" \/>/g,
+    api === '' ? 'content="configurable" />' : `content="configurable" />\n    <meta name="wirehaus-api" content="${api}" />`,
     1,
   );
   page = replaceExactly(

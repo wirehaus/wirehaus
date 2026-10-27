@@ -14,7 +14,7 @@ import { TouchLayer } from './touchlayer.js';
 import { type Messages, messagesFor } from './strings.js';
 import { bridgeTerminalStyles } from './stylebridge.js';
 import { Terminals } from './terminals.js';
-import { resolveTarget } from './target.js';
+import { cleanName, nameFromPath, namedByPath, resolveTarget, validAccessName } from './target.js';
 import { Viewer, type ViewerState } from './viewer.js';
 
 function element<T extends HTMLElement>(id: string): T {
@@ -64,6 +64,15 @@ const keys = element<HTMLElement>('keys');
 const softKeys = element<HTMLTextAreaElement>('softkeys');
 const keyboardButton = element<HTMLButtonElement>('keyboard');
 const zoomReset = element<HTMLButtonElement>('zoom-reset');
+const homePanel = element<HTMLElement>('home');
+const homeForm = element<HTMLFormElement>('home-form');
+const homeName = element<HTMLInputElement>('home-name');
+const homeError = element<HTMLElement>('home-error');
+const homeContinue = element<HTMLButtonElement>('home-continue');
+const homeCreate = element<HTMLAnchorElement>('home-create');
+const splashReserve = element<HTMLAnchorElement>('splash-reserve');
+const splashOther = element<HTMLButtonElement>('splash-other');
+const foot = element<HTMLElement>('foot');
 const pairSubmit = element<HTMLButtonElement>('pair-submit');
 const codeSubmit = element<HTMLButtonElement>('code-submit');
 const tabs = element<HTMLElement>('tabs');
@@ -99,6 +108,15 @@ const labels: [string, string][] = [
   ['secure-code', messages.secureNote],
   ['layout-label', messages.layoutLabel],
   ['keyboard-label', messages.keyboard],
+  ['home-title', messages.homeTitle],
+  ['home-lead', messages.homeLead],
+  ['home-label', messages.homeLabel],
+  ['home-submit', messages.homeOpen],
+  ['home-noaccess', messages.homeNoAccess],
+  ['home-create', messages.homeCreate],
+  ['foot-docs', messages.linkDocs],
+  ['foot-privacy', messages.linkPrivacy],
+  ['foot-terms', messages.linkTerms],
 ];
 for (const [id, text] of labels) {
   element(id).textContent = text;
@@ -112,6 +130,7 @@ zoomReset.setAttribute('aria-label', messages.zoomReset);
 zoomReset.title = messages.zoomReset;
 reconnect.textContent = messages.reconnect;
 pairName.value = messages.pairNameDefault;
+homeName.placeholder = messages.homePlaceholder;
 pairCode.placeholder = 'XXXX-XXXX-XXXX-XXXX';
 
 function refusal(state: Extract<ViewerState, { kind: 'refused' }>, texts: Messages): string {
@@ -176,6 +195,37 @@ const audio = new AudioControl(
 );
 
 let lastKind: ViewerState['kind'] = 'loading';
+let everConnected = false;
+const namedPath = namedByPath(location);
+const SITE = 'https://wirehaus.dev';
+const SITE_PREFIX = navigator.language.toLowerCase().startsWith('en') ? '/en' : '';
+const apiBase = document.querySelector('meta[name="wirehaus-api"]')?.getAttribute('content') ?? '';
+
+foot.querySelector<HTMLAnchorElement>('#foot-docs')?.setAttribute('href', `${SITE}${SITE_PREFIX}/docs/`);
+foot.querySelector<HTMLAnchorElement>('#foot-privacy')?.setAttribute('href', `${SITE}${SITE_PREFIX}/privacy/`);
+foot.querySelector<HTMLAnchorElement>('#foot-terms')?.setAttribute('href', `${SITE}${SITE_PREFIX}/terms/`);
+homeCreate.href = `${SITE}${SITE_PREFIX}/signup/`;
+
+function updateFoot(): void {
+  foot.hidden = pairPanel.hidden && codePanel.hidden && splash.hidden && homePanel.hidden;
+}
+
+function rememberName(name: string): void {
+  try {
+    localStorage.setItem('wirehaus.last', name);
+  } catch {
+    return;
+  }
+}
+
+function lastName(): string | undefined {
+  try {
+    const value = localStorage.getItem('wirehaus.last');
+    return value !== null && validAccessName(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function setError(target: HTMLElement, text: string): void {
   target.textContent = text;
@@ -218,8 +268,13 @@ function paintSplash(state: ViewerState): void {
       splashDetail.textContent = refusal(state, messages);
       break;
     case 'closed':
-      splashTitle.textContent = messages.endedTitle;
-      splashDetail.textContent = messages.closed;
+      if (!everConnected && namedPath !== undefined) {
+        splashTitle.textContent = messages.offlineTitle;
+        splashDetail.textContent = messages.offlineDetail(namedPath);
+      } else {
+        splashTitle.textContent = messages.endedTitle;
+        splashDetail.textContent = messages.closed;
+      }
       break;
     case 'ended':
       splashTitle.textContent = messages.endedTitle;
@@ -252,6 +307,14 @@ function show(state: ViewerState): void {
     toolsNotice.textContent = '';
   }
   showView();
+  homePanel.hidden = true;
+  splashReserve.hidden = true;
+  splashOther.hidden = true;
+  if (state.kind === 'connected' && namedPath !== undefined) {
+    everConnected = true;
+    rememberName(namedPath);
+  }
+  updateFoot();
   const canForget = state.kind !== 'loading' && state.kind !== 'needsPairing' && state.kind !== 'noAgent';
   forget.hidden = !canForget;
   menuButton.hidden = !canForget;
@@ -653,4 +716,112 @@ forget.addEventListener('click', () => {
 splashForget.addEventListener('click', () => void viewer.forget());
 reconnect.addEventListener('click', () => void viewer.reconnect());
 splashReconnect.addEventListener('click', () => void viewer.reconnect());
-void viewer.start();
+type Verdict = 'exists' | 'free' | 'cooling' | 'invalid';
+
+async function lookup(name: string): Promise<Verdict> {
+  if (!validAccessName(name)) {
+    return 'invalid';
+  }
+  if (apiBase === '') {
+    return 'exists';
+  }
+  try {
+    const answer = await fetch(`${apiBase}/v1/availability?name=${encodeURIComponent(name)}`, {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!answer.ok) {
+      return 'exists';
+    }
+    const body = (await answer.json()) as { available?: boolean; reason?: string | null };
+    if (body.available === true) {
+      return 'free';
+    }
+    if (body.reason === 'cooling') {
+      return 'cooling';
+    }
+    if (body.reason === 'invalid' || body.reason === 'reserved') {
+      return 'invalid';
+    }
+    return 'exists';
+  } catch {
+    return 'exists';
+  }
+}
+
+function hideAll(): void {
+  for (const section of [pairPanel, codePanel, homePanel, splash]) {
+    section.hidden = true;
+  }
+  menuButton.hidden = true;
+  forget.hidden = true;
+  reconnect.hidden = true;
+  status.textContent = '';
+}
+
+function showHome(error: string): void {
+  hideAll();
+  document.body.dataset['state'] = 'home';
+  homePanel.hidden = false;
+  setError(homeError, error);
+  const last = lastName();
+  homeContinue.hidden = last === undefined;
+  if (last !== undefined) {
+    homeContinue.textContent = messages.homeContinue(last);
+    homeContinue.onclick = () => location.assign(`/${last}`);
+  }
+  updateFoot();
+  homeName.focus();
+}
+
+function showNotFound(name: string, verdict: Exclude<Verdict, 'exists'>): void {
+  hideAll();
+  document.body.dataset['state'] = 'notfound';
+  splash.hidden = false;
+  splashSpinner.hidden = true;
+  splashIcon.removeAttribute('hidden');
+  splashReconnect.hidden = true;
+  splashForget.hidden = true;
+  splashTitle.textContent = messages.notFoundTitle(name);
+  splashDetail.textContent =
+    verdict === 'free' ? messages.notFoundDetail : verdict === 'cooling' ? messages.coolingDetail : messages.invalidDetail;
+  splashReserve.hidden = verdict !== 'free';
+  splashReserve.textContent = messages.reserveName(name);
+  splashReserve.href = `${SITE}${SITE_PREFIX}/signup/?name=${encodeURIComponent(name)}`;
+  splashOther.hidden = false;
+  splashOther.textContent = messages.searchAnother;
+  splashOther.onclick = () => location.assign('/');
+  updateFoot();
+}
+
+homeForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const name = cleanName(homeName.value);
+  if (name === '') {
+    setError(homeError, messages.homeShort);
+    return;
+  }
+  if (!validAccessName(name)) {
+    setError(homeError, messages.homeInvalid(name));
+    return;
+  }
+  location.assign(`/${name}`);
+});
+
+async function boot(): Promise<void> {
+  if (typeof target === 'string') {
+    const asked = nameFromPath(location.pathname);
+    showHome(target === 'invalid' && asked !== undefined ? messages.homeInvalid(asked) : '');
+    return;
+  }
+  if (namedPath !== undefined) {
+    document.title = `${namedPath} \u00b7 Wirehaus`;
+    const verdict = await lookup(namedPath);
+    if (verdict !== 'exists') {
+      showNotFound(namedPath, verdict);
+      return;
+    }
+  }
+  void viewer.start();
+}
+
+void boot();

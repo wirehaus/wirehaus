@@ -251,7 +251,8 @@ body[data-state='noAgent'] .dot {
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
 }
 
-button.primary {
+button.primary,
+a.primary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -266,7 +267,8 @@ button.primary {
   transition: background 0.15s ease, transform 0.05s ease;
 }
 
-button.primary:hover {
+button.primary:hover,
+a.primary:hover {
   background: var(--accent-strong);
 }
 
@@ -644,7 +646,7 @@ main {
 }
 
 .splash-actions:empty,
-.splash-actions:not(:has(button:not([hidden]))) {
+.splash-actions:not(:has(button:not([hidden]), a:not([hidden]))) {
   display: none;
 }
 
@@ -1307,4 +1309,106 @@ body.immersive #tabs {
 body.phone #immersive,
 body.phone .menu-field {
   display: none;
+}
+
+a.primary {
+  text-decoration: none;
+}
+
+.card a.primary,
+.card button.ghost.wide {
+  width: 100%;
+}
+
+.card button.ghost.wide {
+  margin-top: 10px;
+}
+
+.field > .affix {
+  display: flex;
+  margin-bottom: 0;
+  color: var(--text);
+  font-size: inherit;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-2);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.affix:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--ring);
+}
+
+.field .affix input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+}
+
+.field .affix input:focus {
+  box-shadow: none;
+}
+
+.affix .suffix {
+  padding: 0 14px 0 0;
+  margin: 0;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+}
+
+.split {
+  margin: 18px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+a.inline {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 550;
+}
+
+a.inline:hover {
+  text-decoration: underline;
+}
+
+.foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--safe-bottom) + 10px);
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.foot a {
+  pointer-events: auto;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.foot a:hover {
+  color: var(--text);
+}
+
+.splash-actions .linkbtn {
+  text-decoration: none;
+}
+
+.splash .name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
 }

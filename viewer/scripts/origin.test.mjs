@@ -70,6 +70,14 @@ test('the rewritten page is configurable and pins every subresource', () => {
   assert.ok(result.indexOf('importmap') < result.indexOf('type="module"'));
 });
 
+test('the page can name the API it checks addresses against', () => {
+  const files = viewer();
+  const map = moduleIntegrity(files);
+  const result = rewriteIndex(page, files, map, 'https://api.example.test');
+  assert.ok(result.includes('<meta name="wirehaus-api" content="https://api.example.test" />'));
+  assert.ok(!rewriteIndex(page, files, map).includes('wirehaus-api'));
+});
+
 test('a page that does not match the expected shape is rejected', () => {
   const files = viewer();
   const map = moduleIntegrity(files);

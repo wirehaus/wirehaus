@@ -3,6 +3,27 @@ import type { ClipboardFailure } from './clipboardprotocol.js';
 import type { FileFailure } from './filesprotocol.js';
 
 export type Messages = {
+  homeTitle: string;
+  homeLead: string;
+  homeLabel: string;
+  homePlaceholder: string;
+  homeOpen: string;
+  homeContinue: (name: string) => string;
+  homeNoAccess: string;
+  homeCreate: string;
+  homeInvalid: (name: string) => string;
+  homeShort: string;
+  notFoundTitle: (name: string) => string;
+  notFoundDetail: string;
+  coolingDetail: string;
+  invalidDetail: string;
+  reserveName: (name: string) => string;
+  searchAnother: string;
+  linkDocs: string;
+  linkPrivacy: string;
+  linkTerms: string;
+  offlineTitle: string;
+  offlineDetail: (name: string) => string;
   stepPair: string;
   connectedBasic: string;
   stepVerify: string;
@@ -111,6 +132,28 @@ export type Messages = {
 
 const catalog: Record<string, Messages> = {
   es: {
+    homeTitle: 'Entra a tu ordenador',
+    homeLead: 'Escribe el nombre de tu acceso para abrir tu escritorio, tu terminal y tus archivos desde el navegador.',
+    homeLabel: 'Tu dirección',
+    homePlaceholder: 'tu-nombre',
+    homeOpen: 'Abrir',
+    homeContinue: (name) => `Continuar con ${name}`,
+    homeNoAccess: '¿Todavía no tienes acceso?',
+    homeCreate: 'Crear el mío',
+    homeInvalid: (name) => `«${name}» no es una dirección válida. Usa de 3 a 32 letras minúsculas, cifras o guiones.`,
+    homeShort: 'Escribe el nombre de tu acceso.',
+    notFoundTitle: (name) => `«${name}» no existe`,
+    notFoundDetail: 'Nadie ha reservado todavía esta dirección. Si quieres, puedes reservarla ahora, gratis y sin contraseña.',
+    coolingDetail: 'Esta dirección se liberó hace poco y no se puede reservar durante unos días. Prueba con otra.',
+    invalidDetail: 'Esa dirección no se puede usar. Prueba con otra: de 3 a 32 letras minúsculas, cifras o guiones.',
+    reserveName: (name) => `Reservar ${name}`,
+    searchAnother: 'Buscar otra dirección',
+    linkDocs: 'Documentación',
+    linkPrivacy: 'Privacidad',
+    linkTerms: 'Términos',
+    offlineTitle: 'No se puede llegar a tu ordenador',
+    offlineDetail: (name) =>
+      `${name} existe, pero su ordenador no responde. Puede estar apagado, sin conexión o con el agente parado.`,
     stepPair: 'Emparejar',
     connectedBasic: 'Conectado',
     stepVerify: 'Verificar',
@@ -244,6 +287,28 @@ const catalog: Record<string, Messages> = {
     },
   },
   en: {
+    homeTitle: 'Get into your computer',
+    homeLead: 'Enter the name of your access to open your desktop, terminal and files from the browser.',
+    homeLabel: 'Your address',
+    homePlaceholder: 'your-name',
+    homeOpen: 'Open',
+    homeContinue: (name) => `Continue with ${name}`,
+    homeNoAccess: "Don't have an access yet?",
+    homeCreate: 'Create mine',
+    homeInvalid: (name) => `"${name}" is not a valid address. Use 3 to 32 lowercase letters, digits or hyphens.`,
+    homeShort: 'Enter the name of your access.',
+    notFoundTitle: (name) => `"${name}" does not exist`,
+    notFoundDetail: 'Nobody has claimed this address yet. If you like, you can reserve it now, free and without a password.',
+    coolingDetail: 'This address was released recently and cannot be reserved for a few days. Try another one.',
+    invalidDetail: 'That address cannot be used. Try another: 3 to 32 lowercase letters, digits or hyphens.',
+    reserveName: (name) => `Reserve ${name}`,
+    searchAnother: 'Look for another address',
+    linkDocs: 'Documentation',
+    linkPrivacy: 'Privacy',
+    linkTerms: 'Terms',
+    offlineTitle: 'Cannot reach your computer',
+    offlineDetail: (name) =>
+      `${name} exists, but its computer does not answer. It may be off, offline or have the agent stopped.`,
     stepPair: 'Pair',
     connectedBasic: 'Connected',
     stepVerify: 'Verify',

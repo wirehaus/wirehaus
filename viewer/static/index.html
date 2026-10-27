@@ -6,6 +6,7 @@
     <meta name="wirehaus-agent-address" content="own" />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0d1117" />
+    <meta name="robots" content="noindex" />
     <title>Wirehaus</title>
     <link
       rel="icon"
@@ -86,6 +87,27 @@
     </header>
 
     <main>
+      <section id="home" class="stage" hidden>
+        <form id="home-form" class="card" autocomplete="off" novalidate>
+          <div class="card-head">
+            <svg class="logo" aria-hidden="true"><use href="#i-mark" /></svg>
+          </div>
+          <h1 id="home-title"></h1>
+          <p id="home-lead" class="lead"></p>
+          <label class="field">
+            <span id="home-label"></span>
+            <span class="affix">
+              <input id="home-name" name="name" class="mono-lower" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="32" enterkeyhint="go" />
+              <span class="suffix">.wirehaus.dev</span>
+            </span>
+          </label>
+          <p id="home-error" class="error" role="alert"></p>
+          <button id="home-submit" type="submit" class="primary"></button>
+          <button id="home-continue" type="button" class="ghost wide" hidden></button>
+          <p class="split"><span id="home-noaccess"></span> <a id="home-create" class="inline" rel="noopener"></a></p>
+        </form>
+      </section>
+
       <section id="pair" class="stage" hidden>
         <form id="pair-form" class="card" autocomplete="off">
           <div class="card-head">
@@ -151,11 +173,19 @@
           <h1 id="splash-title"></h1>
           <p id="splash-detail" class="lead"></p>
           <div class="splash-actions">
+            <a id="splash-reserve" class="primary linkbtn" rel="noopener" hidden></a>
+            <button id="splash-other" type="button" class="ghost" hidden></button>
             <button id="splash-reconnect" type="button" class="primary" hidden></button>
             <button id="splash-forget" type="button" class="ghost" hidden></button>
           </div>
         </div>
       </section>
+
+      <footer id="foot" class="foot" hidden>
+        <a id="foot-docs" rel="noopener"></a>
+        <a id="foot-privacy" rel="noopener"></a>
+        <a id="foot-terms" rel="noopener"></a>
+      </footer>
 
       <div id="screen-area" class="screen-area" hidden>
         <canvas id="screen" tabindex="0" hidden></canvas>
