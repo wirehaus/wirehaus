@@ -63,6 +63,12 @@ impl Files {
             FilesMessage::Remove { root, path } => {
                 remove(&roots, root, &path, stream, &self.parts())
             }
+            FilesMessage::Rename {
+                root,
+                from,
+                to,
+                replace,
+            } => rename(&roots, root, &from, &to, replace, stream, &self.parts()),
             FilesMessage::Download { root, path } => self.download(&roots, root, &path, stream),
             FilesMessage::Upload { root, path, size } => {
                 self.upload(&roots, root, &path, size, stream)
@@ -466,6 +472,57 @@ fn remove(
     Ok(vec![(stream, FilesMessage::Done)])
 }
 
+fn rename(
+    roots: &[PathBuf],
+    root: u8,
+    from: &str,
+    to: &str,
+    replace: bool,
+    stream: u32,
+    busy: &[PathBuf],
+) -> Result<Vec<Reply>, FailureReason> {
+    let base = root_at(roots, root)?;
+    let (from_parent, from_name) = creatable_parent(base, from)?;
+    let (to_parent, to_name) = creatable_parent(base, to)?;
+    let source = from_parent.join(from_name);
+    let target = to_parent.join(to_name);
+    if busy.contains(&source) || busy.contains(&target) {
+        return Err(FailureReason::InvalidPath);
+    }
+    let source_meta = fs::symlink_metadata(&source).map_err(|error| map_io(&error))?;
+    if source == target {
+        return Ok(vec![(stream, FilesMessage::Done)]);
+    }
+    if source_meta.is_dir() && to_parent.starts_with(&source) {
+        return Err(FailureReason::InvalidPath);
+    }
+    match fs::symlink_metadata(&target) {
+        Ok(target_meta) => {
+            if !replace || !source_meta.is_file() || !target_meta.is_file() {
+                return Err(FailureReason::AlreadyExists);
+            }
+            fs::set_permissions(&source, target_meta.permissions())
+                .map_err(|error| map_io(&error))?;
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(map_io(&error)),
+    }
+    if !replace && source_meta.is_file() {
+        match fs::hard_link(&source, &target) {
+            Ok(()) => {
+                fs::remove_file(&source).map_err(|error| map_io(&error))?;
+                return Ok(vec![(stream, FilesMessage::Done)]);
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                return Err(FailureReason::AlreadyExists);
+            }
+            Err(_) => {}
+        }
+    }
+    fs::rename(&source, &target).map_err(|error| map_io(&error))?;
+    Ok(vec![(stream, FilesMessage::Done)])
+}
+
 fn canonical_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
     roots
         .iter()
@@ -656,6 +713,15 @@ mod tests {
         FilesMessage::Remove { root, path }
     }
 
+    fn rename_message(from: &str, to: &str, replace: bool) -> FilesMessage {
+        FilesMessage::Rename {
+            root: 0,
+            from: from.to_owned(),
+            to: to.to_owned(),
+            replace,
+        }
+    }
+
     fn names(message: FilesMessage) -> Vec<String> {
         match message {
             FilesMessage::Listing { entries, .. } => {
@@ -704,6 +770,7 @@ mod tests {
             path_message(download_message, "a"),
             path_message(mkdir_message, "a"),
             path_message(remove_message, "a"),
+            rename_message("a", "b", false),
         ] {
             assert_eq!(
                 only(files.handle(1, message, &[])),
@@ -987,6 +1054,105 @@ mod tests {
         assert_eq!(files.active(), 0);
         let leftovers = fs::read_dir(sandbox.root().join("sub")).unwrap().count();
         assert_eq!(leftovers, 2);
+    }
+
+    #[test]
+    fn rename_moves_inside_the_root_and_never_replaces_by_default() {
+        let sandbox = Sandbox::new("rename");
+        let mut files = Files::new();
+        let roots = sandbox.roots();
+        let done = |files: &mut Files, from: &str, to: &str, replace: bool| {
+            only(files.handle(1, rename_message(from, to, replace), &roots))
+        };
+        assert_eq!(
+            done(&mut files, "a.txt", "c.txt", false),
+            FilesMessage::Done
+        );
+        assert!(sandbox.root().join("c.txt").exists());
+        assert!(!sandbox.root().join("a.txt").exists());
+        assert_eq!(
+            done(&mut files, "c.txt", "sub/c.txt", false),
+            FilesMessage::Done
+        );
+        assert_eq!(
+            done(&mut files, "sub/c.txt", "sub/b.txt", false),
+            FilesMessage::Failed(FailureReason::AlreadyExists)
+        );
+        assert_eq!(
+            done(&mut files, "sub/c.txt", "sub/b.txt", true),
+            FilesMessage::Done
+        );
+        assert_eq!(
+            fs::read(sandbox.root().join("sub/b.txt")).unwrap(),
+            b"hello"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let script = sandbox.root().join("run.sh");
+            fs::write(&script, b"#!/bin/sh\n").unwrap();
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::write(sandbox.root().join("run.sh.tmp"), b"#!/bin/sh\necho\n").unwrap();
+            assert_eq!(
+                done(&mut files, "run.sh.tmp", "run.sh", true),
+                FilesMessage::Done
+            );
+            let mode = fs::metadata(&script).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o755);
+        }
+        assert_eq!(
+            done(&mut files, "missing", "x", false),
+            FilesMessage::Failed(FailureReason::NotFound)
+        );
+    }
+
+    #[test]
+    fn rename_refuses_directories_into_themselves_and_replacing_folders() {
+        let sandbox = Sandbox::new("rename-guard");
+        fs::create_dir_all(sandbox.root().join("sub/deeper")).unwrap();
+        fs::create_dir_all(sandbox.root().join("other")).unwrap();
+        let mut files = Files::new();
+        let roots = sandbox.roots();
+        for (from, to, replace) in [
+            ("sub", "sub/deeper/sub", false),
+            ("sub", "other", true),
+            ("a.txt", "sub", true),
+            ("a.txt", "../outside/a.txt", false),
+            ("a.txt", "..", false),
+        ] {
+            let reply = only(files.handle(1, rename_message(from, to, replace), &roots));
+            assert!(matches!(reply, FilesMessage::Failed(_)), "{from} -> {to}");
+        }
+        assert!(sandbox.root().join("sub/deeper").exists());
+        assert!(sandbox.base.join("outside/secret.txt").exists());
+        assert!(!sandbox.base.join("outside/a.txt").exists());
+    }
+
+    #[test]
+    fn rename_never_follows_or_replaces_a_symlink_destination() {
+        let sandbox = Sandbox::new("rename-link");
+        if symlink(
+            sandbox.base.join("outside/secret.txt"),
+            sandbox.root().join("link"),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let mut files = Files::new();
+        let roots = sandbox.roots();
+        for replace in [false, true] {
+            let reply = only(files.handle(1, rename_message("a.txt", "link", replace), &roots));
+            assert!(
+                matches!(reply, FilesMessage::Failed(_)),
+                "replace={replace}"
+            );
+        }
+        assert_eq!(
+            fs::read(sandbox.base.join("outside/secret.txt")).unwrap(),
+            b"secret"
+        );
+        assert_eq!(fs::read(sandbox.root().join("a.txt")).unwrap(), b"hello");
     }
 
     #[test]

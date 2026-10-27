@@ -2,6 +2,7 @@ import { ALTGR_WINDOW_MS, AltGrFilter, type KeyChange } from './altgr.js';
 import { AUDIO_CHANNEL, type AudioMessage, decodeAudio } from './audioprotocol.js';
 import { CLIPBOARD_CHANNEL, type ClipboardMessage, decodeClipboard } from './clipboardprotocol.js';
 import { FILES_CHANNEL, type FilesMessage, decodeFiles } from './filesprotocol.js';
+import { HostKey } from './hostkey.js';
 import { evdevCode } from './keymap.js';
 import {
   CODEC_JPEG,
@@ -28,6 +29,7 @@ import {
 } from './protocol.js';
 import { Handshake, type Session, generateDeviceKey, loadCrypto } from './secure.js';
 import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './storage.js';
+import { loadTicket, saveTicket } from './ticketstore.js';
 import type { Target, TargetError } from './target.js';
 import { VideoPlayer, videoSupported } from './video.js';
 
@@ -56,6 +58,8 @@ type Phase = 'handshake' | 'authenticating' | 'streaming';
 
 const BUTTONS: Record<number, MouseButton> = { 0: 'left', 1: 'middle', 2: 'right' };
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
+const RESUME_RETRIES = 3;
+const RESUME_RETRY_MS = 800;
 const PIXELS_PER_NOTCH = 100;
 const MAX_NOTCHES = 10;
 const MAX_ZOOM = 5;
@@ -73,6 +77,9 @@ export class Viewer {
   private drawing: Promise<void> = Promise.resolve();
   private readonly pressedKeys = new Set<number>();
   private readonly altGr = new AltGrFilter();
+  private readonly hostKey = new HostKey();
+  hostKeyEnabled = false;
+  onHostKey: (() => void) | null = null;
   private readonly pressedButtons = new Set<MouseButton>();
   private pendingMove: { x: number; y: number } | null = null;
   private zoom = 1;
@@ -80,8 +87,9 @@ export class Viewer {
   private panY = 0;
   zoomListener: ((zoomed: boolean) => void) | null = null;
   desktopEnabled = true;
-  private ticket: Uint8Array | null = null;
+  private ticketValue: Uint8Array | null = null;
   private resumeSent = false;
+  private resumeRetries = 0;
   private retrying = false;
   private retries = 0;
   private retryTimer: number | undefined;
@@ -109,6 +117,31 @@ export class Viewer {
     new ResizeObserver(() => this.fit()).observe(canvas.parentElement ?? canvas);
   }
 
+  releaseHostKey(): void {
+    this.hostKey.reset();
+  }
+
+  private setTicket(ticket: Uint8Array | null): void {
+    this.ticketValue = ticket;
+    if (ticket === null) {
+      this.resumeRetries = 0;
+    }
+    if (typeof this.target !== 'string') {
+      saveTicket(this.target.origin, ticket);
+    }
+  }
+
+  private restoreTicket(): void {
+    if (this.ticketValue !== null || typeof this.target === 'string') {
+      return;
+    }
+    const restored = loadTicket(this.target.origin);
+    if (restored !== null) {
+      this.ticketValue = restored;
+      this.retrying = true;
+    }
+  }
+
   async start(): Promise<void> {
     if (typeof this.target === 'string') {
       this.report({ kind: 'noAgent', error: this.target });
@@ -125,6 +158,7 @@ export class Viewer {
     const pinned = this.identity?.agents[this.target.origin];
     if (this.identity !== undefined && pinned !== undefined) {
       const key = this.identity.deviceKey;
+      this.restoreTicket();
       this.open(() => Handshake.reconnect(key, pinned), false);
     } else {
       this.report({ kind: 'needsPairing' });
@@ -158,7 +192,7 @@ export class Viewer {
   }
 
   async forget(): Promise<void> {
-    this.ticket = null;
+    this.setTicket(null);
     this.stopRetrying();
     this.close();
     await forgetIdentity().catch(() => undefined);
@@ -232,15 +266,15 @@ export class Viewer {
     const endedBy = this.endedBy;
     this.close();
     if (endedBy !== null) {
-      this.ticket = null;
+      this.setTicket(null);
       this.stopRetrying();
       this.report({ kind: 'ended', reason: endedBy });
       return;
     }
-    if (this.ticket !== null && (phase === 'streaming' || this.retrying) && this.scheduleRetry()) {
+    if (this.ticketValue !== null && (phase === 'streaming' || this.retrying) && this.scheduleRetry()) {
       return;
     }
-    this.ticket = null;
+    this.setTicket(null);
     this.stopRetrying();
     this.report(
       phase === 'streaming' ? { kind: 'closed' } : { kind: 'refused', reason: 'unknown', retryAfter: 0 },
@@ -334,16 +368,26 @@ export class Viewer {
     const message = decodeControl(payload);
     switch (message.kind) {
       case 'authRequired':
-        if (this.ticket !== null && !this.resumeSent && !this.pairing) {
+        if (this.ticketValue !== null && !this.resumeSent && !this.pairing) {
           this.resumeSent = true;
-          this.send(CONTROL_CHANNEL, encodeResume(this.ticket));
+          this.send(CONTROL_CHANNEL, encodeResume(this.ticketValue));
           return;
         }
-        this.ticket = null;
+        if (this.ticketValue !== null && this.resumeSent && !this.pairing && this.resumeRetries < RESUME_RETRIES) {
+          this.resumeRetries += 1;
+          this.close();
+          window.clearTimeout(this.retryTimer);
+          this.retrying = true;
+          this.report({ kind: 'reconnecting', attempt: this.resumeRetries });
+          this.retryTimer = window.setTimeout(() => void this.start(), RESUME_RETRY_MS);
+          return;
+        }
+        this.setTicket(null);
         this.stopRetrying();
         this.report({ kind: 'needsCode' });
         return;
       case 'authOk':
+        this.resumeRetries = 0;
         this.stopRetrying();
         this.phase = 'streaming';
         this.report({ kind: 'connecting' });
@@ -359,7 +403,7 @@ export class Viewer {
         if (message.reason === 'busy' && this.retrying && this.scheduleRetry()) {
           return;
         }
-        this.ticket = null;
+        this.setTicket(null);
         this.stopRetrying();
         this.report({ kind: 'refused', reason: message.reason, retryAfter: message.retryAfter });
         return;
@@ -372,10 +416,10 @@ export class Viewer {
   private streamControl(payload: Uint8Array): void {
     const message = decodeControl(payload);
     if (message.kind === 'ticket') {
-      this.ticket = message.ticket;
+      this.setTicket(message.ticket);
     } else if (message.kind === 'sessionEnded') {
       this.endedBy = message.reason;
-      this.ticket = null;
+      this.setTicket(null);
     } else {
       throw new ProtocolError('unexpected control message');
     }
@@ -657,6 +701,23 @@ export class Viewer {
     }
     event.preventDefault();
     event.stopPropagation();
+    if (this.hostKeyEnabled) {
+      const verdict = this.hostKey.feed(event.code, pressed);
+      if (verdict === 'swallow') {
+        return;
+      }
+      if (verdict === 'exit') {
+        this.releaseAll();
+        this.onHostKey?.();
+        return;
+      }
+      if (verdict === 'modifier-then-pass') {
+        const modifier = evdevCode('ControlRight');
+        if (modifier !== undefined) {
+          this.sendKeys(this.altGr.feed({ code: modifier, pressed: true, time: event.timeStamp }));
+        }
+      }
+    }
     this.sendKeys(this.altGr.feed({ code, pressed, time: event.timeStamp }));
     if (this.altGr.pending()) {
       window.setTimeout(() => this.sendKeys(this.altGr.flush(performance.now())), ALTGR_WINDOW_MS);
@@ -682,6 +743,7 @@ export class Viewer {
   }
 
   private releaseAll(): void {
+    this.hostKey.reset();
     this.releaseButtons();
     for (const code of this.pressedKeys) {
       this.sendInput({ kind: 'key', code, pressed: false });

@@ -38,6 +38,12 @@ export type Messages = {
   keyboard: string;
   immersiveOn: string;
   immersiveOff: string;
+  updateAvailable: string;
+  updateReload: string;
+  updateLater: string;
+  captureOn: string;
+  captureUnsupported: string;
+  captureExit: string;
   layoutLabel: string;
   menu: string;
   typeUnsupported: string;
@@ -84,26 +90,55 @@ export type Messages = {
   tabFiles: string;
   filesNoRoots: string;
   filesEmpty: string;
+  filesNoMatches: string;
   filesTruncated: string;
   filesUp: string;
+  filesBack: string;
+  filesForward: string;
   filesRefresh: string;
+  filesPlaces: string;
+  filesQuickAccess: string;
+  filesSearch: string;
+  filesViewGrid: string;
+  filesViewList: string;
+  filesSortBy: string;
   filesNewFolder: string;
-  filesFolderName: string;
-  filesCreate: string;
+  filesNewFile: string;
+  filesNewFolderName: string;
+  filesNewFileName: string;
   filesUpload: string;
   filesDownload: string;
+  filesOpen: string;
+  filesEdit: string;
+  filesRename: string;
   filesRemove: string;
-  filesConfirmRemove: string;
   filesCancel: string;
   filesColumnName: string;
   filesColumnSize: string;
   filesColumnModified: string;
+  filesItems: (count: number) => string;
+  filesSelected: (count: number, size: string) => string;
+  filesDropHint: string;
+  filesConfirmRemove: (count: number, name: string) => string;
+  filesRemoving: (name: string) => string;
+  filesMoved: (count: number) => string;
+  filesInvalidName: string;
   filesDownloading: (name: string, percent: number) => string;
   filesUploading: (name: string, percent: number) => string;
   filesFinished: (name: string) => string;
   filesTooBig: (name: string) => string;
   filesFailure: Record<FileFailure, string>;
   filesClosed: string;
+  editorSave: string;
+  editorSaved: (name: string) => string;
+  editorClose: string;
+  editorWrap: string;
+  editorModified: string;
+  editorUnsaved: string;
+  editorPosition: (line: number, column: number) => string;
+  editorBinary: string;
+  editorLoading: string;
+  editorChangedMeanwhile: string;
   screenshot: string;
   recordStart: string;
   recordStop: (seconds: number) => string;
@@ -166,8 +201,14 @@ const catalog: Record<string, Messages> = {
     loadingDetail: 'Preparando el cifrado en tu navegador.',
     connectingDetail: 'Estableciendo una conexión cifrada con tu ordenador.',
     keyboard: 'Teclado',
-    immersiveOn: 'Pantalla completa',
+    immersiveOn: 'Pantalla completa y teclado',
     immersiveOff: 'Salir de pantalla completa',
+    updateAvailable: 'Hay una versión nueva de Wirehaus.',
+    updateReload: 'Recargar',
+    updateLater: 'Más tarde',
+    captureOn: 'Teclado capturado. Pulsa Ctrl derecho para soltarlo.',
+    captureUnsupported: 'Este navegador no puede capturar todo el teclado: Esc y algunos atajos seguirán siendo del navegador. Ctrl derecho sale.',
+    captureExit: 'Salir (Ctrl derecho)',
     layoutLabel: 'Teclado del ordenador remoto',
     menu: 'Menú',
     typeUnsupported: 'Ese carácter no se puede escribir con el teclado táctil. Usa la pestaña Portapapeles.',
@@ -217,21 +258,41 @@ const catalog: Record<string, Messages> = {
     tabFiles: 'Archivos',
     filesNoRoots:
       'No hay carpetas compartidas. Comparte una en el ordenador de casa con "wirehaus-agent files add <carpeta> --code".',
-    filesEmpty: 'Carpeta vacía.',
+    filesEmpty: 'Esta carpeta está vacía.',
+    filesNoMatches: 'Nada coincide con la búsqueda.',
     filesTruncated: 'Solo se muestran los primeros 1000 elementos.',
-    filesUp: 'Subir un nivel',
+    filesUp: 'Carpeta superior',
+    filesBack: 'Atrás',
+    filesForward: 'Adelante',
     filesRefresh: 'Actualizar',
-    filesNewFolder: 'Nueva carpeta',
-    filesFolderName: 'Nombre de la carpeta',
-    filesCreate: 'Crear',
+    filesPlaces: 'Carpetas compartidas',
+    filesQuickAccess: 'Acceso rápido',
+    filesSearch: 'Buscar en esta carpeta',
+    filesViewGrid: 'Vista de iconos',
+    filesViewList: 'Vista de lista',
+    filesSortBy: 'Ordenar por',
+    filesNewFolder: 'Carpeta nueva',
+    filesNewFile: 'Archivo nuevo',
+    filesNewFolderName: 'Carpeta nueva',
+    filesNewFileName: 'Archivo nuevo.txt',
     filesUpload: 'Subir archivos',
     filesDownload: 'Descargar',
+    filesOpen: 'Abrir',
+    filesEdit: 'Editar',
+    filesRename: 'Cambiar nombre',
     filesRemove: 'Borrar',
-    filesConfirmRemove: '¿Seguro?',
     filesCancel: 'Cancelar',
     filesColumnName: 'Nombre',
     filesColumnSize: 'Tamaño',
     filesColumnModified: 'Modificado',
+    filesItems: (count) => (count === 1 ? '1 elemento' : `${count} elementos`),
+    filesSelected: (count, size) => (count === 1 ? `1 seleccionado${size === '' ? '' : ` (${size})`}` : `${count} seleccionados${size === '' ? '' : ` (${size})`}`),
+    filesDropHint: 'Suelta aquí para subir a esta carpeta',
+    filesConfirmRemove: (count, name) =>
+      count === 1 ? `¿Borrar "${name}"? No se puede deshacer.` : `¿Borrar ${count} elementos? No se puede deshacer.`,
+    filesRemoving: (name) => `Borrando ${name}...`,
+    filesMoved: (count) => (count === 1 ? 'Movido.' : `${count} elementos movidos.`),
+    filesInvalidName: 'Ese nombre no es válido.',
     filesDownloading: (name, percent) => `Descargando ${name}: ${percent} %`,
     filesUploading: (name, percent) => `Subiendo ${name}: ${percent} %`,
     filesFinished: (name) => `${name}: terminado.`,
@@ -250,6 +311,16 @@ const catalog: Record<string, Messages> = {
       io: 'Ha ocurrido un error en el disco del agente.',
     },
     filesClosed: 'Desconectado.',
+    editorSave: 'Guardar',
+    editorSaved: (name) => `${name}: guardado.`,
+    editorClose: 'Cerrar',
+    editorWrap: 'Ajustar líneas',
+    editorModified: 'Sin guardar',
+    editorUnsaved: 'Hay cambios sin guardar. ¿Cerrar y descartarlos?',
+    editorPosition: (line, column) => `Línea ${line}, columna ${column}`,
+    editorBinary: 'Este archivo no es de texto y no se puede editar aquí.',
+    editorLoading: 'Abriendo...',
+    editorChangedMeanwhile: 'El archivo ha cambiado en el ordenador desde que lo abriste. ¿Guardar y sobrescribir esos cambios?',
     screenshot: 'Captura',
     recordStart: 'Grabar',
     recordStop: (seconds) => `Parar (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')})`,
@@ -321,8 +392,14 @@ const catalog: Record<string, Messages> = {
     loadingDetail: 'Preparing encryption in your browser.',
     connectingDetail: 'Setting up an encrypted connection to your computer.',
     keyboard: 'Keyboard',
-    immersiveOn: 'Full screen',
+    immersiveOn: 'Full screen and keyboard',
     immersiveOff: 'Leave full screen',
+    updateAvailable: 'A new version of Wirehaus is available.',
+    updateReload: 'Reload',
+    updateLater: 'Later',
+    captureOn: 'Keyboard captured. Press right Ctrl to release it.',
+    captureUnsupported: 'This browser cannot capture the whole keyboard: Esc and some shortcuts stay with the browser. Right Ctrl leaves.',
+    captureExit: 'Leave (right Ctrl)',
     layoutLabel: 'Remote computer keyboard',
     menu: 'Menu',
     typeUnsupported: 'That character cannot be typed with the touch keyboard. Use the Clipboard tab.',
@@ -372,23 +449,43 @@ const catalog: Record<string, Messages> = {
     tabFiles: 'Files',
     filesNoRoots:
       'No folders are shared. Share one on the home computer with "wirehaus-agent files add <folder> --code".',
-    filesEmpty: 'Empty folder.',
+    filesEmpty: 'This folder is empty.',
+    filesNoMatches: 'Nothing matches the search.',
     filesTruncated: 'Only the first 1000 items are shown.',
-    filesUp: 'Up one level',
+    filesUp: 'Parent folder',
+    filesBack: 'Back',
+    filesForward: 'Forward',
     filesRefresh: 'Refresh',
+    filesPlaces: 'Shared folders',
+    filesQuickAccess: 'Quick access',
+    filesSearch: 'Search this folder',
+    filesViewGrid: 'Icon view',
+    filesViewList: 'List view',
+    filesSortBy: 'Sort by',
     filesNewFolder: 'New folder',
-    filesFolderName: 'Folder name',
-    filesCreate: 'Create',
+    filesNewFile: 'New file',
+    filesNewFolderName: 'New folder',
+    filesNewFileName: 'New file.txt',
     filesUpload: 'Upload files',
     filesDownload: 'Download',
+    filesOpen: 'Open',
+    filesEdit: 'Edit',
+    filesRename: 'Rename',
     filesRemove: 'Delete',
-    filesConfirmRemove: 'Sure?',
     filesCancel: 'Cancel',
     filesColumnName: 'Name',
     filesColumnSize: 'Size',
     filesColumnModified: 'Modified',
-    filesDownloading: (name, percent) => `Downloading ${name}: ${percent}%`,
-    filesUploading: (name, percent) => `Uploading ${name}: ${percent}%`,
+    filesItems: (count) => (count === 1 ? '1 item' : `${count} items`),
+    filesSelected: (count, size) => `${count} selected${size === '' ? '' : ` (${size})`}`,
+    filesDropHint: 'Drop here to upload to this folder',
+    filesConfirmRemove: (count, name) =>
+      count === 1 ? `Delete "${name}"? This cannot be undone.` : `Delete ${count} items? This cannot be undone.`,
+    filesRemoving: (name) => `Deleting ${name}...`,
+    filesMoved: (count) => (count === 1 ? 'Moved.' : `${count} items moved.`),
+    filesInvalidName: 'That name is not valid.',
+    filesDownloading: (name, percent) => `Downloading ${name}: ${percent} %`,
+    filesUploading: (name, percent) => `Uploading ${name}: ${percent} %`,
     filesFinished: (name) => `${name}: done.`,
     filesTooBig: (name) => `${name} is too large to download in the browser (1 GiB maximum).`,
     filesFailure: {
@@ -405,6 +502,16 @@ const catalog: Record<string, Messages> = {
       io: 'A disk error occurred on the agent.',
     },
     filesClosed: 'Disconnected.',
+    editorSave: 'Save',
+    editorSaved: (name) => `${name}: saved.`,
+    editorClose: 'Close',
+    editorWrap: 'Wrap lines',
+    editorModified: 'Unsaved',
+    editorUnsaved: 'There are unsaved changes. Close and discard them?',
+    editorPosition: (line, column) => `Line ${line}, column ${column}`,
+    editorBinary: 'This file is not text and cannot be edited here.',
+    editorLoading: 'Opening...',
+    editorChangedMeanwhile: 'The file changed on the computer since you opened it. Save and overwrite those changes?',
     screenshot: 'Screenshot',
     recordStart: 'Record',
     recordStop: (seconds) => `Stop (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')})`,

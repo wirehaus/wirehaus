@@ -8,6 +8,7 @@ import { AudioControl } from './audio.js';
 import { DesktopCapture } from './capture.js';
 import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
+import { UpdateWatcher } from './updates.js';
 import { KeyBar } from './keybar.js';
 import type { Layout } from './softkeys.js';
 import { TouchLayer } from './touchlayer.js';
@@ -60,6 +61,11 @@ const menuButton = element<HTMLButtonElement>('menu-button');
 const menu = element<HTMLElement>('menu');
 const layoutSelect = element<HTMLSelectElement>('layout');
 const immersive = element<HTMLButtonElement>('immersive');
+type KeyboardLock = { lock(codes?: string[]): Promise<void>; unlock(): void };
+const keyboardLock = (navigator as Navigator & { keyboard?: KeyboardLock }).keyboard;
+const captureHint = element<HTMLElement>('capture-hint');
+let capturing = false;
+let hintTimer: number | undefined;
 const keys = element<HTMLElement>('keys');
 const softKeys = element<HTMLTextAreaElement>('softkeys');
 const keyboardButton = element<HTMLButtonElement>('keyboard');
@@ -424,34 +430,10 @@ const terminals = new Terminals(
 );
 viewer.terminalListener = (stream, message) => terminals.receive(stream, message);
 
-const filesTexts = messages;
 const files = new FilesPanel(
   filesHost,
   { send: (stream, payload) => viewer.sendFiles(stream, payload), buffered: () => viewer.bufferedBytes() },
-  {
-    noRoots: filesTexts.filesNoRoots,
-    empty: filesTexts.filesEmpty,
-    truncated: filesTexts.filesTruncated,
-    up: filesTexts.filesUp,
-    refresh: filesTexts.filesRefresh,
-    newFolder: filesTexts.filesNewFolder,
-    folderName: filesTexts.filesFolderName,
-    create: filesTexts.filesCreate,
-    upload: filesTexts.filesUpload,
-    download: filesTexts.filesDownload,
-    remove: filesTexts.filesRemove,
-    confirmRemove: filesTexts.filesConfirmRemove,
-    cancel: filesTexts.filesCancel,
-    columnName: filesTexts.filesColumnName,
-    columnSize: filesTexts.filesColumnSize,
-    columnModified: filesTexts.filesColumnModified,
-    downloading: filesTexts.filesDownloading,
-    uploading: filesTexts.filesUploading,
-    finished: filesTexts.filesFinished,
-    tooBig: filesTexts.filesTooBig,
-    failure: (reason) => filesTexts.filesFailure[reason],
-    closed: filesTexts.filesClosed,
-  },
+  messages,
 );
 viewer.filesListener = (stream, message) => files.receive(stream, message);
 
@@ -494,6 +476,7 @@ function showView(): void {
   keys.hidden = !(coarse && connected && (onTerminal || panel === 'desktop'));
   zoomReset.hidden = !(zoomedNow && !onTerminal && panel === 'desktop');
   document.body.classList.toggle('keys-on', !keys.hidden);
+  syncKeyboardCapture();
 }
 
 function selectPanel(wanted: Panel): void {
@@ -645,20 +628,85 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+function showHint(text: string): void {
+  captureHint.textContent = text;
+  captureHint.hidden = false;
+  window.clearTimeout(hintTimer);
+  hintTimer = window.setTimeout(() => {
+    captureHint.hidden = true;
+  }, 5000);
+}
+
+function lockKeyboard(): void {
+  if (typeof keyboardLock?.lock !== 'function') {
+    showHint(messages.captureUnsupported);
+    return;
+  }
+  keyboardLock.lock().then(
+    () => showHint(messages.captureOn),
+    () => showHint(messages.captureUnsupported),
+  );
+}
+
+function syncKeyboardCapture(): void {
+  const want =
+    document.body.classList.contains('immersive') &&
+    lastKind === 'connected' &&
+    terminals.activeStream() === null &&
+    panel === 'desktop';
+  if (want === capturing) {
+    return;
+  }
+  capturing = want;
+  viewer.hostKeyEnabled = want;
+  viewer.releaseHostKey();
+  if (want) {
+    screen.focus();
+    lockKeyboard();
+  } else {
+    captureHint.hidden = true;
+    try {
+      keyboardLock?.unlock();
+    } catch {
+      return;
+    }
+  }
+}
+
+viewer.onHostKey = () => setImmersive(false);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && capturing) {
+    lockKeyboard();
+  }
+});
+
 function setImmersive(on: boolean): void {
   document.body.classList.toggle('immersive', on);
   immersiveExit.hidden = !on;
   immersive.textContent = on ? messages.immersiveOff : messages.immersiveOn;
   if (on) {
-    void document.documentElement.requestFullscreen?.().catch(() => undefined);
-  } else if (document.fullscreenElement !== null) {
-    void document.exitFullscreen().catch(() => undefined);
+    const entered = document.documentElement.requestFullscreen?.();
+    if (entered === undefined) {
+      syncKeyboardCapture();
+    } else {
+      entered.then(
+        () => syncKeyboardCapture(),
+        () => syncKeyboardCapture(),
+      );
+    }
+  } else {
+    syncKeyboardCapture();
+    if (document.fullscreenElement !== null) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
   }
 }
 immersive.addEventListener('click', () => {
   closeMenu();
   setImmersive(!document.body.classList.contains('immersive'));
 });
+immersiveExit.title = messages.captureExit;
+immersiveExit.setAttribute('aria-label', messages.captureExit);
 immersiveExit.addEventListener('click', () => setImmersive(false));
 document.addEventListener('fullscreenchange', () => {
   if (document.fullscreenElement === null && document.body.classList.contains('immersive')) {
@@ -825,3 +873,15 @@ async function boot(): Promise<void> {
 }
 
 void boot();
+
+const updateBanner = element<HTMLElement>('update-banner');
+element('update-text').textContent = messages.updateAvailable;
+element<HTMLButtonElement>('update-reload').textContent = messages.updateReload;
+element<HTMLButtonElement>('update-later').textContent = messages.updateLater;
+element<HTMLButtonElement>('update-reload').addEventListener('click', () => window.location.reload());
+element<HTMLButtonElement>('update-later').addEventListener('click', () => {
+  updateBanner.hidden = true;
+});
+new UpdateWatcher(() => {
+  updateBanner.hidden = false;
+}).start();

@@ -201,6 +201,19 @@ export const encodeList = (root: number, path: string): Uint8Array => pathMessag
 export const encodeDownload = (root: number, path: string): Uint8Array => pathMessage(2, root, path);
 export const encodeMkdir = (root: number, path: string): Uint8Array => pathMessage(4, root, path);
 export const encodeRemove = (root: number, path: string): Uint8Array => pathMessage(5, root, path);
+export function encodeRename(root: number, from: string, to: string, replace: boolean): Uint8Array {
+  const head = pathMessage(14, root, from);
+  const target = new TextEncoder().encode(to);
+  if (target.length > MAX_PATH_LEN) {
+    throw new ProtocolError('path out of range');
+  }
+  const out = new Uint8Array(head.length + 2 + target.length + 1);
+  out.set(head, 0);
+  new DataView(out.buffer).setUint16(head.length, target.length);
+  out.set(target, head.length + 2);
+  out[out.length - 1] = replace ? 1 : 0;
+  return out;
+}
 export const encodeCancel = (): Uint8Array => Uint8Array.of(6);
 export const encodeDone = (): Uint8Array => Uint8Array.of(11);
 

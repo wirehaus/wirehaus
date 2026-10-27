@@ -4,6 +4,15 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ## [Sin publicar]
 
+### Añadido
+
+- Gestor de archivos del visor al estilo de un escritorio: carpetas compartidas y acceso rápido, migas, vistas de lista y de iconos, orden y filtro, selección múltiple, menú contextual, teclado completo, arrastrar para mover y para subir (también carpetas), creación y renombrado en línea, borrado recursivo con confirmación, vista previa de imágenes y editor de texto integrado que conserva fin de línea, BOM y permisos.
+- Operación `Rename` en el protocolo de archivos para mover y renombrar dentro de la carpeta compartida; reemplazar solo vale entre archivos normales y conserva los permisos del destino. Un agente anterior no la entiende.
+- Captura de todo el teclado del escritorio remoto con pantalla completa (Keyboard Lock en Chromium); un toque suelto de Ctrl derecho la suelta.
+- Al recargar la página la sesión se reanuda sin pedir el segundo factor mientras dure el billete de reanudación (5 minutos tras la desconexión, guardado solo en `sessionStorage`).
+- Aviso en el visor cuando hay una versión nueva publicada, con botón para recargar.
+- La grabación de pantalla admite MP4 cuando el navegador no puede grabar WebM.
+
 ## [0.2.1] - 2026-10-27
 
 ### Añadido

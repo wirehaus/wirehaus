@@ -114,6 +114,12 @@ pub enum FilesMessage {
         root: u8,
         path: String,
     },
+    Rename {
+        root: u8,
+        from: String,
+        to: String,
+        replace: bool,
+    },
     Cancel,
     Roots(Vec<String>),
     Listing {
@@ -145,6 +151,7 @@ const DATA: u8 = 10;
 const DONE: u8 = 11;
 const FAILED: u8 = 12;
 const ACK: u8 = 13;
+const RENAME: u8 = 14;
 
 impl FilesMessage {
     #[must_use]
@@ -158,6 +165,17 @@ impl FilesMessage {
             FilesMessage::Upload { root, path, size } => {
                 let mut out = path_message(UPLOAD, *root, path);
                 out.extend_from_slice(&size.to_be_bytes());
+                out
+            }
+            FilesMessage::Rename {
+                root,
+                from,
+                to,
+                replace,
+            } => {
+                let mut out = path_message(RENAME, *root, from);
+                put_text(&mut out, to);
+                out.push(u8::from(*replace));
                 out
             }
             FilesMessage::Cancel => vec![CANCEL],
@@ -216,6 +234,17 @@ impl FilesMessage {
                     DOWNLOAD => FilesMessage::Download { root, path },
                     MKDIR => FilesMessage::Mkdir { root, path },
                     _ => FilesMessage::Remove { root, path },
+                }
+            }
+            RENAME => {
+                let (root, from) = reader.root_and_path()?;
+                let to = reader.text(MAX_PATH_LEN)?;
+                let replace = reader.flag()?;
+                FilesMessage::Rename {
+                    root,
+                    from,
+                    to,
+                    replace,
                 }
             }
             UPLOAD => {
@@ -390,6 +419,12 @@ mod tests {
                 root: 0,
                 path: "old".to_owned(),
             },
+            FilesMessage::Rename {
+                root: 1,
+                from: "a/old.txt".to_owned(),
+                to: "b/new.txt".to_owned(),
+                replace: true,
+            },
             FilesMessage::Cancel,
             FilesMessage::Roots(vec!["home".to_owned(), "data".to_owned()]),
             FilesMessage::Roots(Vec::new()),
@@ -463,6 +498,16 @@ mod tests {
             [12, 3]
         );
         assert_eq!(FilesMessage::Data(vec![9]).encode(), [10, 9]);
+        assert_eq!(
+            FilesMessage::Rename {
+                root: 1,
+                from: "a".to_owned(),
+                to: "bc".to_owned(),
+                replace: true
+            }
+            .encode(),
+            [14, 1, 0, 1, b'a', 0, 2, b'b', b'c', 1]
+        );
     }
 
     #[test]

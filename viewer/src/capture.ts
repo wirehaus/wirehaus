@@ -10,7 +10,13 @@ export type CaptureTexts = {
   limit: string;
 };
 
-const MIME_TYPES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+const MIME_TYPES = [
+  'video/webm;codecs=vp9',
+  'video/webm;codecs=vp8',
+  'video/webm',
+  'video/mp4;codecs=avc1',
+  'video/mp4',
+];
 const MAX_SECONDS = 30 * 60;
 const MAX_BYTES = 1 << 30;
 const BITRATE = 4_000_000;
@@ -72,18 +78,17 @@ export class DesktopCapture {
   }
 
   private start(): void {
-    const mimeType =
-      typeof MediaRecorder === 'undefined' ? undefined : MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
-    if (mimeType === undefined) {
+    if (typeof MediaRecorder === 'undefined' || typeof this.canvas.captureStream !== 'function') {
       this.say(this.texts.unsupported);
       return;
     }
+    const supported = MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
     let recorder: MediaRecorder;
     try {
-      recorder = new MediaRecorder(this.canvas.captureStream(FRAMES_PER_SECOND), {
-        mimeType,
-        videoBitsPerSecond: BITRATE,
-      });
+      recorder = new MediaRecorder(
+        this.canvas.captureStream(FRAMES_PER_SECOND),
+        supported === undefined ? { videoBitsPerSecond: BITRATE } : { mimeType: supported, videoBitsPerSecond: BITRATE },
+      );
     } catch {
       this.say(this.texts.failed);
       return;
@@ -92,7 +97,7 @@ export class DesktopCapture {
     this.bytes = 0;
     this.overLimit = false;
     recorder.addEventListener('dataavailable', (event) => this.collect(event.data));
-    recorder.addEventListener('stop', () => this.finish(mimeType));
+    recorder.addEventListener('stop', () => this.finish(recorder.mimeType || supported || 'video/webm'));
     recorder.addEventListener('error', () => {
       this.say(this.texts.failed);
       this.stop();
@@ -130,14 +135,15 @@ export class DesktopCapture {
     this.ticker = undefined;
     this.recorder = null;
     this.recordButton.textContent = this.texts.recordStart;
-    const blob = new Blob(this.chunks, { type: mimeType.split(';')[0] ?? 'video/webm' });
+    const type = mimeType.split(';')[0] ?? 'video/webm';
+    const blob = new Blob(this.chunks, { type });
     this.chunks = [];
     this.bytes = 0;
     if (blob.size === 0) {
       this.say(this.texts.failed);
       return;
     }
-    const name = `wirehaus-${timestamp()}.webm`;
+    const name = `wirehaus-${timestamp()}.${type === 'video/mp4' ? 'mp4' : 'webm'}`;
     saveBlob(blob, name);
     this.say(this.overLimit ? this.texts.limit : this.texts.saved(name));
   }

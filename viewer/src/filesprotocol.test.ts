@@ -12,6 +12,7 @@ import {
   encodeListRoots,
   encodeMkdir,
   encodeRemove,
+  encodeRename,
   encodeUpload,
 } from './filesprotocol.js';
 import { ProtocolError } from './protocol.js';
@@ -22,6 +23,8 @@ test('encodes the file requests with the agent layout', () => {
   assert.deepEqual([...encodeDownload(0, '')], [2, 0, 0, 0]);
   assert.deepEqual([...encodeMkdir(1, 'x')], [4, 1, 0, 1, 120]);
   assert.deepEqual([...encodeRemove(1, 'x')], [5, 1, 0, 1, 120]);
+  assert.deepEqual([...encodeRename(1, 'a', 'bc', true)], [14, 1, 0, 1, 97, 0, 2, 98, 99, 1]);
+  assert.deepEqual([...encodeRename(0, '', 'ñ', false)], [14, 0, 0, 0, 0, 2, 195, 177, 0]);
   assert.deepEqual([...encodeCancel()], [6]);
   assert.deepEqual([...encodeUpload(0, '', 258)], [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2]);
   assert.deepEqual([...encodeAck(65536)], [13, 0, 0, 0, 0, 0, 1, 0, 0]);
