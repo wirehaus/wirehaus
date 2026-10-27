@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$Uninstall,
     [switch]$Purge,
@@ -7,10 +7,20 @@ param(
     [string]$ViewerOrigin = 'https://app.wirehaus.dev',
     [string]$PublicHost = '',
     [string]$TunnelTokenFile = '',
+    [string]$ConnectorFile = '',
+    [string]$FetchConnector = '',
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\Wirehaus')
 )
 
 $ErrorActionPreference = 'Stop'
+try {
+    [Console]::OutputEncoding = [Text.Encoding]::UTF8
+    $OutputEncoding = [Text.Encoding]::UTF8
+} catch { }
+$spanish = (Get-UICulture).TwoLetterISOLanguageName -eq 'es'
+function Say([string]$es, [string]$en) {
+    if ($spanish) { Write-Host $es } else { Write-Host $en }
+}
 $source = Split-Path -Parent $MyInvocation.MyCommand.Path
 $agent = Join-Path $InstallDir 'wirehaus-agent.exe'
 $dataDir = Join-Path $env:LOCALAPPDATA 'Wirehaus'
@@ -18,6 +28,8 @@ $stateFile = Join-Path $dataDir 'state\state'
 $files = @('wirehaus-agent.exe', 'wirehaus-agentd.exe')
 $cloudflaredVersion = '2026.10.4'
 $cloudflaredSha256 = '411b16d40c8d872243efeb52c550053d00af0a8a97fbb32e730fb8aba429eaa8'
+$cloudflaredGzSha256 = 'b924c817cc2ef5e679c0b20a95cb87291634f1f65ebbf1f64a9ddd5a74ee3db3'
+$siteOrigin = 'https://wirehaus.dev'
 $cloudflared = Join-Path $InstallDir 'cloudflared.exe'
 $tunnelToken = Join-Path $dataDir 'tunnel-token'
 $tunnelTask = 'WirehausTunnel'
@@ -31,17 +43,67 @@ function Remove-Tunnel {
     Remove-Item -Force $cloudflared, $tunnelToken -ErrorAction SilentlyContinue
 }
 
-function Install-Tunnel {
-    $url = "https://github.com/cloudflare/cloudflared/releases/download/$cloudflaredVersion/cloudflared-windows-amd64.exe"
-    $download = Join-Path ([IO.Path]::GetTempPath()) "cloudflared-$([guid]::NewGuid()).exe"
+function Get-File([string]$url, [string]$path) {
     $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $download
-    if ((Get-FileHash -Algorithm SHA256 $download).Hash.ToLower() -ne $cloudflaredSha256) {
-        Remove-Item -Force $download
-        throw 'cloudflared-windows-amd64.exe does not match the expected checksum.'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    for ($try = 1; $try -le 3; $try++) {
+        try {
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 600 -Uri $url -OutFile $path
+            return $true
+        } catch {
+            Remove-Item -Force $path -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+        }
+    }
+    return $false
+}
+
+function Get-Connector([string]$target) {
+    $work = Join-Path ([IO.Path]::GetTempPath()) "wirehaus-cf-$([guid]::NewGuid())"
+    New-Item -ItemType Directory -Force $work | Out-Null
+    try {
+        Say 'Descargando el conector del túnel (unos 20 MB)...' 'Downloading the tunnel connector (about 20 MB)...'
+        $gz = Join-Path $work 'cloudflared.exe.gz'
+        $ok = $false
+        if (Get-File "$siteOrigin/download/cloudflared-$cloudflaredVersion-windows-amd64.exe.gz" $gz) {
+            if ((Get-FileHash -Algorithm SHA256 $gz).Hash.ToLower() -eq $cloudflaredGzSha256) {
+                $inStream = [IO.File]::OpenRead($gz)
+                $outStream = [IO.File]::Create($target)
+                try {
+                    $zip = New-Object IO.Compression.GzipStream($inStream, [IO.Compression.CompressionMode]::Decompress)
+                    $zip.CopyTo($outStream)
+                } finally {
+                    $outStream.Dispose()
+                    $inStream.Dispose()
+                }
+                $ok = (Get-FileHash -Algorithm SHA256 $target).Hash.ToLower() -eq $cloudflaredSha256
+            }
+        }
+        if (-not $ok) {
+            Say 'La primera fuente no ha respondido bien; pruebo con la segunda...' 'The first source did not answer well; trying the second one...'
+            $url = "https://github.com/cloudflare/cloudflared/releases/download/$cloudflaredVersion/cloudflared-windows-amd64.exe"
+            if (-not (Get-File $url $target)) {
+                throw 'Could not download the tunnel connector. Check your connection and run the command again.'
+            }
+            if ((Get-FileHash -Algorithm SHA256 $target).Hash.ToLower() -ne $cloudflaredSha256) {
+                Remove-Item -Force $target
+                throw 'cloudflared-windows-amd64.exe does not match the expected checksum.'
+            }
+        }
+    } finally {
+        Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+    }
+}
+
+function Install-Tunnel {
+    $download = $ConnectorFile
+    if (-not $download) {
+        $download = Join-Path ([IO.Path]::GetTempPath()) "cloudflared-$([guid]::NewGuid()).exe"
+        Get-Connector $download
     }
     Remove-Tunnel
-    Move-Item -Force $download $cloudflared
+    Copy-Item -Force $download $cloudflared
+    if (-not $ConnectorFile) { Remove-Item -Force $download -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Force $dataDir | Out-Null
     (Get-Content -Raw $TunnelTokenFile).Trim() | Set-Content -NoNewline -Encoding ascii $tunnelToken
     $arguments = "--headless `"$cloudflared`" tunnel run --token-file `"$tunnelToken`""
@@ -77,6 +139,11 @@ function Test-Package {
     }
 }
 
+if ($FetchConnector) {
+    Get-Connector $FetchConnector
+    exit 0
+}
+
 if ($Uninstall) {
     if (Test-Path $agent) {
         Invoke-Agent @('service', 'uninstall')
@@ -92,6 +159,7 @@ if ($Uninstall) {
 
 Get-ChildItem -Recurse -File $source | Unblock-File
 Test-Package
+Say '[1/4] Instalando el agente...' '[1/4] Installing the agent...'
 
 if (Test-Path $agent) {
     try { Invoke-Agent @('service', 'uninstall') } catch { Write-Host 'No previous service to remove.' }
@@ -106,11 +174,13 @@ Copy-Item -Recurse -Force (Join-Path $source 'viewer') $viewer
 
 $firstRun = -not (Test-Path $stateFile)
 if ($firstRun) {
+    Say '[2/4] Segundo factor: escanea este QR con una app de autenticación (2FAS, Aegis, Google Authenticator o Contraseñas de Apple).' '[2/4] Second factor: scan this QR with an authenticator app (2FAS, Aegis, Google Authenticator or Apple Passwords).'
     Invoke-Agent @('init')
     Write-Host ''
-    Write-Host 'Scan the QR (or type the secret) in your authenticator app now. You can show it again on this computer with: wirehaus-agent totp'
-    Write-Host ''
+} else {
+    Say '[2/4] El segundo factor ya estaba configurado en este equipo.' '[2/4] The second factor was already set up on this computer.'
 }
+Say '[3/4] Arrancando el servicio y el túnel...' '[3/4] Starting the service and the tunnel...'
 
 if ($Name -and -not $PublicHost) {
     $PublicHost = "$Name.$Zone"
@@ -119,24 +189,35 @@ $serviceArguments = @('service', 'install', '--viewer-dir', $viewer)
 if ($PublicHost) {
     $serviceArguments += @('--public-host', $PublicHost, '--viewer-origin', $ViewerOrigin)
 }
-Invoke-Agent $serviceArguments
+Invoke-Agent $serviceArguments | Out-Null
 if ($TunnelTokenFile) {
     Install-Tunnel
 }
+Say '[4/4] Emparejar tu móvil u otro equipo:' '[4/4] Pair your phone or another device:'
 Invoke-Agent @('pairing')
 Write-Host ''
 if ($PublicHost) {
     if (-not $TunnelTokenFile) {
-        Write-Host 'First connect the tunnel (see your dashboard).'
+        Say 'Antes conecta el túnel (mira tu panel).' 'First connect the tunnel (see your dashboard).'
     }
     $Address = "$ViewerOrigin/$($PublicHost.Split('.')[0])"
-    Write-Host 'Next steps:'
-    Write-Host '  1. Scan the first QR (second factor) with an authenticator app such as 2FAS, Aegis, Google Authenticator or Apple Passwords.'
-    Write-Host "  2. Scan the second QR with your phone: it opens $Address with the pairing code filled in."
-    Write-Host '     On another device, open that address and type the pairing code instead.'
-    Write-Host '  3. Type the six digits your authenticator app shows.'
-    Write-Host 'Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR.'
-    Write-Host 'Show the second factor again on this computer with: wirehaus-agent totp'
+    if ($spanish) {
+        Write-Host 'Listo. Te quedan tres cosas:'
+        Write-Host "  1. Escanea con tu móvil el QR de emparejamiento: abre $Address con el código ya puesto."
+        Write-Host '     En otro equipo, abre esa dirección y escribe el código de emparejamiento.'
+        Write-Host '  2. Escribe los seis dígitos que muestra tu app de autenticación.'
+        Write-Host '  3. Si Windows pide permiso para wirehaus-agent o el conector del túnel, acéptalo.'
+        Write-Host 'Después, desde el móvil: menú > Vincular otro equipo, para dar acceso a cualquier ordenador escaneando un QR.'
+        Write-Host 'Para ver el segundo factor otra vez en este ordenador: wirehaus-agent totp'
+    } else {
+        Write-Host 'Done. Three things left:'
+        Write-Host "  1. Scan the pairing QR with your phone: it opens $Address with the code already filled in."
+        Write-Host '     On another device, open that address and type the pairing code.'
+        Write-Host '  2. Type the six digits your authenticator app shows.'
+        Write-Host '  3. If Windows asks for permission for wirehaus-agent or the tunnel connector, accept it.'
+        Write-Host 'Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR.'
+        Write-Host 'Show the second factor again on this computer with: wirehaus-agent totp'
+    }
 } else {
     Write-Host 'Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code.'
 }

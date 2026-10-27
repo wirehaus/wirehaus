@@ -73,6 +73,13 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
   const dialogError = byId('link-error');
   const approveButton = byId<HTMLButtonElement>('link-approve');
 
+  let incoming: string | undefined;
+  {
+    const fromHash = new URLSearchParams(window.location.hash.replace(/^#/u, '')).get('link') ?? '';
+    if (/^[0-9a-f]{32}$/u.test(fromHash)) {
+      incoming = fromHash;
+    }
+  }
   let supported: boolean | undefined;
   let lastKind = 'loading';
   let computer: ComputerLink | undefined;
@@ -322,6 +329,14 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
         dialog.close();
       }
       refresh();
+      if (kind === 'connected' && incoming !== undefined) {
+        const id = incoming;
+        incoming = undefined;
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        resetDialog();
+        dialog.showModal();
+        void find(id);
+      }
     },
     active: () => active,
     receive: (reply) => approver.receive(reply),

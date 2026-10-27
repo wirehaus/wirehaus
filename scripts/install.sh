@@ -11,9 +11,27 @@ zone=wirehaus.dev
 viewer_origin=https://app.wirehaus.dev
 public_host=
 tunnel_token_file=
+site_origin=https://wirehaus.dev
+connector_file=
+fetch_connector=
 cf_version=2026.10.4
 cf_linux_amd64_sha256=ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42
+cf_linux_amd64_gz_sha256=be6c8a8b56fe9e516cee7c6e6dd97da09529bae182677b9d67a9b3642f219588
 cf_darwin_arm64_sha256=68b6bc4080ac1330234db2a9002d07f98b000537a1bd531a687b660d4160fa7f
+
+case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
+  es*) lang=es ;;
+  *) lang=en ;;
+esac
+
+say() {
+  if [ "$lang" = es ]; then printf '%s\n' "$1"; else printf '%s\n' "$2"; fi
+}
+
+fail() {
+  say "$1" "$2" >&2
+  exit 1
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -24,6 +42,8 @@ while [ $# -gt 0 ]; do
     --viewer-origin) [ $# -ge 2 ] || { echo "--viewer-origin needs a value" >&2; exit 2; }; viewer_origin=$2; shift ;;
     --tunnel-token-file) [ $# -ge 2 ] || { echo "--tunnel-token-file needs a value" >&2; exit 2; }; tunnel_token_file=$2; shift ;;
     --public-host) [ $# -ge 2 ] || { echo "--public-host needs a value" >&2; exit 2; }; public_host=$2; shift ;;
+    --connector-file) [ $# -ge 2 ] || { echo "--connector-file needs a value" >&2; exit 2; }; connector_file=$2; shift ;;
+    --fetch-connector) [ $# -ge 2 ] || { echo "--fetch-connector needs a value" >&2; exit 2; }; fetch_connector=$2; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -66,27 +86,48 @@ tunnel_label=wirehaus.tunnel
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --proto '=https' --proto-redir '=https' -o "$2" "$1"
+    if [ -t 2 ]; then meter=-#; else meter=-sS; fi
+    curl -fL "$meter" --proto '=https' --proto-redir '=https' --connect-timeout 20 --retry 3 --retry-delay 2 --speed-limit 20000 --speed-time 40 -o "$2" "$1"
   else
-    wget -q -O "$2" "$1"
+    wget -q -T 40 -t 3 -O "$2" "$1"
   fi
 }
 
 download_cloudflared() {
-  base=https://github.com/cloudflare/cloudflared/releases/download/$cf_version
+  if [ -n "$connector_file" ]; then
+    [ -f "$connector_file" ] || fail "No encuentro el conector descargado." "The downloaded connector is missing."
+    cf_binary=$connector_file
+    return 0
+  fi
+  github=https://github.com/cloudflare/cloudflared/releases/download/$cf_version
   case "$(uname -s)-$(uname -m)" in
-    Linux-x86_64) asset=cloudflared-linux-amd64; want=$cf_linux_amd64_sha256 ;;
-    Darwin-arm64) asset=cloudflared-darwin-arm64.tgz; want=$cf_darwin_arm64_sha256 ;;
-    *) echo "No tunnel connector is available for $(uname -s) $(uname -m)." >&2; exit 1 ;;
+    Linux-x86_64)
+      official=cloudflared-linux-amd64; official_sum=$cf_linux_amd64_sha256
+      mirror=cloudflared-$cf_version-linux-amd64.gz; mirror_sum=$cf_linux_amd64_gz_sha256; kind=gz ;;
+    Darwin-arm64)
+      official=cloudflared-darwin-arm64.tgz; official_sum=$cf_darwin_arm64_sha256
+      mirror=cloudflared-$cf_version-darwin-arm64.tgz; mirror_sum=$cf_darwin_arm64_sha256; kind=tgz ;;
+    *) fail "No hay conector de túnel para $(uname -s) $(uname -m)." "No tunnel connector is available for $(uname -s) $(uname -m)." ;;
   esac
   cf_work=$(mktemp -d)
   trap 'rm -rf "$cf_work"' EXIT
-  fetch "$base/$asset" "$cf_work/$asset" || { echo "Could not download the tunnel connector." >&2; exit 1; }
-  [ "$(checksum "$cf_work/$asset")" = "$want" ] || { echo "$asset does not match the expected checksum." >&2; exit 1; }
-  case "$asset" in
-    *.tgz) tar -xzf "$cf_work/$asset" -C "$cf_work" cloudflared; cf_binary=$cf_work/cloudflared ;;
-    *) cf_binary=$cf_work/$asset ;;
-  esac
+  say "Descargando el conector del túnel (unos 20 MB)..." "Downloading the tunnel connector (about 20 MB)..."
+  cf_binary=
+  if fetch "$site_origin/download/$mirror" "$cf_work/$mirror" && [ "$(checksum "$cf_work/$mirror")" = "$mirror_sum" ]; then
+    case "$kind" in
+      gz) gzip -dc "$cf_work/$mirror" > "$cf_work/cloudflared" && [ "$(checksum "$cf_work/cloudflared")" = "$official_sum" ] && cf_binary=$cf_work/cloudflared ;;
+      *) LC_ALL=C tar -xzf "$cf_work/$mirror" -C "$cf_work" cloudflared && cf_binary=$cf_work/cloudflared ;;
+    esac
+  fi
+  if [ -z "$cf_binary" ]; then
+    say "La primera fuente no ha respondido bien; pruebo con la segunda..." "The first source did not answer well; trying the second one..."
+    fetch "$github/$official" "$cf_work/$official" || fail "No se pudo descargar el conector del túnel. Comprueba tu conexión y repite el comando." "Could not download the tunnel connector. Check your connection and run the command again."
+    [ "$(checksum "$cf_work/$official")" = "$official_sum" ] || fail "El conector descargado no coincide con su suma de comprobación." "The downloaded connector does not match its checksum."
+    case "$official" in
+      *.tgz) LC_ALL=C tar -xzf "$cf_work/$official" -C "$cf_work" cloudflared; cf_binary=$cf_work/cloudflared ;;
+      *) cf_binary=$cf_work/$official ;;
+    esac
+  fi
   chmod 755 "$cf_binary"
 }
 
@@ -166,6 +207,12 @@ run_agent() {
   "$agent" --state-dir "$data_dir" "$@"
 }
 
+if [ -n "$fetch_connector" ]; then
+  download_cloudflared
+  cp "$cf_binary" "$fetch_connector"
+  exit 0
+fi
+
 if [ "$mode" = uninstall ]; then
   if [ -x "$agent" ]; then
     run_agent service uninstall || true
@@ -181,10 +228,26 @@ if [ "$mode" = uninstall ]; then
   exit 0
 fi
 
+mac_permissions() {
+  log="$HOME/Library/Logs/Wirehaus/agent.log"
+  waited=0
+  while [ "$waited" -lt 12 ] && ! grep -qiE "Accessibility|Accesibilidad" "$log" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if tail -n 6 "$log" 2>/dev/null | grep -qiE "pending|pendiente"; then
+    say "macOS necesita dos permisos para wirehaus-agent. Voy a abrir los Ajustes: activa «wirehaus-agent» en Grabación de pantalla y en Accesibilidad (si no aparece, pulsa + y elige $agent)." "macOS needs two permissions for wirehaus-agent. I am opening System Settings: turn on \"wirehaus-agent\" under Screen Recording and under Accessibility (if it is not listed, click + and pick $agent)."
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture" >/dev/null 2>&1 || true
+    sleep 2
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" >/dev/null 2>&1 || true
+  fi
+}
+
 verify_package
 
+say "[1/4] Instalando el agente..." "[1/4] Installing the agent..."
 if [ -x "$agent" ]; then
-  run_agent service uninstall || true
+  run_agent service uninstall >/dev/null 2>&1 || true
 fi
 mkdir -p "$install_dir"
 rm -rf "$install_dir/viewer"
@@ -197,33 +260,53 @@ ln -sf "$agent" "$HOME/.local/bin/wirehaus-agent"
 if ! run_agent devices >/dev/null 2>&1; then
   mkdir -p "$data_dir"
   chmod 700 "$data_dir"
+  say "[2/4] Segundo factor: escanea este QR con una app de autenticación (2FAS, Aegis, Google Authenticator o Contraseñas de Apple)." "[2/4] Second factor: scan this QR with an authenticator app (2FAS, Aegis, Google Authenticator or Apple Passwords)."
   run_agent init
   echo
-  echo "Scan the QR (or type the secret) in your authenticator app now. You can show it again on this computer with: wirehaus-agent totp"
-  echo
+else
+  say "[2/4] El segundo factor ya estaba configurado en este equipo." "[2/4] The second factor was already set up on this computer."
 fi
 
+say "[3/4] Arrancando el servicio y el túnel..." "[3/4] Starting the service and the tunnel..."
 if [ -n "$public_host" ]; then
-  run_agent service install --viewer-dir "$install_dir/viewer" --public-host "$public_host" --viewer-origin "$viewer_origin"
+  run_agent service install --viewer-dir "$install_dir/viewer" --public-host "$public_host" --viewer-origin "$viewer_origin" >/dev/null
 else
-  run_agent service install --viewer-dir "$install_dir/viewer"
+  run_agent service install --viewer-dir "$install_dir/viewer" >/dev/null
 fi
 if [ -n "$tunnel_token_file" ]; then
   install_tunnel
 fi
+if [ "$(uname -s)" = Darwin ]; then
+  mac_permissions
+fi
+
+say "[4/4] Emparejar tu móvil u otro equipo:" "[4/4] Pair your phone or another device:"
 run_agent pairing
 echo
 if [ -n "$public_host" ]; then
-  [ -n "$tunnel_token_file" ] || echo "First connect the tunnel (see your dashboard)."
-  cat <<STEPS
-Next steps:
-  1. Scan the first QR (second factor) with an authenticator app such as 2FAS, Aegis, Google Authenticator or Apple Passwords.
-  2. Scan the second QR with your phone: it opens $viewer_origin/${public_host%%.*} with the pairing code filled in.
-     On another device, open that address and type the pairing code instead.
-  3. Type the six digits your authenticator app shows.
+  address=$viewer_origin/${public_host%%.*}
+  [ -n "$tunnel_token_file" ] || say "Antes conecta el túnel (mira tu panel)." "First connect the tunnel (see your dashboard)."
+  if [ "$lang" = es ]; then
+    cat <<STEPS
+Listo. Te quedan tres cosas:
+  1. Escanea con tu móvil el QR de emparejamiento: abre $address con el código ya puesto.
+     En otro equipo, abre esa dirección y escribe el código de emparejamiento.
+  2. Escribe los seis dígitos que muestra tu app de autenticación.
+  3. Si macOS o Windows pide permisos para wirehaus-agent, concédelos.
+Después, desde el móvil: menú > Vincular otro equipo, para dar acceso a cualquier ordenador escaneando un QR.
+Para ver el segundo factor otra vez en este ordenador: wirehaus-agent totp
+STEPS
+  else
+    cat <<STEPS
+Done. Three things left:
+  1. Scan the pairing QR with your phone: it opens $address with the code already filled in.
+     On another device, open that address and type the pairing code.
+  2. Type the six digits your authenticator app shows.
+  3. If macOS or Windows asks for permissions for wirehaus-agent, grant them.
 Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR.
 Show the second factor again on this computer with: wirehaus-agent totp
 STEPS
+  fi
 else
   echo "Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code."
 fi

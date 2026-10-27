@@ -227,9 +227,24 @@ function updateFoot(): void {
   foot.hidden = pairPanel.hidden && linkPanel.hidden && codePanel.hidden && splash.hidden && homePanel.hidden;
 }
 
+const RECENT_KEY = 'wirehaus.names';
+const RECENT_MAX = 6;
+
+function recentNames(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string' && validAccessName(item)).slice(0, RECENT_MAX)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function rememberName(name: string): void {
   try {
     localStorage.setItem('wirehaus.last', name);
+    localStorage.setItem(RECENT_KEY, JSON.stringify([name, ...recentNames().filter((item) => item !== name)].slice(0, RECENT_MAX)));
   } catch {
     return;
   }
@@ -902,6 +917,19 @@ function showHome(error: string): void {
     homeContinue.textContent = messages.homeContinue(last);
     homeContinue.onclick = () => location.assign(`/${last}`);
   }
+  const recent = recentNames().filter((item) => item !== last);
+  const recentBox = element('home-recent');
+  recentBox.hidden = recent.length === 0;
+  element('home-recent-title').textContent = messages.homeRecent;
+  element('home-recent-list').replaceChildren(
+    ...recent.map((item) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = item;
+      button.addEventListener('click', () => location.assign(`/${item}`));
+      return button;
+    }),
+  );
   updateFoot();
   homeName.focus();
 }

@@ -9,6 +9,7 @@ export type Messages = {
   homePlaceholder: string;
   homeOpen: string;
   homeContinue: (name: string) => string;
+  homeRecent: string;
   linkOr: string;
   linkStart: string;
   linkPcTitle: string;
@@ -236,6 +237,7 @@ const catalog: Record<string, Messages> = {
     homePlaceholder: 'tu-nombre',
     homeOpen: 'Abrir',
     homeContinue: (name) => `Continuar con ${name}`,
+    homeRecent: 'Tus equipos',
     linkOr: 'o',
     linkStart: 'Conectar con mi móvil',
     linkPcTitle: 'Conecta con tu móvil',
@@ -489,6 +491,7 @@ const catalog: Record<string, Messages> = {
     homePlaceholder: 'your-name',
     homeOpen: 'Open',
     homeContinue: (name) => `Continue with ${name}`,
+    homeRecent: 'Your computers',
     linkOr: 'or',
     linkStart: 'Connect with my phone',
     linkPcTitle: 'Connect with your phone',
