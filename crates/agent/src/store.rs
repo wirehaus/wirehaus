@@ -143,10 +143,18 @@ pub fn system_clock() -> Clock {
 
 #[must_use]
 pub fn default_dir() -> PathBuf {
-    dir_from(|name| std::env::var_os(name))
+    dir_with(
+        |name| std::env::var_os(name),
+        |dir| dir.join(STATE_FILE).is_file(),
+        cfg!(target_os = "macos"),
+    )
 }
 
-fn dir_from(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+fn dir_with(
+    get: impl Fn(&str) -> Option<std::ffi::OsString>,
+    has_state: impl Fn(&Path) -> bool,
+    mac: bool,
+) -> PathBuf {
     if let Some(dir) = get("WIREHAUS_STATE_DIR") {
         return PathBuf::from(dir);
     }
@@ -155,11 +163,29 @@ fn dir_from(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
     {
         return dir;
     }
-    let base = get("XDG_CONFIG_HOME")
+    let home = get("HOME").map(PathBuf::from);
+    let legacy = get("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| get("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join("wirehaus")
+        .or_else(|| home.as_ref().map(|home| home.join(".config")))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("wirehaus");
+    let installed = home.as_ref().map(|home| {
+        if mac {
+            home.join("Library")
+                .join("Application Support")
+                .join("Wirehaus")
+        } else {
+            get("XDG_DATA_HOME")
+                .map_or_else(|| home.join(".local").join("share"), PathBuf::from)
+                .join("wirehaus-state")
+        }
+    });
+    match installed {
+        Some(installed) if has_state(&installed) => installed,
+        _ if has_state(&legacy) => legacy,
+        Some(installed) => installed,
+        None => legacy,
+    }
 }
 
 fn windows_dir(get: &impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
@@ -956,26 +982,61 @@ mod tests {
     }
 
     #[test]
-    fn the_state_directory_follows_the_environment() {
+    fn the_state_directory_follows_the_environment_and_prefers_the_installed_one() {
+        let none = |_: &Path| false;
+        let only = |wanted: &'static str| move |dir: &Path| dir == Path::new(wanted);
         assert_eq!(
-            dir_from(environment(&[
-                ("WIREHAUS_STATE_DIR", "/srv/w"),
-                ("HOME", "/home/a")
-            ])),
+            dir_with(
+                environment(&[("WIREHAUS_STATE_DIR", "/srv/w"), ("HOME", "/home/a")]),
+                none,
+                false
+            ),
             PathBuf::from("/srv/w")
         );
         assert_eq!(
-            dir_from(environment(&[
-                ("XDG_CONFIG_HOME", "/cfg"),
-                ("HOME", "/home/a")
-            ])),
-            PathBuf::from("/cfg/wirehaus")
+            dir_with(environment(&[("HOME", "/home/a")]), none, false),
+            PathBuf::from("/home/a/.local/share/wirehaus-state")
         );
         assert_eq!(
-            dir_from(environment(&[("HOME", "/home/a")])),
+            dir_with(
+                environment(&[("HOME", "/home/a"), ("XDG_DATA_HOME", "/data")]),
+                none,
+                false
+            ),
+            PathBuf::from("/data/wirehaus-state")
+        );
+        assert_eq!(
+            dir_with(environment(&[("HOME", "/Users/a")]), none, true),
+            PathBuf::from("/Users/a/Library/Application Support/Wirehaus")
+        );
+        assert_eq!(
+            dir_with(
+                environment(&[("HOME", "/home/a")]),
+                only("/home/a/.config/wirehaus"),
+                false
+            ),
             PathBuf::from("/home/a/.config/wirehaus")
         );
-        assert_eq!(dir_from(environment(&[])), PathBuf::from("./wirehaus"));
+        assert_eq!(
+            dir_with(
+                environment(&[("XDG_CONFIG_HOME", "/cfg"), ("HOME", "/home/a")]),
+                only("/cfg/wirehaus"),
+                false
+            ),
+            PathBuf::from("/cfg/wirehaus")
+        );
+        let both = |dir: &Path| {
+            dir == Path::new("/Users/a/.config/wirehaus")
+                || dir == Path::new("/Users/a/Library/Application Support/Wirehaus")
+        };
+        assert_eq!(
+            dir_with(environment(&[("HOME", "/Users/a")]), both, true),
+            PathBuf::from("/Users/a/Library/Application Support/Wirehaus")
+        );
+        assert_eq!(
+            dir_with(environment(&[]), none, false),
+            PathBuf::from("./wirehaus")
+        );
     }
 
     #[test]
