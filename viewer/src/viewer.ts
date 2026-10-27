@@ -179,7 +179,9 @@ export class Viewer {
       return;
     }
     const pinned = this.identity?.agents[this.target.origin];
-    if (!this.forcePairing && this.identity !== undefined && pinned !== undefined) {
+    const forced = this.forcePairing;
+    this.forcePairing = false;
+    if (!forced && this.identity !== undefined && pinned !== undefined) {
       const key = this.identity.deviceKey;
       this.restoreTicket();
       this.open(() => Handshake.reconnect(key, pinned), false);
@@ -323,7 +325,10 @@ export class Viewer {
     this.retrying = true;
     this.retries += 1;
     this.report({ kind: 'reconnecting', attempt: this.retries });
-    this.retryTimer = window.setTimeout(() => void this.start(), delay);
+    this.retryTimer = window.setTimeout(() => {
+      this.retryTimer = undefined;
+      void this.start();
+    }, delay);
     return true;
   }
 
@@ -415,7 +420,10 @@ export class Viewer {
           window.clearTimeout(this.retryTimer);
           this.retrying = true;
           this.report({ kind: 'reconnecting', attempt: this.resumeRetries });
-          this.retryTimer = window.setTimeout(() => void this.start(), RESUME_RETRY_MS);
+          this.retryTimer = window.setTimeout(() => {
+        this.retryTimer = undefined;
+        void this.start();
+      }, RESUME_RETRY_MS);
           return;
         }
         this.setTicket(null);

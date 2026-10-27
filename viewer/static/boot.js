@@ -3,15 +3,23 @@
   var done = false;
   var spanish = /^es/i.test(navigator.language || '');
 
+  var reloadTimer = 0;
+
   function attempts() {
     try {
-      return Number(sessionStorage.getItem(KEY) || '0');
+      var stored = sessionStorage.getItem(KEY);
+      if (stored !== null) {
+        return Number(stored) || 0;
+      }
     } catch (error) {
-      return 0;
+      void error;
     }
+    var match = /wh\.heal=(\d+)/.exec(window.name || '');
+    return match ? Number(match[1]) : 0;
   }
 
   function remember(value) {
+    var cleaned = (window.name || '').replace(/wh\.heal=\d+;?/, '');
     try {
       if (value === null) {
         sessionStorage.removeItem(KEY);
@@ -19,8 +27,9 @@
         sessionStorage.setItem(KEY, String(value));
       }
     } catch (error) {
-      return;
+      void error;
     }
+    window.name = value === null || value === 0 ? cleaned : cleaned + 'wh.heal=' + value + ';';
   }
 
   function note(text, retry) {
@@ -61,7 +70,7 @@
     }
     remember(tries + 1);
     note(spanish ? 'Actualizando Wirehaus…' : 'Updating Wirehaus…', false);
-    setTimeout(function () {
+    reloadTimer = setTimeout(function () {
       location.reload();
     }, 2500 + tries * 3000);
   }
@@ -79,7 +88,12 @@
 
   window.addEventListener('wirehaus-ready', function () {
     done = true;
+    clearTimeout(reloadTimer);
     remember(null);
+    var box = document.getElementById('boot-note');
+    if (box) {
+      box.hidden = true;
+    }
   });
 
   setTimeout(function () {

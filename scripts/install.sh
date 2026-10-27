@@ -315,7 +315,7 @@ if ! run_agent devices >/dev/null 2>&1; then
   run_agent init --allow-all
   echo
 else
-  say "[2/4] El segundo factor ya estaba configurado en este equipo." "[2/4] The second factor was already set up on this computer."
+  say "[2/4] Este equipo ya estaba configurado (segundo factor incluido). Para activar archivos, terminal, portapapeles y audio de golpe: wirehaus-agent allow-all --code SEIS_DÍGITOS" "[2/4] This computer was already set up (second factor included). To turn on files, terminal, clipboard and audio at once: wirehaus-agent allow-all --code SIX_DIGITS"
 fi
 
 say "[3/4] Arrancando el servicio y el túnel..." "[3/4] Starting the service and the tunnel..."
@@ -335,7 +335,7 @@ if [ -n "$tunnel_token_file" ] && [ -n "$public_host" ]; then
 fi
 
 device_count() {
-  run_agent devices 2>/dev/null | grep -c "(active)" || true
+  grep -c " paired " "$data_dir/access.log" 2>/dev/null || true
 }
 
 wait_for_pairing() {
@@ -358,8 +358,9 @@ if [ -n "$public_host" ]; then
   address=$viewer_origin/${public_host%%.*}
   [ -n "$tunnel_token_file" ] || say "Antes conecta el túnel (mira tu panel)." "First connect the tunnel (see your dashboard)."
   say "Escanea el QR de arriba con tu móvil (abre $address con el código puesto) y escribe los seis dígitos de tu app de autenticación." "Scan the QR above with your phone (it opens $address with the code filled in) and type the six digits from your authenticator app."
-  say "Esperando a tu móvil... (pulsa Ctrl+C para saltar este paso y hacerlo luego con: wirehaus-agent pairing)" "Waiting for your phone... (press Ctrl+C to skip this step and do it later with: wirehaus-agent pairing)"
-  if wait_for_pairing "$devices_before"; then
+  if [ ! -t 1 ] || [ -n "${WIREHAUS_NO_WAIT:-}" ]; then
+    say "Cuando emparejes el móvil habrá terminado. Para otro código: wirehaus-agent pairing" "Once the phone is paired you are done. For another code: wirehaus-agent pairing"
+  elif say "Esperando a tu móvil... (pulsa Ctrl+C para saltar este paso y hacerlo luego con: wirehaus-agent pairing)" "Waiting for your phone... (press Ctrl+C to skip this step and do it later with: wirehaus-agent pairing)"; wait_for_pairing "$devices_before"; then
     say "Listo: tu móvil está emparejado y conectado. Ya no tienes que tocar nada más en este ordenador." "Done: your phone is paired and connected. You do not need to touch anything else on this computer."
   else
     say "No he visto ningún móvil emparejarse en 10 minutos. Cuando quieras, ejecuta: wirehaus-agent pairing" "I did not see a phone pair in 10 minutes. Whenever you like, run: wirehaus-agent pairing"

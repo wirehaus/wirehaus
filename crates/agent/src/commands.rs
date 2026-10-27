@@ -70,9 +70,6 @@ pub fn init_with(
     out: &mut impl Write,
 ) -> Result<(), CommandError> {
     let store = Store::initialize(dir, clock)?;
-    if let Some(home) = everything_in {
-        apply_all(&store, home, out)?;
-    }
     let (public, secret, uri) = store.read(|state, _| {
         (
             state.agent_key().public().to_text(),
@@ -108,6 +105,22 @@ pub fn init_with(
         )
     )?;
     write_totp(out, &secret, &uri)?;
+    if let Some(home) = everything_in
+        && let Err(error) = apply_all(&store, home, out)
+    {
+        writeln!(
+            out,
+            "{}",
+            tr!(
+                format!(
+                    "Aviso: no se pudieron activar las funciones ({error}). Actívalas luego con `wirehaus-agent allow-all --code SEIS_DÍGITOS`."
+                ),
+                format!(
+                    "Warning: the features could not be turned on ({error}). Turn them on later with `wirehaus-agent allow-all --code SIX_DIGITS`."
+                )
+            )
+        )?;
+    }
     Ok(())
 }
 

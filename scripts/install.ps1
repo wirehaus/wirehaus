@@ -219,7 +219,7 @@ if ($firstRun) {
     Invoke-Agent @('init', '--allow-all')
     Write-Host ''
 } else {
-    Say '[2/4] El segundo factor ya estaba configurado en este equipo.' '[2/4] The second factor was already set up on this computer.'
+    Say '[2/4] Este equipo ya estaba configurado (segundo factor incluido). Para activar archivos, terminal, portapapeles y audio de golpe: wirehaus-agent allow-all --code SEIS_DÍGITOS' '[2/4] This computer was already set up (second factor included). To turn on files, terminal, clipboard and audio at once: wirehaus-agent allow-all --code SIX_DIGITS'
 }
 Say '[3/4] Arrancando el servicio y el túnel...' '[3/4] Starting the service and the tunnel...'
 
@@ -238,8 +238,9 @@ if ($TunnelTokenFile) {
     }
 }
 function Get-DeviceCount {
-    $text = (& $agent --state-dir (Join-Path $dataDir 'state') devices 2>$null | Out-String)
-    return ([regex]::Matches($text, '\(active\)')).Count
+    $log = Join-Path $dataDir 'state\access.log'
+    if (-not (Test-Path $log)) { return 0 }
+    return @(Select-String -Path $log -Pattern ' paired ' -SimpleMatch -ErrorAction SilentlyContinue).Count
 }
 
 function Wait-Pairing([int]$Before) {
