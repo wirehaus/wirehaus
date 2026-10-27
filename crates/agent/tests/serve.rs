@@ -1809,6 +1809,27 @@ fn a_ticket_resumes_a_dropped_session_without_a_new_code_and_only_once() {
 }
 
 #[test]
+fn a_ticket_takes_over_a_session_the_agent_still_believes_is_alive() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut first, device) = pair_and_login(&server, "Aula 3");
+    let ticket = first.wait_for_ticket();
+
+    let mut second =
+        start_reconnect(&server, &device, &server.agent_key()).expect("reconnection handshake");
+    second.expect_auth_required();
+    assert!(matches!(
+        second.resume(ticket),
+        Received::Got(ControlMessage::AuthOk)
+    ));
+    let renewed = second.wait_for_ticket();
+    assert_ne!(renewed, ticket);
+    assert!(first.wait_closed(Duration::from_secs(5)));
+    sleep(Duration::from_millis(600));
+    assert!(refused_ticket(&server, &device, ticket));
+}
+
+#[test]
 fn a_ticket_stops_working_after_the_grace_period() {
     let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);

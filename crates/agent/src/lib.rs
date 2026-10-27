@@ -13,6 +13,7 @@ mod link;
 mod mode;
 mod pacer;
 mod platform;
+pub mod qr;
 mod server;
 #[cfg(unix)]
 pub mod service;

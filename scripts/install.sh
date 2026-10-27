@@ -199,7 +199,7 @@ if ! run_agent devices >/dev/null 2>&1; then
   chmod 700 "$data_dir"
   run_agent init
   echo
-  echo "Save the secret above in your authenticator app now: it is only shown once."
+  echo "Scan the QR (or type the secret) in your authenticator app now. You can show it again on this computer with: wirehaus-agent totp"
   echo
 fi
 

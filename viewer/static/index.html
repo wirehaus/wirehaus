@@ -85,6 +85,16 @@
         <button id="shot" type="button" class="tool"></button>
         <button id="record" type="button" class="tool"></button>
         <button id="listen" type="button" class="tool"></button>
+        <span class="menu-wrap">
+          <button id="keys-button" type="button" class="tool" aria-haspopup="true" aria-expanded="false"></button>
+          <div id="keys-menu" class="menu" hidden>
+            <button type="button" class="menu-item" data-combo="AltLeft+F4" id="combo-close"></button>
+            <button type="button" class="menu-item" data-combo="AltLeft+Tab" id="combo-switch"></button>
+            <button type="button" class="menu-item" data-combo="ControlLeft+AltLeft+Delete" id="combo-cad"></button>
+            <button type="button" class="menu-item" data-combo="MetaLeft" id="combo-super"></button>
+            <button type="button" class="menu-item" data-combo="Escape" id="combo-escape"></button>
+          </div>
+        </span>
       </span>
       <button id="reconnect" type="button" class="primary small" hidden></button>
       <div class="menu-wrap">

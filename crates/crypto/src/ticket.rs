@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use subtle::ConstantTimeEq;
 
 use crate::error::CryptoError;
@@ -9,11 +12,12 @@ pub const GRACE_SECONDS: u64 = 300;
 pub const MAX_PER_DEVICE: usize = 4;
 const MAX_ENTRIES: usize = 64;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Entry {
     device: PublicKey,
     secret: [u8; TICKET_BYTES],
     valid_until: Option<u64>,
+    superseded: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -61,8 +65,21 @@ impl Tickets {
             device,
             secret,
             valid_until: None,
+            superseded: Arc::new(AtomicBool::new(false)),
         });
         Ok(secret)
+    }
+
+    #[must_use]
+    pub fn superseded_flag(
+        &self,
+        device: &PublicKey,
+        secret: &[u8; TICKET_BYTES],
+    ) -> Option<Arc<AtomicBool>> {
+        self.entries
+            .iter()
+            .find(|entry| entry.device == *device && bool::from(entry.secret.ct_eq(secret)))
+            .map(|entry| entry.superseded.clone())
     }
 
     pub fn suspend(&mut self, device: &PublicKey, secret: &[u8; TICKET_BYTES], now: u64) {
@@ -86,14 +103,16 @@ impl Tickets {
 
     pub fn verify(&mut self, device: &PublicKey, presented: &[u8; TICKET_BYTES], now: u64) -> bool {
         self.prune(now);
-        let found = self.entries.iter().position(|entry| {
-            entry.device == *device
-                && entry.valid_until.is_some()
-                && bool::from(entry.secret.ct_eq(presented))
-        });
+        let found = self
+            .entries
+            .iter()
+            .position(|entry| entry.device == *device && bool::from(entry.secret.ct_eq(presented)));
         match found {
             Some(index) => {
-                self.entries.remove(index);
+                let entry = self.entries.remove(index);
+                if entry.valid_until.is_none() {
+                    entry.superseded.store(true, Ordering::SeqCst);
+                }
                 true
             }
             None => false,
@@ -126,15 +145,39 @@ mod tests {
     }
 
     #[test]
-    fn a_ticket_is_random_and_unusable_while_its_session_is_active() {
+    fn a_ticket_is_random_and_distinct_per_session() {
         let mut tickets = Tickets::new();
         let key = device();
         let first = tickets.issue(key, 100).unwrap();
         assert_ne!(first, [0; TICKET_BYTES]);
-        assert!(!tickets.verify(&key, &first, 100));
         let second = tickets.issue(key, 100).unwrap();
         assert_ne!(first, second);
         assert_eq!(tickets.len(), 2);
+    }
+
+    #[test]
+    fn presenting_the_ticket_of_a_session_that_looks_alive_takes_it_over() {
+        let mut tickets = Tickets::new();
+        let (key, other) = (device(), device());
+        let ticket = tickets.issue(key, 100).unwrap();
+        let flag = tickets.superseded_flag(&key, &ticket).unwrap();
+        assert!(!flag.load(Ordering::SeqCst));
+        assert!(!tickets.verify(&other, &ticket, 100));
+        assert!(!flag.load(Ordering::SeqCst));
+        assert!(tickets.verify(&key, &ticket, 100));
+        assert!(flag.load(Ordering::SeqCst));
+        assert!(!tickets.verify(&key, &ticket, 100));
+    }
+
+    #[test]
+    fn a_suspended_ticket_does_not_raise_the_flag_of_a_finished_session() {
+        let mut tickets = Tickets::new();
+        let key = device();
+        let ticket = tickets.issue(key, 0).unwrap();
+        let flag = tickets.superseded_flag(&key, &ticket).unwrap();
+        tickets.suspend(&key, &ticket, 0);
+        assert!(tickets.verify(&key, &ticket, 1));
+        assert!(!flag.load(Ordering::SeqCst));
     }
 
     #[test]

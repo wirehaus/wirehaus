@@ -10,6 +10,7 @@ use crate::state::{AuthError, ClipboardMode, SecretStorage, State, StateError};
 use crate::store::{Clock, Store, StoreError};
 
 const ISSUER: &str = "Wirehaus";
+const VIEWER_URL_FILE: &str = "viewer-url";
 
 #[derive(Debug, Error)]
 pub enum CommandError {
@@ -87,13 +88,51 @@ pub fn init(dir: &Path, clock: Clock, out: &mut impl Write) -> Result<(), Comman
         out,
         "{}",
         tr!(
-            "Segundo factor: añade este secreto a tu aplicación de autenticación. Solo se muestra ahora.",
-            "Second factor: add this secret to your authenticator app. It is only shown now."
+            "Segundo factor: añádelo a tu aplicación de autenticación ahora. Podrás volver a verlo en este ordenador con `wirehaus-agent totp`.",
+            "Second factor: add it to your authenticator app now. You can see it again on this computer with `wirehaus-agent totp`."
+        )
+    )?;
+    write_totp(out, &secret, &uri)?;
+    Ok(())
+}
+
+fn write_totp(out: &mut impl Write, secret: &str, uri: &str) -> Result<(), CommandError> {
+    if let Some(qr) = crate::qr::render(uri) {
+        writeln!(
+            out,
+            "{}",
+            tr!(
+                "Escanea este QR con cualquier aplicación de autenticación (2FAS, Aegis, Google Authenticator, Contraseñas de Apple...):",
+                "Scan this QR with any authenticator app (2FAS, Aegis, Google Authenticator, Apple Passwords...):"
+            )
+        )?;
+        write!(out, "{qr}")?;
+    }
+    writeln!(
+        out,
+        "{}",
+        tr!(
+            "Si no puedes escanearlo, escribe el secreto a mano:",
+            "If you cannot scan it, type the secret by hand:"
         )
     )?;
     writeln!(out, "{}: {secret}", tr!("Secreto", "Secret"))?;
     writeln!(out, "URI: {uri}")?;
     Ok(())
+}
+
+pub fn totp(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
+    let (secret, uri) = store.read(|state, _| {
+        (
+            state.totp().to_base32(),
+            state.totp().otpauth_uri(ISSUER, &host_name()),
+        )
+    })?;
+    store.log(
+        "totp_shown",
+        "the second factor secret was shown on this computer",
+    );
+    write_totp(out, &secret, &uri)
 }
 
 pub fn permissions(
@@ -147,6 +186,14 @@ pub fn permissions(
 }
 
 pub fn pairing(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
+    pairing_with_link(store, None, out)
+}
+
+pub fn pairing_with_link(
+    store: &Store,
+    viewer_url: Option<&str>,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
     let code = store.update(State::open_pairing)??;
     store.log("pairing_opened", "a pairing code was generated");
     let minutes = VALIDITY_SECONDS / 60;
@@ -168,7 +215,44 @@ pub fn pairing(store: &Store, out: &mut impl Write) -> Result<(), CommandError> 
             )
         )
     )?;
+    if let Some(base) = viewer_url {
+        let link = format!("{base}#pair={}", code.to_text());
+        if let Some(qr) = crate::qr::render(&link) {
+            writeln!(
+                out,
+                "{}",
+                tr!(
+                    "Para no teclear el código, escanea este QR con el móvil y abre el enlace en el equipo desde el que vas a conectarte (o copia el enlace):",
+                    "To avoid typing the code, scan this QR with your phone and open the link on the computer you will connect from (or copy the link):"
+                )
+            )?;
+            write!(out, "{qr}")?;
+        }
+        writeln!(out, "{link}")?;
+    }
     Ok(())
+}
+
+pub fn remember_viewer_url(
+    dir: &Path,
+    public_hosts: &[String],
+    viewer_origins: &[String],
+) -> std::io::Result<()> {
+    let (Some(host), Some(origin)) = (public_hosts.first(), viewer_origins.first()) else {
+        return Ok(());
+    };
+    let name = host.split('.').next().unwrap_or(host);
+    std::fs::write(
+        dir.join(VIEWER_URL_FILE),
+        format!("{}/{name}\n", origin.trim_end_matches('/')),
+    )
+}
+
+#[must_use]
+pub fn viewer_url(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(VIEWER_URL_FILE)).ok()?;
+    let line = text.trim();
+    (line.starts_with("https://") && !line.contains(['#', ' '])).then(|| line.to_string())
 }
 
 pub fn devices(store: &Store, out: &mut impl Write) -> Result<(), CommandError> {
@@ -797,6 +881,57 @@ mod tests {
             init(&dir.0, clock(&time), &mut Vec::new()),
             Err(CommandError::Store(StoreError::AlreadyInitialized(_)))
         ));
+    }
+
+    #[test]
+    fn init_shows_a_scannable_qr_and_the_totp_command_shows_it_again() {
+        let dir = TempDir::new();
+        let time = Arc::new(AtomicU64::new(0));
+        let mut out = Vec::new();
+        init(&dir.0, clock(&time), &mut out).unwrap();
+        assert!(text(out).contains('\u{2588}'));
+        let store = Store::open(&dir.0, clock(&time)).unwrap();
+        let secret = store.read(|state, _| state.totp().to_base32()).unwrap();
+        let mut again = Vec::new();
+        totp(&store, &mut again).unwrap();
+        let shown = text(again);
+        assert!(shown.contains(&secret));
+        assert!(shown.contains('\u{2588}'));
+    }
+
+    #[test]
+    fn pairing_with_a_viewer_url_prints_a_link_that_carries_the_code() {
+        let (_dir, store, _time) = setup();
+        let mut out = Vec::new();
+        pairing_with_link(&store, Some("https://app.example/zz"), &mut out).unwrap();
+        let shown = text(out);
+        let code = shown
+            .lines()
+            .next()
+            .unwrap()
+            .trim_start_matches("Pairing code: ")
+            .to_string();
+        assert!(shown.contains(&format!("https://app.example/zz#pair={code}")));
+        assert!(shown.contains('\u{2588}'));
+    }
+
+    #[test]
+    fn the_viewer_url_is_remembered_from_the_first_host_and_origin() {
+        let dir = TempDir::new();
+        std::fs::create_dir_all(&dir.0).unwrap();
+        assert_eq!(viewer_url(&dir.0), None);
+        remember_viewer_url(
+            &dir.0,
+            &["zz-test.wirehaus.dev".to_string()],
+            &["https://app.wirehaus.dev/".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            viewer_url(&dir.0).as_deref(),
+            Some("https://app.wirehaus.dev/zz-test")
+        );
+        std::fs::write(dir.0.join("viewer-url"), "http://insecure/x#y").unwrap();
+        assert_eq!(viewer_url(&dir.0), None);
     }
 
     #[test]

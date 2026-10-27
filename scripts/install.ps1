@@ -108,7 +108,7 @@ $firstRun = -not (Test-Path $stateFile)
 if ($firstRun) {
     Invoke-Agent @('init')
     Write-Host ''
-    Write-Host 'Save the secret above in your authenticator app now: it is only shown once.'
+    Write-Host 'Scan the QR (or type the secret) in your authenticator app now. You can show it again on this computer with: wirehaus-agent totp'
     Write-Host ''
 }
 

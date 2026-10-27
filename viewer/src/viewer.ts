@@ -118,6 +118,17 @@ export class Viewer {
     new ResizeObserver(() => this.fit()).observe(canvas.parentElement ?? canvas);
   }
 
+  tapCombo(names: readonly string[]): void {
+    const codes = names.map((name) => evdevCode(name));
+    if (codes.some((code) => code === undefined)) {
+      return;
+    }
+    const sequence = codes as number[];
+    this.sendKeys(sequence.map((code) => ({ code, pressed: true, time: performance.now() })));
+    this.sendKeys([...sequence].reverse().map((code) => ({ code, pressed: false, time: performance.now() })));
+    this.canvas.focus();
+  }
+
   releaseHostKey(): void {
     this.hostKey.reset();
   }

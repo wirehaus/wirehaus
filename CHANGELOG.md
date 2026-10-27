@@ -8,7 +8,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 - Actualización automática del agente: comprueba cada seis horas la lista de versiones firmada de `wirehaus.dev`, verifica la firma SSH con la clave fijada en el binario, nunca baja de versión, comprueba el hash del paquete, espera a que no haya sesión, cambia el binario y el visor de forma atómica y se reinicia por el gestor del sistema. Si la versión nueva no llega a arrancar tres veces, vuelve a la anterior y la descarta. Comandos `update status`, `check`, `apply`, `enable`, `disable` y `rollback`. Solo actúa en instalaciones con el diseño del instalador (`serve --no-auto-update` la desactiva).
 - El conector del túnel de Cloudflare vuelve a usar su actualizador propio (los instaladores ya no pasan `--no-autoupdate`).
-- Varias sesiones a la vez (hasta 3) y varios billetes de reanudación por dispositivo, de un solo uso: se puede abrir el visor en dos pestañas.
+- Varias sesiones a la vez (hasta 5) y varios billetes de reanudación por dispositivo, de un solo uso: se puede abrir el visor en dos pestañas.
 - El agente anuncia sus capacidades en el listado de carpetas compartidas y el visor desactiva renombrar, mover y editar con agentes anteriores.
 - Editor con colores por tipo de archivo (HTML con scripts y estilos incrustados, CSS, JavaScript y TypeScript, JSON, Python, shell, Rust, Go, C y derivados, Java y Kotlin, PHP, SQL, YAML, TOML y Markdown), números de línea, línea actual resaltada, sangría automática, cierre de paréntesis y comillas, comentar con Ctrl+/ y tabuladores de bloque.
 - El visor recuerda la pestaña y la carpeta de Archivos al recargar, el idioma se elige en el menú, y el decodificador de vídeo liberado por el navegador en segundo plano provoca una reconexión automática en vez de un error.
@@ -22,6 +22,12 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 - Al recargar la página la sesión se reanuda sin pedir el segundo factor mientras dure el billete de reanudación (5 minutos tras la desconexión, guardado solo en `sessionStorage`).
 - Aviso en el visor cuando hay una versión nueva publicada, con botón para recargar.
 - La grabación de pantalla admite MP4 cuando el navegador no puede grabar WebM.
+- El segundo factor se muestra como un QR escaneable en la terminal (`init`) y vuelve a mostrarse en el propio ordenador con `wirehaus-agent totp`; el código de emparejamiento se muestra también como enlace y QR (`#pair=`) que rellena el formulario del visor sin teclearlo y se borra de la barra de direcciones. El instalador recuerda la dirección del visor en `viewer-url`.
+- Menú «Teclas» en el escritorio del visor con Cerrar ventana (Alt+F4), Alt+Tab, Ctrl+Alt+Supr, tecla Super y Escape, para las combinaciones que el sistema o el navegador del usuario no dejan pasar.
+
+### Corregido
+
+- Abrir una segunda pestaña o recargar ya no obliga a volver a escribir el segundo factor: presentar el billete de una sesión que el agente aún cree viva la reanuda y cierra la antigua (antes el billete se rechazaba hasta que la sesión vieja caía por tiempo), y una sesión que acaba por un fallo del propio equipo (captura, codificación, entrada) ya no revoca el billete. El agente permite hasta 5 sesiones, espera 45 s antes de dar por atascado a un visor y anota la causa al cerrar cada sesión.
 
 ## [0.2.1] - 2026-10-27
 

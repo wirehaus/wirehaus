@@ -45,7 +45,10 @@ fn run(command: Command, dir: &std::path::Path) -> Result<(), Box<dyn std::error
             );
         }
         Command::Init => commands::init(dir, system_clock(), &mut out)?,
-        Command::Pairing => commands::pairing(&open()?, &mut out)?,
+        Command::Pairing => {
+            commands::pairing_with_link(&open()?, commands::viewer_url(dir).as_deref(), &mut out)?;
+        }
+        Command::Totp => commands::totp(&open()?, &mut out)?,
         #[cfg(any(target_os = "macos", target_os = "linux", windows))]
         Command::Service { action } => match action {
             crate::cli::ServiceAction::Install {
@@ -63,6 +66,7 @@ fn run(command: Command, dir: &std::path::Path) -> Result<(), Box<dyn std::error
                     &viewer_origins,
                     &mut out,
                 )?;
+                commands::remember_viewer_url(dir, &public_hosts, &viewer_origins)?;
             }
             crate::cli::ServiceAction::Uninstall => wirehaus_agent::service::uninstall(&mut out)?,
             crate::cli::ServiceAction::Status => wirehaus_agent::service::status(&mut out)?,

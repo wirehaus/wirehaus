@@ -160,6 +160,12 @@ export type Messages = {
   captureFailed: string;
   recordLimit: string;
   audioListen: string;
+  keysButton: string;
+  keysClose: string;
+  keysSwitch: string;
+  keysCad: string;
+  keysSuper: string;
+  keysEscape: string;
   audioStop: string;
   audioStarting: string;
   audioUnsupported: string;
@@ -367,6 +373,12 @@ const catalog: Record<string, Messages> = {
     captureFailed: 'No se pudo guardar.',
     recordLimit: 'Grabación detenida al llegar al límite de 30 minutos o 1 GiB. Se ha guardado lo grabado.',
     audioListen: 'Escuchar',
+    keysButton: 'Teclas',
+    keysClose: 'Cerrar ventana (Alt+F4)',
+    keysSwitch: 'Cambiar de ventana (Alt+Tab)',
+    keysCad: 'Ctrl+Alt+Supr',
+    keysSuper: 'Tecla Super (Windows)',
+    keysEscape: 'Escape',
     audioStop: 'Dejar de escuchar',
     audioStarting: 'Activando el audio...',
     audioUnsupported: 'Este navegador no puede reproducir el audio del ordenador remoto.',
@@ -583,6 +595,12 @@ const catalog: Record<string, Messages> = {
     captureFailed: 'Could not save.',
     recordLimit: 'Recording stopped at the limit of 30 minutes or 1 GiB. What was recorded has been saved.',
     audioListen: 'Listen',
+    keysButton: 'Keys',
+    keysClose: 'Close window (Alt+F4)',
+    keysSwitch: 'Switch window (Alt+Tab)',
+    keysCad: 'Ctrl+Alt+Del',
+    keysSuper: 'Super (Windows) key',
+    keysEscape: 'Escape',
     audioStop: 'Stop listening',
     audioStarting: 'Starting audio...',
     audioUnsupported: 'This browser cannot play the remote computer audio.',

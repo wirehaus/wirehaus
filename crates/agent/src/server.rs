@@ -30,7 +30,7 @@ const HEAD_POLL: Duration = Duration::from_millis(5);
 const MAX_INBOUND_MESSAGE: usize = INBOUND_LIMIT + 64;
 const MAX_CONNECTIONS: usize = 64;
 const MAX_UNAUTHENTICATED: usize = 16;
-const MAX_SESSIONS: usize = 3;
+const MAX_SESSIONS: usize = 5;
 const HEAD_END: &[u8] = b"\r\n\r\n";
 const TEXT: &str = "text/plain; charset=utf-8";
 
@@ -311,7 +311,7 @@ impl Server {
                 return Err(error);
             }
         };
-        let ticket = self.issue_ticket(&identity.device)?;
+        let (ticket, superseded) = self.issue_ticket(&identity.device)?;
         link.send_control(ControlMessage::AuthOk)?;
         link.send_control(ControlMessage::Ticket { ticket })?;
         link.flush()?;
@@ -338,6 +338,7 @@ impl Server {
                         .unwrap_or(Some(EndReason::Revoked))
                 },
                 idle_timeout: self.config.idle_timeout,
+                superseded: &|| superseded.load(Ordering::SeqCst),
                 terminal_allowed: &|| {
                     self.store
                         .read(|state, _| state.terminal_allowed())
@@ -361,18 +362,23 @@ impl Server {
                 },
             },
         );
-        self.store.log("session_end", name);
+        match &result {
+            Ok(()) => self.store.log("session_end", name),
+            Err(error) => self.store.log("session_end", &format!("{name}: {error}")),
+        }
         self.settle_ticket(&identity.device, &ticket, &result);
         result
     }
 
-    fn issue_ticket(&self, device: &PublicKey) -> Result<[u8; TICKET_LEN], ServerError> {
+    fn issue_ticket(
+        &self,
+        device: &PublicKey,
+    ) -> Result<([u8; TICKET_LEN], Arc<AtomicBool>), ServerError> {
         let now = self.store.read(|_, now| now)?;
-        Ok(self
-            .tickets
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .issue(*device, now)?)
+        let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);
+        let ticket = tickets.issue(*device, now)?;
+        let superseded = tickets.superseded_flag(device, &ticket).unwrap_or_default();
+        Ok((ticket, superseded))
     }
 
     fn settle_ticket(
@@ -381,10 +387,15 @@ impl Server {
         ticket: &[u8; TICKET_LEN],
         result: &Result<(), ServerError>,
     ) {
-        let keeps_grace = matches!(
+        let keeps_grace = !matches!(
             result,
-            Ok(())
-                | Err(ServerError::ViewerStalled | ServerError::Io(_) | ServerError::WebSocket(_))
+            Err(ServerError::AccessRevoked
+                | ServerError::IdleTimeout
+                | ServerError::Protocol(_)
+                | ServerError::UnexpectedChannel(_)
+                | ServerError::UnexpectedMessage
+                | ServerError::Crypto(_)
+                | ServerError::Viewer(_))
         );
         let now = self.store.read(|_, now| now).unwrap_or(0);
         let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);

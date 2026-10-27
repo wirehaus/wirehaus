@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 pub const MAX_IN_FLIGHT_BATCHES: usize = 8;
 pub const MAX_IN_FLIGHT_BYTES: usize = 256 * 1024;
 pub const MIN_QUALITY: u8 = 30;
-pub const STALL_TIMEOUT: Duration = Duration::from_secs(15);
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(45);
 
 const WINDOW_TICKS: u32 = 15;
 const CALM_WINDOWS_TO_RECOVER: u32 = 2;

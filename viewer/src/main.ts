@@ -10,6 +10,7 @@ import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
 import { UpdateWatcher } from './updates.js';
 import { KeyBar } from './keybar.js';
+import { pairCodeFromHash, withoutPairCode } from './pairlink.js';
 import type { Layout } from './softkeys.js';
 import { TouchLayer } from './touchlayer.js';
 import { type Messages, messagesFor, preferredLanguage } from './strings.js';
@@ -139,7 +140,11 @@ zoomReset.title = messages.zoomReset;
 reconnect.textContent = messages.reconnect;
 pairName.value = messages.pairNameDefault;
 homeName.placeholder = messages.homePlaceholder;
-pairCode.placeholder = 'XXXX-XXXX-XXXX-XXXX';
+pairCode.placeholder = 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX';
+const linkedPairCode = pairCodeFromHash(window.location.hash);
+if (linkedPairCode !== undefined) {
+  history.replaceState(null, '', window.location.pathname + window.location.search + withoutPairCode(window.location.hash));
+}
 
 function refusal(state: Extract<ViewerState, { kind: 'refused' }>, texts: Messages): string {
   switch (state.reason) {
@@ -186,6 +191,42 @@ const capture = new DesktopCapture(
     toolsNotice.textContent = text;
   },
 );
+
+const keysButton = element<HTMLButtonElement>('keys-button');
+const keysMenu = element<HTMLElement>('keys-menu');
+keysButton.textContent = messages.keysButton;
+keysButton.setAttribute('aria-label', messages.keysButton);
+keysButton.title = messages.keysButton;
+for (const [id, text] of [
+  ['combo-close', messages.keysClose],
+  ['combo-switch', messages.keysSwitch],
+  ['combo-cad', messages.keysCad],
+  ['combo-super', messages.keysSuper],
+  ['combo-escape', messages.keysEscape],
+] as const) {
+  element<HTMLButtonElement>(id).textContent = text;
+}
+function closeKeysMenu(): void {
+  keysMenu.hidden = true;
+  keysButton.setAttribute('aria-expanded', 'false');
+}
+keysButton.addEventListener('click', (event) => {
+  event.stopPropagation();
+  keysMenu.hidden = !keysMenu.hidden;
+  keysButton.setAttribute('aria-expanded', String(!keysMenu.hidden));
+});
+keysMenu.addEventListener('click', (event) => {
+  const combo = (event.target as HTMLElement).closest<HTMLElement>('[data-combo]')?.dataset['combo'];
+  if (combo !== undefined) {
+    viewer.tapCombo(combo.split('+'));
+    closeKeysMenu();
+  }
+});
+document.addEventListener('click', (event) => {
+  if (!keysMenu.hidden && !keysMenu.contains(event.target as Node)) {
+    closeKeysMenu();
+  }
+});
 
 const audio = new AudioControl(
   element<HTMLButtonElement>('listen'),
@@ -345,7 +386,12 @@ function show(state: ViewerState): void {
       break;
     case 'needsPairing':
       status.textContent = '';
-      pairCode.focus();
+      if (linkedPairCode !== undefined && pairCode.value === '') {
+        pairCode.value = linkedPairCode;
+        pairName.focus();
+      } else {
+        pairCode.focus();
+      }
       break;
     case 'connecting':
       status.textContent = messages.connecting;

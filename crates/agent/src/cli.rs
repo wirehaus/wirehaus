@@ -17,6 +17,7 @@ pub enum Command {
     Info,
     Init,
     Pairing,
+    Totp,
     #[cfg(target_os = "macos")]
     Permissions,
     #[cfg(any(target_os = "macos", target_os = "linux", windows))]

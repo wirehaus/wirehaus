@@ -28,6 +28,7 @@ const REVOCATION_CHECK_TICKS: u32 = 30;
 pub struct Policy<'a> {
     pub revoked: &'a dyn Fn() -> Option<EndReason>,
     pub idle_timeout: Duration,
+    pub superseded: &'a dyn Fn() -> bool,
     pub terminal_allowed: &'a dyn Fn() -> bool,
     pub audio_allowed: &'a dyn Fn() -> bool,
     pub file_roots: &'a dyn Fn() -> Vec<PathBuf>,
@@ -77,6 +78,14 @@ fn serve(
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
         ticks = ticks.wrapping_add(1);
+        if (policy.superseded)() {
+            (policy.audit)(
+                "session_superseded",
+                "the viewer resumed this session elsewhere",
+            );
+            link.close();
+            return Ok(());
+        }
         if ticks.is_multiple_of(REVOCATION_CHECK_TICKS) {
             if let Some(reason) = (policy.revoked)() {
                 end_session(&mut link, reason);
