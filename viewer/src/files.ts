@@ -31,6 +31,7 @@ import {
   uniqueName,
   validName,
 } from './filetypes.js';
+import { LocalPane, type RemoteBridge } from './localfiles.js';
 import type { Messages } from './strings.js';
 
 export type FilesIo = {
@@ -40,7 +41,15 @@ export type FilesIo = {
 
 export type FilesTexts = Messages;
 
+export type Sink = {
+  write(chunk: Uint8Array): Promise<void>;
+  close(): Promise<void>;
+  abort(): Promise<void>;
+};
+
 type Transfer = {
+  sink: Sink | null;
+  writing: Promise<void>;
   name: string;
   kind: 'download' | 'upload';
   total: number;
@@ -55,7 +64,7 @@ type Transfer = {
 
 type Place = { root: number; path: string[] };
 type View = 'grid' | 'list';
-type Preferences = { view: View; sort: SortKey; descending: boolean };
+type Preferences = { view: View; sort: SortKey; descending: boolean; dual: boolean };
 type MenuItem = { label: string; icon: string; run: () => void; danger?: boolean } | 'separator';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -105,7 +114,7 @@ function node<K extends keyof HTMLElementTagNameMap>(
 
 function loadPreferences(): Preferences {
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-  const fallback: Preferences = { view: coarse ? 'grid' : 'list', sort: 'name', descending: false };
+  const fallback: Preferences = { view: coarse ? 'grid' : 'list', sort: 'name', descending: false, dual: false };
   try {
     const raw = localStorage.getItem(PREFERENCES_KEY);
     if (raw === null) {
@@ -116,6 +125,7 @@ function loadPreferences(): Preferences {
       view: value.view === 'grid' || value.view === 'list' ? value.view : fallback.view,
       sort: value.sort === 'name' || value.sort === 'size' || value.sort === 'modified' ? value.sort : 'name',
       descending: value.descending === true,
+      dual: value.dual === true,
     };
   } catch {
     return fallback;
@@ -126,6 +136,7 @@ export class FilesPanel {
   private readonly pending = new Map<number, (message: FilesMessage) => void>();
   private readonly transfers = new Map<number, Transfer>();
   private readonly dialog: FileDialog;
+  private readonly local: LocalPane;
   private readonly side: HTMLElement;
   private readonly crumbs: HTMLElement;
   private readonly search: HTMLInputElement;
@@ -176,7 +187,7 @@ export class FilesPanel {
     private readonly io: FilesIo,
     private readonly texts: FilesTexts,
   ) {
-    const root = node('div', 'fm');
+    const root = node('div', 'fm fm-remote');
     const bar = node('div', 'fm-bar');
     this.buttons['back'] = this.tool('i-left', texts.filesBack, () => this.goBack());
     this.buttons['forward'] = this.tool('i-right', texts.filesForward, () => this.goForward());
@@ -233,6 +244,9 @@ export class FilesPanel {
     this.buttons['newFile'] = this.tool('i-file-plus', texts.filesNewFile, () => void this.createFile(), true);
     this.buttons['upload'] = this.tool('i-upload', texts.filesUpload, () => this.picker.click(), true);
     this.buttons['refresh'] = this.tool('i-refresh', texts.filesRefresh, () => void this.refresh());
+    this.buttons['dual'] = this.tool('i-desktop', texts.filesDual, () => this.toggleDual(), true);
+    this.buttons['toLocal'] = this.tool('i-left', texts.filesToLocal, () => void this.local.receiveFromRemote(), true);
+    this.buttons['toLocal'].classList.add('fm-dual-only');
     const divider = node('span', 'fm-divider');
     this.buttons['open'] = this.tool('i-folder', texts.filesOpen, () => this.openSelected(), true);
     this.buttons['edit'] = this.tool('i-edit', texts.filesEdit, () => this.editSelected(), true);
@@ -249,6 +263,8 @@ export class FilesPanel {
       this.buttons['newFile'],
       this.buttons['upload'],
       this.buttons['refresh'],
+      this.buttons['dual'],
+      this.buttons['toLocal'],
       divider,
       this.buttons['open'],
       this.buttons['edit'],
@@ -294,7 +310,12 @@ export class FilesPanel {
     this.modal.hidden = true;
 
     root.append(bar, actions, body, this.progress, statusBar, this.picker);
-    this.host.append(root, this.menu, this.modal);
+    const stage = node('div', 'fm-split');
+    const localHost = node('div');
+    stage.append(localHost, root);
+    this.host.append(stage, this.menu, this.modal);
+    this.local = new LocalPane(localHost, texts, this.bridge());
+    this.host.classList.toggle('fm-dual-on', this.preferences.dual);
     this.dialog = new FileDialog(this.host, texts, {
       read: (path) => this.readFile(path),
       write: (path, data) => this.writeFile(path, data),
@@ -536,6 +557,29 @@ export class FilesPanel {
     }
   }
 
+  private toggleDual(): void {
+    this.preferences.dual = !this.preferences.dual;
+    this.savePreferences();
+    this.host.classList.toggle('fm-dual-on', this.preferences.dual);
+    this.renderTools();
+  }
+
+  private bridge(): RemoteBridge {
+    return {
+      dir: () => [...this.path],
+      names: () => [...this.entryByName.keys()],
+      selection: () => this.selectedEntries(),
+      draggedNames: () => this.dragging?.names ?? null,
+      list: async (dir) => (await this.listDir(this.root, dir))?.entries ?? null,
+      upload: (dir, blob, name) => this.upload(blob, joinPath(dir, name), name),
+      mkdir: (dir, name) => this.must(encodeMkdir(this.root, joinPath(dir, name))),
+      download: (dir, entry, sink) => this.fetchToSink(joinPath(dir, entry.name), entry.name, entry.size, sink),
+      refresh: () => this.refresh(),
+      say: (text) => this.say(text),
+      confirm: (message, ok, danger) => this.confirm(message, ok, danger),
+    };
+  }
+
   private toggleView(): void {
     this.preferences.view = this.preferences.view === 'grid' ? 'list' : 'grid';
     this.savePreferences();
@@ -599,6 +643,10 @@ export class FilesPanel {
     set('newFile', has);
     set('upload', has);
     set('refresh', has);
+    set('dual', has || this.preferences.dual);
+    set('toLocal', has && files.length > 0);
+    this.buttons['dual']?.setAttribute('aria-pressed', String(this.preferences.dual));
+    this.buttons['dual']?.classList.toggle('on', this.preferences.dual);
     set('open', single !== undefined);
     set('edit', single !== undefined && isEditable(single) && this.canRename);
     set('download', files.length > 0);
@@ -972,6 +1020,11 @@ export class FilesPanel {
       this.clearDropMarks();
     });
     this.list.addEventListener('dragover', (event) => {
+      if (this.local.isDragging() && !event.defaultPrevented) {
+        event.preventDefault();
+        this.dropHint.hidden = false;
+        return;
+      }
       if (this.hasFiles(event) && !event.defaultPrevented) {
         event.preventDefault();
         if (event.dataTransfer !== null) {
@@ -987,6 +1040,11 @@ export class FilesPanel {
     });
     this.list.addEventListener('drop', (event) => {
       this.dropHint.hidden = true;
+      if (this.local.isDragging() && !event.defaultPrevented) {
+        event.preventDefault();
+        this.local.sendSelection();
+        return;
+      }
       if (event.defaultPrevented || !this.hasFiles(event) || event.dataTransfer === null) {
         return;
       }
@@ -1587,6 +1645,8 @@ export class FilesPanel {
     this.next += 1;
     return new Promise((resolve) => {
       const transfer: Transfer = {
+        sink: null,
+        writing: Promise.resolve(),
         name,
         kind: 'download',
         total: size,
@@ -1604,11 +1664,37 @@ export class FilesPanel {
     });
   }
 
+  private fetchToSink(path: string, name: string, size: number, sink: Sink): Promise<boolean> {
+    const stream = this.next;
+    this.next += 1;
+    return new Promise((resolve) => {
+      const transfer: Transfer = {
+        sink,
+        writing: Promise.resolve(),
+        name,
+        kind: 'download',
+        total: size,
+        done: 0,
+        parts: [],
+        acked: 0,
+        waiting: null,
+        cancelled: false,
+        source: null,
+        settle: (ok) => resolve(ok),
+      };
+      this.transfers.set(stream, transfer);
+      this.io.send(stream, encodeDownload(this.root, path));
+      this.renderProgress();
+    });
+  }
+
   private upload(source: Blob, path: string, name: string, quiet = false): Promise<boolean> {
     const stream = this.next;
     this.next += 1;
     return new Promise((resolve) => {
       this.transfers.set(stream, {
+        sink: null,
+        writing: Promise.resolve(),
         name,
         kind: 'upload',
         total: source.size,
@@ -1640,12 +1726,34 @@ export class FilesPanel {
         }
         break;
       case 'data': {
-        transfer.parts.push(message.data.slice());
+        const chunk = message.data.slice();
         const before = transfer.done;
-        transfer.done += message.data.length;
-        if (Math.floor(transfer.done / ACK_STEP) !== Math.floor(before / ACK_STEP)) {
-          this.io.send(stream, encodeAck(transfer.done));
+        transfer.done += chunk.length;
+        const crossed = Math.floor(transfer.done / ACK_STEP) !== Math.floor(before / ACK_STEP);
+        const total = transfer.done;
+        if (transfer.sink === null) {
+          transfer.parts.push(chunk);
+          if (crossed) {
+            this.io.send(stream, encodeAck(total));
+          }
+          break;
         }
+        const sink = transfer.sink;
+        transfer.writing = transfer.writing
+          .then(() => sink.write(chunk))
+          .then(() => {
+            if (crossed && this.transfers.has(stream)) {
+              this.io.send(stream, encodeAck(total));
+            }
+          })
+          .catch(() => {
+            if (this.transfers.has(stream)) {
+              this.io.send(stream, encodeCancel());
+              this.end(stream);
+              this.say(`${transfer.name}: ${this.texts.filesFailure.io}`);
+              void sink.abort().finally(() => transfer.settle(false));
+            }
+          });
         break;
       }
       case 'ack':
@@ -1654,16 +1762,24 @@ export class FilesPanel {
         break;
       case 'done':
         this.end(stream);
-        transfer.settle(true);
+        if (transfer.sink === null) {
+          transfer.settle(true);
+        } else {
+          const sink = transfer.sink;
+          void transfer.writing.then(
+            () => sink.close().then(() => transfer.settle(true), () => transfer.settle(false)),
+            () => transfer.settle(false),
+          );
+        }
         break;
       case 'failed':
         this.end(stream);
         this.say(`${transfer.name}: ${this.texts.filesFailure[message.reason as FileFailure]}`);
-        transfer.settle(false);
+        void (transfer.sink?.abort() ?? Promise.resolve()).finally(() => transfer.settle(false));
         break;
       default:
         this.end(stream);
-        transfer.settle(false);
+        void (transfer.sink?.abort() ?? Promise.resolve()).finally(() => transfer.settle(false));
         break;
     }
     this.renderProgress();
@@ -1716,7 +1832,7 @@ export class FilesPanel {
     const transfer = this.transfers.get(stream);
     this.io.send(stream, encodeCancel());
     this.end(stream);
-    transfer?.settle(false);
+    void (transfer?.sink?.abort() ?? Promise.resolve()).finally(() => transfer?.settle(false));
     this.renderProgress();
   }
 }

@@ -454,20 +454,7 @@ files.onLocation = (root, path) => {
 const clipboard = new ClipboardPanel(
   clipboardHost,
   { send: (stream, payload) => viewer.sendClipboard(stream, payload) },
-  {
-    intro: messages.clipboardIntro,
-    placeholder: messages.clipboardPlaceholder,
-    send: messages.clipboardSend,
-    fetch: messages.clipboardFetch,
-    sent: messages.clipboardSent,
-    received: messages.clipboardReceived,
-    copied: messages.clipboardCopied,
-    empty: messages.clipboardEmpty,
-    tooLong: messages.clipboardTooLong,
-    nothingToSend: messages.clipboardNothingToSend,
-    failure: (reason) => messages.clipboardFailure[reason],
-    closed: messages.closed,
-  },
+  messages,
 );
 viewer.clipboardListener = (message) => clipboard.receive(message);
 viewer.audioListener = (message) => audio.receive(message);

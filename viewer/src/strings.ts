@@ -125,6 +125,14 @@ export type Messages = {
   filesMoved: (count: number) => string;
   filesInvalidName: string;
   filesAgentOld: string;
+  filesDual: string;
+  filesToLocal: string;
+  localTitle: string;
+  localChoose: string;
+  localReopen: (name: string) => string;
+  localUpload: string;
+  localUnsupported: string;
+  localNoFolder: string;
   filesDownloading: (name: string, percent: number) => string;
   filesUploading: (name: string, percent: number) => string;
   filesFinished: (name: string) => string;
@@ -167,6 +175,18 @@ export type Messages = {
   clipboardTooLong: (limit: number) => string;
   clipboardNothingToSend: string;
   clipboardFailure: Record<ClipboardFailure, string>;
+  clipboardBrowser: string;
+  clipboardRemote: string;
+  clipboardRemoteEmpty: string;
+  clipboardPaste: string;
+  clipboardCopy: string;
+  clipboardCopiedLocal: string;
+  clipboardPasteDenied: string;
+  clipboardHistory: string;
+  clipboardHistoryEmpty: string;
+  clipboardClear: string;
+  clipboardToLeft: string;
+  clipboardChars: (count: number) => string;
 };
 
 const catalog: Record<string, Messages> = {
@@ -299,6 +319,14 @@ const catalog: Record<string, Messages> = {
     filesMoved: (count) => (count === 1 ? 'Movido.' : `${count} elementos movidos.`),
     filesInvalidName: 'Ese nombre no es válido.',
     filesAgentOld: 'Este agente es de una versión anterior: actualízalo para mover, renombrar y editar archivos.',
+    filesDual: 'Doble panel',
+    filesToLocal: 'Traer al equipo',
+    localTitle: 'Este equipo',
+    localChoose: 'Elegir carpeta',
+    localReopen: (name) => `Reabrir «${name}»`,
+    localUpload: 'Subir al remoto',
+    localUnsupported: 'Este navegador no puede explorar carpetas de tu equipo (hace falta Chrome, Edge u Opera). Puedes seguir usando «Subir archivos» y «Descargar».',
+    localNoFolder: 'Elige una carpeta de este equipo para empezar a copiar archivos en los dos sentidos.',
     filesDownloading: (name, percent) => `Descargando ${name}: ${percent} %`,
     filesUploading: (name, percent) => `Subiendo ${name}: ${percent} %`,
     filesFinished: (name) => `${name}: terminado.`,
@@ -364,6 +392,18 @@ const catalog: Record<string, Messages> = {
       unavailable: 'El portapapeles del ordenador remoto no está disponible ahora.',
       timeout: 'El ordenador remoto no ha respondido a tiempo.',
     },
+    clipboardBrowser: 'Este navegador',
+    clipboardRemote: 'Ordenador remoto',
+    clipboardRemoteEmpty: 'Aquí aparece lo que traigas del ordenador remoto.',
+    clipboardPaste: 'Pegar',
+    clipboardCopy: 'Copiar',
+    clipboardCopiedLocal: 'Copiado a tu portapapeles.',
+    clipboardPasteDenied: 'El navegador no deja usar tu portapapeles desde aquí: pega con Ctrl+V.',
+    clipboardHistory: 'Historial',
+    clipboardHistoryEmpty: 'Todavía no hay nada.',
+    clipboardClear: 'Vaciar',
+    clipboardToLeft: 'Pasar al cuadro de la izquierda',
+    clipboardChars: (count) => `${count} caracteres`,
   },
   en: {
     homeTitle: 'Get into your computer',
@@ -494,6 +534,14 @@ const catalog: Record<string, Messages> = {
     filesMoved: (count) => (count === 1 ? 'Moved.' : `${count} items moved.`),
     filesInvalidName: 'That name is not valid.',
     filesAgentOld: 'This agent is an older version: update it to move, rename and edit files.',
+    filesDual: 'Dual pane',
+    filesToLocal: 'Bring to this computer',
+    localTitle: 'This computer',
+    localChoose: 'Choose folder',
+    localReopen: (name) => `Reopen "${name}"`,
+    localUpload: 'Upload to remote',
+    localUnsupported: 'This browser cannot browse folders on your computer (Chrome, Edge or Opera are needed). You can still use "Upload files" and "Download".',
+    localNoFolder: 'Choose a folder on this computer to start copying files both ways.',
     filesDownloading: (name, percent) => `Downloading ${name}: ${percent} %`,
     filesUploading: (name, percent) => `Uploading ${name}: ${percent} %`,
     filesFinished: (name) => `${name}: done.`,
@@ -559,6 +607,18 @@ const catalog: Record<string, Messages> = {
       unavailable: 'The remote clipboard is not available right now.',
       timeout: 'The remote computer did not answer in time.',
     },
+    clipboardBrowser: 'This browser',
+    clipboardRemote: 'Remote computer',
+    clipboardRemoteEmpty: 'What you bring from the remote computer appears here.',
+    clipboardPaste: 'Paste',
+    clipboardCopy: 'Copy',
+    clipboardCopiedLocal: 'Copied to your clipboard.',
+    clipboardPasteDenied: 'The browser does not let this page use your clipboard: paste with Ctrl+V.',
+    clipboardHistory: 'History',
+    clipboardHistoryEmpty: 'Nothing here yet.',
+    clipboardClear: 'Clear',
+    clipboardToLeft: 'Move to the left box',
+    clipboardChars: (count) => `${count} characters`,
   },
 };
 
