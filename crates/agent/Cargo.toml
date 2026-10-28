@@ -25,7 +25,7 @@ path = "src/bin/wirehaus-agentd.rs"
 
 [dependencies]
 clap.workspace = true
-ed25519-dalek = { version = "2", default-features = false }
+ed25519-dalek = { version = "3", default-features = false }
 httparse = "1"
 qrcode = { version = "0.14", default-features = false }
 portable-pty = "0.9"
