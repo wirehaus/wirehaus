@@ -423,7 +423,7 @@ fn stop_task() -> std::io::Result<()> {
         .map(|dir| dir.join("cloudflared.exe"))
         .ok_or_else(|| std::io::Error::other("no install folder"))?;
     let script = format!(
-        "Get-Process cloudflared -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq '{}' }} | Stop-Process -Force",
+        "Get-Process cloudflared -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq '{}' }} | Stop-Process -Force; exit 0",
         connector.display().to_string().replace('\'', "''")
     );
     run(
