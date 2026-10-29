@@ -7,6 +7,7 @@ export type WakeDeps = {
 export const WAKE_DEADLINE_MS = 240_000;
 export const REACH_DEADLINE_MS = 90_000;
 const REACH_STREAK = 2;
+const SETTLE_MS = 5_000;
 const WAKE_POLL_MS = 2_000;
 const REACH_POLL_MS = 1_500;
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -79,6 +80,7 @@ export async function ensureAwake(
   if (state !== 'awake') {
     return true;
   }
+  await deps.sleep(SETTLE_MS);
   const reachBy = deps.now() + REACH_DEADLINE_MS;
   let streak = 0;
   while (deps.now() < reachBy) {

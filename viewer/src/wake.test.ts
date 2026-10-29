@@ -67,6 +67,21 @@ test('a failing registry never blocks the connection', async () => {
   await ensureAwake('https://api.example', 'ana.wirehaus.dev', () => undefined, deps);
 });
 
+test('the first probe waits a few seconds after the registry says the tunnel is up', async () => {
+  const { deps, calls, clock } = rig({ states: ['waking', 'awake'], reachableAfter: 0 });
+  let firstProbeAt = -1;
+  const original = deps.fetch;
+  deps.fetch = async (input, init) => {
+    if (String(input).endsWith('/link/ping') && firstProbeAt < 0) {
+      firstProbeAt = clock();
+    }
+    return original(input, init);
+  };
+  await ensureAwake('https://api.example', 'ana.wirehaus.dev', () => undefined, deps);
+  assert.ok(firstProbeAt >= 2_000 + 5_000);
+  assert.ok(calls.length > 0);
+});
+
 test('waiting is bounded when the computer never comes back', async () => {
   const { deps, clock } = rig({ states: Array<string>(1000).fill('waking'), reachableAfter: 0 });
   await ensureAwake('https://api.example', 'ana.wirehaus.dev', () => undefined, deps);
@@ -84,11 +99,11 @@ test('a flaky tunnel needs two good probes in a row before the connection is att
       if (String(input).endsWith('/v1/wake')) {
         return new Response(JSON.stringify({ state: n === 0 ? 'waking' : 'awake' }), { status: 200 });
       }
-      return new Response('{}', { status: [2, 4, 5].includes(n) ? 200 : 530 });
+      return new Response('{}', { status: [3, 5, 6].includes(n) ? 200 : 530 });
     },
   };
   await ensureAwake('https://api.example', 'ana.wirehaus.dev', () => undefined, deps);
-  assert.equal(n, 5);
+  assert.equal(n, 6);
 });
 
 test('the name is the first label of a dotted host', () => {
