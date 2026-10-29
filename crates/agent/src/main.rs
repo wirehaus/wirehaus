@@ -139,6 +139,7 @@ fn run(command: Command, dir: &std::path::Path) -> Result<(), Box<dyn std::error
             viewer_dir,
             quality,
             idle_minutes,
+            tunnel_sleep_minutes,
             viewer_hash,
             public_hosts,
             viewer_origins,
@@ -151,6 +152,7 @@ fn run(command: Command, dir: &std::path::Path) -> Result<(), Box<dyn std::error
                 viewer_dir,
                 quality,
                 idle_minutes,
+                tunnel_sleep_minutes,
                 viewer_hash,
                 public_hosts,
                 viewer_origins,
@@ -234,6 +236,7 @@ struct ServeOptions {
     viewer_dir: std::path::PathBuf,
     quality: u8,
     idle_minutes: u32,
+    tunnel_sleep_minutes: u32,
     viewer_hash: Option<String>,
     public_hosts: Vec<String>,
     viewer_origins: Vec<String>,
@@ -269,6 +272,8 @@ fn serve(
     #[cfg(not(target_os = "macos"))]
     let _ = out;
     let exposure = wirehaus_agent::Exposure::new(&options.public_hosts, &options.viewer_origins)?;
+    let options_hosts = options.public_hosts.clone();
+    let tunnel_sleep_minutes = options.tunnel_sleep_minutes;
     let server = Server::bind(ServerConfig {
         listen: options.listen,
         display: options.display,
@@ -282,6 +287,7 @@ fn serve(
         exposure,
     })?;
     println!("listening on http://{}", server.local_addr()?);
+    let keeper = tunnel_keeper(dir, &options_hosts, tunnel_sleep_minutes);
     let stop = AtomicBool::new(false);
     std::thread::scope(|scope| {
         if let Some(layout) = &layout {
@@ -305,11 +311,50 @@ fn serve(
                 );
             });
         }
+        if let Some(keeper) = keeper {
+            let server = &server;
+            let stop = &stop;
+            scope.spawn(move || {
+                wirehaus_agent::connector::run_background(
+                    keeper,
+                    &|| server.idle_for(),
+                    &|| server.is_busy(),
+                    stop,
+                );
+            });
+        }
         let result = server.run(&stop);
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
         result
     })?;
     Ok(())
+}
+
+fn tunnel_keeper(
+    dir: &std::path::Path,
+    public_hosts: &[String],
+    sleep_minutes: u32,
+) -> Option<
+    wirehaus_agent::connector::Keeper<
+        wirehaus_agent::connector::CurlRemote,
+        wirehaus_agent::connector::ServiceTunnel,
+    >,
+> {
+    use wirehaus_agent::connector::{CurlRemote, Keeper, ServiceTunnel, registry_url, valid_name};
+    if sleep_minutes == 0 || !dir.join(wirehaus_agent::connector::TOKEN_FILE).is_file() {
+        return None;
+    }
+    let host = public_hosts.first()?;
+    let name = host.split('.').next().filter(|n| valid_name(n))?;
+    let base = registry_url(dir, host)?;
+    Some(Keeper::new(
+        CurlRemote::new(&base),
+        ServiceTunnel,
+        dir,
+        name,
+        Duration::from_secs(u64::from(sleep_minutes) * 60),
+        std::time::Instant::now(),
+    ))
 }
 
 fn run_update(

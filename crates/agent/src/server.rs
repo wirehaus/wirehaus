@@ -78,6 +78,7 @@ pub struct Server {
     tickets: Mutex<Tickets>,
     links: Mutex<Links>,
     sessions: AtomicUsize,
+    last_used: Mutex<Instant>,
     connections: AtomicUsize,
     unauthenticated: AtomicUsize,
 }
@@ -140,6 +141,7 @@ impl Server {
             tickets: Mutex::new(Tickets::new()),
             links: Mutex::new(Links::default()),
             sessions: AtomicUsize::new(0),
+            last_used: Mutex::new(Instant::now()),
             connections: AtomicUsize::new(0),
             unauthenticated: AtomicUsize::new(0),
         })
@@ -147,6 +149,24 @@ impl Server {
 
     pub fn is_busy(&self) -> bool {
         self.sessions.load(Ordering::SeqCst) > 0
+    }
+
+    pub fn idle_for(&self) -> Duration {
+        let mut last = self
+            .last_used
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if self.is_busy() {
+            *last = Instant::now();
+        }
+        last.elapsed()
+    }
+
+    fn touch(&self) {
+        *self
+            .last_used
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Instant::now();
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, ServerError> {
@@ -196,6 +216,7 @@ impl Server {
         port: u16,
         stop: &AtomicBool,
     ) -> Result<(), ServerError> {
+        self.touch();
         stream.set_nonblocking(false)?;
         stream.set_nodelay(true)?;
         let Some((head, head_len)) = read_head(&mut stream)? else {

@@ -2,6 +2,7 @@ pub mod audio;
 mod auth;
 pub mod clipboard;
 pub mod commands;
+pub mod connector;
 mod error;
 pub mod files;
 mod http;

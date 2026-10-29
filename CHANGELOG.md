@@ -6,6 +6,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Añadido
 
+- El túnel se apaga tras 30 minutos sin uso (`serve --tunnel-sleep-minutes`, 0 lo desactiva) y se vuelve a crear cuando alguien abre el visor: el agente avisa de que está inactivo, consulta cada pocos segundos mientras duerme y, al despertar, guarda el token nuevo y reinicia el conector (`systemctl --user`, `launchctl` o la tarea de Windows). El visor pide el despertar antes de conectar, enseña «preparando acceso» y reintenta solo; si conectó hace menos de 20 minutos va directo.
 - Actualización automática del agente: comprueba cada seis horas la lista de versiones firmada de `wirehaus.dev`, verifica la firma SSH con la clave fijada en el binario, nunca baja de versión, comprueba el hash del paquete, espera a que no haya sesión, cambia el binario y el visor de forma atómica y se reinicia por el gestor del sistema. Si la versión nueva no llega a arrancar tres veces, vuelve a la anterior y la descarta. Comandos `update status`, `check`, `apply`, `enable`, `disable` y `rollback`. Solo actúa en instalaciones con el diseño del instalador (`serve --no-auto-update` la desactiva).
 - El conector del túnel de Cloudflare vuelve a usar su actualizador propio (los instaladores ya no pasan `--no-autoupdate`).
 - Varias sesiones a la vez (hasta 5) y varios billetes de reanudación por dispositivo, de un solo uso: se puede abrir el visor en dos pestañas.

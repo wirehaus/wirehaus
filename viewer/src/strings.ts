@@ -74,6 +74,7 @@ export type Messages = {
   reconnectingTitle: string;
   loadingDetail: string;
   connectingDetail: string;
+  wakingDetail: string;
   keyboard: string;
   immersiveOn: string;
   immersiveOff: string;
@@ -303,6 +304,7 @@ const catalog: Record<string, Messages> = {
     reconnectingTitle: 'Reconectando',
     loadingDetail: 'Preparando el cifrado en tu navegador.',
     connectingDetail: 'Estableciendo una conexión cifrada con tu ordenador.',
+    wakingDetail: 'Preparando el acceso a tu ordenador. Solo tarda unos segundos la primera vez tras un rato sin usarlo.',
     keyboard: 'Teclado',
     immersiveOn: 'Pantalla completa y teclado',
     immersiveOff: 'Salir de pantalla completa',
@@ -558,6 +560,7 @@ const catalog: Record<string, Messages> = {
     reconnectingTitle: 'Reconnecting',
     loadingDetail: 'Preparing encryption in your browser.',
     connectingDetail: 'Setting up an encrypted connection to your computer.',
+    wakingDetail: 'Getting access to your computer ready. It only takes a few seconds the first time after a while without use.',
     keyboard: 'Keyboard',
     immersiveOn: 'Full screen and keyboard',
     immersiveOff: 'Leave full screen',

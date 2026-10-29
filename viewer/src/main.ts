@@ -290,7 +290,7 @@ function paintSplash(state: ViewerState): void {
       break;
     case 'connecting':
       splashTitle.textContent = messages.connecting;
-      splashDetail.textContent = messages.connectingDetail;
+      splashDetail.textContent = state.waking ? messages.wakingDetail : messages.connectingDetail;
       break;
     case 'reconnecting':
       splashTitle.textContent = messages.reconnectingTitle;
@@ -464,7 +464,7 @@ if (typeof target === 'object' && target.foreign) {
   agentLabel.hidden = false;
 }
 
-const viewer = new Viewer(screen, show, target);
+const viewer = new Viewer(screen, show, target, apiBase);
 viewer.desktopEnabled = !phone;
 
 function refusedText(reason: 'notAllowed' | 'tooManySessions' | 'spawnFailed'): string {

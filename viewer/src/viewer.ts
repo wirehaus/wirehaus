@@ -33,6 +33,7 @@ import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './sto
 import { loadTicket, saveTicket } from './ticketstore.js';
 import type { Target, TargetError } from './target.js';
 import { VideoPlayer, videoSupported } from './video.js';
+import { ensureAwake } from './wake.js';
 
 export type AudioListener = (message: AudioMessage) => void;
 export type ClipboardListener = (message: ClipboardMessage) => void;
@@ -47,7 +48,7 @@ export type ViewerState =
   | { kind: 'loading' }
   | { kind: 'noAgent'; error: TargetError }
   | { kind: 'needsPairing'; error?: 'invalid' }
-  | { kind: 'connecting' }
+  | { kind: 'connecting'; waking?: boolean }
   | { kind: 'needsCode'; error?: 'wrong' | 'invalid' }
   | { kind: 'connected'; width: number; height: number }
   | { kind: 'refused'; reason: RefusalReason; retryAfter: number }
@@ -60,6 +61,9 @@ type Phase = 'handshake' | 'authenticating' | 'streaming';
 const BUTTONS: Record<number, MouseButton> = { 0: 'left', 1: 'middle', 2: 'right' };
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 const RESUME_RETRIES = 3;
+const WAKE_RETRY_WINDOW_MS = 120_000;
+const FRESH_TUNNEL_MS = 20 * 60_000;
+const WAKE_RETRY_DELAY_MS = 1500;
 const RESUME_RETRY_MS = 800;
 const PIXELS_PER_NOTCH = 100;
 const MAX_NOTCHES = 10;
@@ -102,11 +106,17 @@ export class Viewer {
   audioListener: AudioListener | null = null;
   linkListener: ((reply: LinkReply) => void) | null = null;
   forcePairing = false;
+  private wakeUntil = 0;
+  private epoch = 0;
+  private skippedCheck = false;
+  private opened = false;
+  private lastOpen: { make: () => Handshake; pairing: boolean } | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly report: (state: ViewerState) => void,
     private readonly target: Target | TargetError,
+    private readonly api = '',
   ) {
     const context = canvas.getContext('2d', { alpha: false });
     if (context === null) {
@@ -166,6 +176,7 @@ export class Viewer {
   }
 
   async start(): Promise<void> {
+    const epoch = ++this.epoch;
     if (typeof this.target === 'string') {
       this.report({ kind: 'noAgent', error: this.target });
       return;
@@ -184,9 +195,52 @@ export class Viewer {
     if (!forced && this.identity !== undefined && pinned !== undefined) {
       const key = this.identity.deviceKey;
       this.restoreTicket();
+      await this.wake();
+      if (epoch !== this.epoch) {
+        return;
+      }
       this.open(() => Handshake.reconnect(key, pinned), false);
     } else {
       this.report({ kind: 'needsPairing' });
+    }
+  }
+
+  private recentlyConnected(authority: string): boolean {
+    try {
+      const at = Number(localStorage.getItem(`wh.last.${authority}`));
+      return at > 0 && Date.now() - at < FRESH_TUNNEL_MS;
+    } catch {
+      return false;
+    }
+  }
+
+  private rememberConnected(): void {
+    const target = this.target;
+    if (typeof target === 'string') {
+      return;
+    }
+    try {
+      localStorage.setItem(`wh.last.${target.authority}`, String(Date.now()));
+    } catch {
+      return;
+    }
+  }
+
+  private async wake(force = false): Promise<void> {
+    const target = this.target;
+    if (typeof target === 'string' || !target.foreign) {
+      return;
+    }
+    if (!force && this.recentlyConnected(target.authority)) {
+      this.skippedCheck = true;
+      return;
+    }
+    this.skippedCheck = false;
+    const waited = await ensureAwake(this.api, target.authority, () =>
+      this.report({ kind: 'connecting', waking: true }),
+    );
+    if (waited) {
+      this.wakeUntil = Date.now() + WAKE_RETRY_WINDOW_MS;
     }
   }
 
@@ -194,10 +248,15 @@ export class Viewer {
     if (typeof this.target === 'string') {
       return;
     }
+    const epoch = ++this.epoch;
     const deviceKey = this.identity?.deviceKey ?? generateDeviceKey();
     if (this.identity === undefined) {
       this.identity = { deviceKey, agents: {} };
       await saveIdentity(this.identity).catch(() => undefined);
+    }
+    await this.wake();
+    if (epoch !== this.epoch) {
+      return;
     }
     this.open(() => Handshake.pairing(deviceKey, code, name), true);
   }
@@ -217,6 +276,7 @@ export class Viewer {
   }
 
   async forget(): Promise<void> {
+    this.epoch += 1;
     this.setTicket(null);
     this.stopRetrying();
     this.close();
@@ -245,7 +305,9 @@ export class Viewer {
       this.report(pairing ? { kind: 'needsPairing', error: 'invalid' } : { kind: 'refused', reason: 'failed', retryAfter: 0 });
       return;
     }
-    this.report({ kind: 'connecting' });
+    this.report({ kind: 'connecting', waking: Date.now() < this.wakeUntil });
+    this.lastOpen = { make, pairing };
+    this.opened = false;
     this.handshake = handshake;
     this.pairing = pairing;
     this.resumeSent = false;
@@ -253,7 +315,10 @@ export class Viewer {
     this.phase = 'handshake';
     const socket = new WebSocket(target.socketUrl);
     socket.binaryType = 'arraybuffer';
-    socket.addEventListener('open', () => socket.send(owned(handshake.firstMessage)));
+    socket.addEventListener('open', () => {
+      this.opened = true;
+      socket.send(owned(handshake.firstMessage));
+    });
     socket.addEventListener('message', (event) => this.receive(socket, event.data));
     socket.addEventListener('close', () => this.closed(socket));
     this.socket = socket;
@@ -300,7 +365,33 @@ export class Viewer {
     }
     const phase = this.phase;
     const endedBy = this.endedBy;
+    if (phase === 'streaming') {
+      this.rememberConnected();
+    }
+    const never = !this.opened && phase === 'handshake';
+    const unreachable = never && Date.now() < this.wakeUntil;
+    const recheck = never && !unreachable && this.skippedCheck && this.lastOpen !== null;
     this.close();
+    if (recheck && this.lastOpen !== null) {
+      const { make, pairing } = this.lastOpen;
+      this.report({ kind: 'connecting', waking: true });
+      const epoch = this.epoch;
+      void this.wake(true).then(() => {
+        if (epoch === this.epoch) {
+          this.open(make, pairing);
+        }
+      });
+      return;
+    }
+    if (unreachable && this.lastOpen !== null) {
+      const { make, pairing } = this.lastOpen;
+      this.report({ kind: 'connecting', waking: true });
+      this.retryTimer = window.setTimeout(() => {
+        this.retryTimer = undefined;
+        this.open(make, pairing);
+      }, WAKE_RETRY_DELAY_MS);
+      return;
+    }
     if (endedBy !== null) {
       this.setTicket(null);
       this.stopRetrying();
@@ -434,6 +525,7 @@ export class Viewer {
         this.resumeRetries = 0;
         this.stopRetrying();
         this.phase = 'streaming';
+        this.rememberConnected();
         this.report({ kind: 'connecting' });
         void this.pinAgent();
         void this.announceCapabilities();

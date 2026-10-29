@@ -88,6 +88,8 @@ pub enum Command {
         quality: u8,
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u32).range(1..=1440))]
         idle_minutes: u32,
+        #[arg(long, default_value_t = wirehaus_agent::connector::DEFAULT_SLEEP_MINUTES, value_parser = clap::value_parser!(u32).range(0..=1440))]
+        tunnel_sleep_minutes: u32,
         #[arg(long, value_name = "SHA256")]
         viewer_hash: Option<String>,
         #[arg(long = "public-host", value_name = "HOST")]
