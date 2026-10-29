@@ -118,6 +118,9 @@ impl<R: Remote, T: Tunnel> Keeper<R, T> {
         match self.remote.sync(&self.name, &token, sleep) {
             Ok(Reply::Active) => {
                 self.become_awake(now);
+                if sleep {
+                    self.due = now + SYNC_EVERY;
+                }
             }
             Ok(Reply::Asleep(poll)) => {
                 if self.phase != Phase::Asleep {
@@ -720,6 +723,25 @@ mod tests {
         assert_eq!(tunnel.0.borrow().0, 2);
         assert_eq!(k.phase(), Phase::Awake);
         assert_eq!(fake.0.borrow().syncs.len(), 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn when_the_registry_declines_to_put_it_to_sleep_it_waits_before_asking_again() {
+        let (mut k, fake, dir, start) =
+            keeper("declined", vec![Ok(Reply::Active), Ok(Reply::Active)]);
+        k.step(start, Duration::ZERO, false);
+        let asked = start + HALF_HOUR;
+        k.step(asked, HALF_HOUR, false);
+        assert!(fake.0.borrow().syncs.last().unwrap().1);
+        let count = fake.0.borrow().syncs.len();
+        for seconds in [5, 30, 60, 110] {
+            k.step(asked + Duration::from_secs(seconds), HALF_HOUR, false);
+        }
+        assert_eq!(fake.0.borrow().syncs.len(), count);
+        k.step(asked + SYNC_EVERY, HALF_HOUR, false);
+        assert_eq!(fake.0.borrow().syncs.len(), count + 1);
+        assert_eq!(k.phase(), Phase::Awake);
         fs::remove_dir_all(dir).unwrap();
     }
 
