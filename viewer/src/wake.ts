@@ -4,7 +4,7 @@ export type WakeDeps = {
   now: () => number;
 };
 
-export const WAKE_DEADLINE_MS = 90_000;
+export const WAKE_DEADLINE_MS = 240_000;
 export const REACH_DEADLINE_MS = 90_000;
 const REACH_STREAK = 2;
 const WAKE_POLL_MS = 2_000;

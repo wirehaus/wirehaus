@@ -70,7 +70,7 @@ test('a failing registry never blocks the connection', async () => {
 test('waiting is bounded when the computer never comes back', async () => {
   const { deps, clock } = rig({ states: Array<string>(1000).fill('waking'), reachableAfter: 0 });
   await ensureAwake('https://api.example', 'ana.wirehaus.dev', () => undefined, deps);
-  assert.ok(clock() <= 95_000);
+  assert.ok(clock() <= 335_000);
 });
 
 test('a flaky tunnel needs two good probes in a row before the connection is attempted', async () => {
