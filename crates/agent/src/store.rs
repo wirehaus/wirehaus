@@ -296,7 +296,9 @@ impl Store {
         let mut cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
         let _guard = Lock::acquire(&self.dir)?;
         self.refresh(&mut cached)?;
-        let result = f(&mut cached.state, self.now());
+        let now = self.now();
+        let result = f(&mut cached.state, now);
+        cached.state.prune_pairing(now);
         let text = cached.state.serialize();
         write_text(&self.dir, &text)?;
         cached.text = text;

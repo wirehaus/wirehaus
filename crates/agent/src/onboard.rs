@@ -238,7 +238,8 @@ pub fn run(
 ) -> Result<(), CommandError> {
     let mode = match plan.mode {
         Some(mode) => mode,
-        None => choose_mode(style, keys, out)?,
+        None if keys.interactive() => choose_mode(style, keys, out)?,
+        None => return plain(plan, style, keys, out),
     };
     match mode {
         Mode::Phone => phone(plan, style, keys, out),
@@ -294,6 +295,32 @@ fn authenticator(
         ),
     )?;
     Ok(())
+}
+
+fn plain(
+    plan: &Plan<'_>,
+    style: &Style,
+    keys: &mut impl Keyboard,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    authenticator(plan, style, keys, out, 1, 2)?;
+    heading(
+        style,
+        out,
+        2,
+        2,
+        &tr!("Código de emparejamiento", "Pairing code"),
+    )?;
+    crate::commands::pairing_custom(plan.store, plan.address, false, None, out)?;
+    writeln!(
+        out,
+        "{}",
+        style.dim(&tr!(
+            "Sin terminal interactivo no se abre el acceso sin segundo factor. Para vincular tu móvil directamente: wirehaus-agent pairing --phone",
+            "Without an interactive terminal the no-second-factor access is not opened. To link your phone directly: wirehaus-agent pairing --phone"
+        ))
+    )?;
+    done(style, out)
 }
 
 fn phone(
@@ -394,7 +421,7 @@ fn install_and_arrive(
         "  {}",
         tr!(
             "Android: Chrome > menú > Instalar aplicación.",
-            "Android: Chrome > menú > Install app."
+            "Android: Chrome > menu > Install app."
         )
     )?;
     writeln!(out)?;

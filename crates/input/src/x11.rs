@@ -32,6 +32,7 @@ pub struct X11Input {
     height: u16,
     origin: (u16, u16),
     view: Option<(u16, u16)>,
+    selected: Option<u8>,
     last_size_check: Option<Instant>,
     pressed: Pressed,
 }
@@ -58,6 +59,7 @@ impl X11Input {
             height,
             origin: (0, 0),
             view: None,
+            selected: None,
             last_size_check: None,
             pressed: Pressed::default(),
         })
@@ -77,8 +79,12 @@ impl X11Input {
             .map_err(request_error)?
             .reply()
             .map_err(request_error)?;
+        let changed = geometry.width != self.width || geometry.height != self.height;
         self.width = geometry.width;
         self.height = geometry.height;
+        if changed && let Some(index) = self.selected {
+            self.select_monitor(index);
+        }
         Ok(())
     }
 
@@ -156,9 +162,11 @@ impl InputSink for X11Input {
         if let Some(&(x, y, width, height)) = self.monitors().get(usize::from(index)) {
             self.origin = (x, y);
             self.view = Some((width, height));
+            self.selected = Some(index);
         } else {
             self.origin = (0, 0);
             self.view = None;
+            self.selected = None;
         }
     }
 

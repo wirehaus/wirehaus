@@ -54,6 +54,7 @@ struct Services<'a> {
     audio: &'a mut Audio,
     link_budget: &'a mut u32,
     monitor: &'a mut Option<u8>,
+    monitors_aware: &'a mut bool,
     policy: &'a Policy<'a>,
 }
 
@@ -151,6 +152,7 @@ fn serve(
                 audio: &mut audio,
                 link_budget: &mut link_budget,
                 monitor: &mut watch.request,
+                monitors_aware: &mut watch.aware,
                 policy,
             },
             deadline,
@@ -309,6 +311,7 @@ fn audio_frame(frame: &Frame, services: &mut Services, link: &mut Link) -> Resul
 
 #[derive(Default)]
 struct MonitorWatch {
+    aware: bool,
     request: Option<u8>,
     announced: wirehaus_capture::Monitors,
     checked: Option<Instant>,
@@ -326,6 +329,9 @@ impl MonitorWatch {
             .checked
             .is_some_and(|at| at.elapsed() < MONITOR_CHECK_INTERVAL)
         {
+            return Ok(());
+        }
+        if !self.aware {
             return Ok(());
         }
         self.checked = Some(Instant::now());
@@ -405,12 +411,14 @@ fn receive(
                 handled += 1;
             }
             Incoming::Frame(frame) => {
-                if frame.channel == Channel::Desktop
-                    && let Ok(ViewerMessage::SelectMonitor { index }) =
-                        ViewerMessage::decode(&frame.payload)
-                {
+                let desktop = (frame.channel == Channel::Desktop)
+                    .then(|| ViewerMessage::decode(&frame.payload))
+                    .and_then(Result::ok);
+                if let Some(ViewerMessage::SelectMonitor { index }) = desktop {
                     *services.monitor = Some(index);
                     *active = true;
+                } else if let Some(ViewerMessage::MonitorsAware) = desktop {
+                    *services.monitors_aware = true;
                 } else {
                     *active |= handle_frame(&frame, input, pacer, video)?;
                 }
@@ -579,7 +587,7 @@ fn handle_frame(
             *video = decodes;
             Ok(false)
         }
-        ViewerMessage::SelectMonitor { .. } => Ok(false),
+        ViewerMessage::SelectMonitor { .. } | ViewerMessage::MonitorsAware => Ok(false),
     }
 }
 

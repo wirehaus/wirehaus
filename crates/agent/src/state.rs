@@ -322,6 +322,16 @@ impl State {
         Ok(code)
     }
 
+    pub fn prune_pairing(&mut self, now: u64) {
+        if self
+            .pairing
+            .as_ref()
+            .is_some_and(|grant| !grant.usable(now))
+        {
+            self.pairing = None;
+        }
+    }
+
     #[must_use]
     pub fn pairing_trusted(&self, now: u64) -> bool {
         self.pairing

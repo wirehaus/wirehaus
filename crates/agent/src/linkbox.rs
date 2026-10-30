@@ -192,7 +192,12 @@ impl Links {
             return true;
         }
         if self.entries.len() >= MAX_PENDING {
-            self.entries.remove(0);
+            let victim = self
+                .entries
+                .iter()
+                .position(|entry| entry.sealed.is_none())
+                .unwrap_or(0);
+            self.entries.remove(victim);
         }
         self.entries.push(Entry {
             id,

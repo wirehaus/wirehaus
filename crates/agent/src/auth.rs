@@ -70,7 +70,7 @@ pub fn negotiate(
     };
     match accepted.mode() {
         Mode::Reconnect => reconnect(socket, store, tickets, accepted),
-        Mode::Pairing => pair(socket, store, accepted, trusted),
+        Mode::Pairing => pair(socket, store, tickets, accepted, trusted),
     }
 }
 
@@ -112,6 +112,7 @@ fn reconnect(
 fn pair(
     mut socket: WebSocket<TcpStream>,
     store: &Store,
+    tickets: &Mutex<Tickets>,
     accepted: Accepted,
     trusted: bool,
 ) -> Result<Outcome, ServerError> {
@@ -137,14 +138,21 @@ fn pair(
         }
     };
     let name = device_name.unwrap_or_default();
-    authenticate(
+    let outcome = authenticate(
         Link::new(socket, session),
         store,
         None,
         device,
         name,
         trusted,
-    )
+    )?;
+    if let Outcome::Authenticated(_, identity) = &outcome {
+        tickets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .revoke_device(&identity.device);
+    }
+    Ok(outcome)
 }
 
 fn authenticate(

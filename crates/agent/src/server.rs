@@ -171,6 +171,7 @@ impl Server {
         let clock = config.clock.clone().unwrap_or_else(system_clock);
         let vault = config.vault.clone().unwrap_or_else(system_vault);
         let store = Arc::new(Store::open_with(&config.state_dir, clock, vault)?);
+        store.update(State::prune_pairing)?;
         let tickets = restored_tickets(&store);
         let viewer = Viewer::open(&config.viewer_dir, config.viewer_hash.as_deref())?;
         let clipboard = Arc::new(Hub::new(platform::clipboard_factory(
@@ -696,7 +697,16 @@ const LINK_PAIRING_SECS: u64 = 600;
 
 fn restored_tickets(store: &Store) -> Tickets {
     let mut tickets = Tickets::new();
-    tickets.import(&store.load_resume(), store.now());
+    let known: Vec<_> = store
+        .load_resume()
+        .into_iter()
+        .filter(|stored| {
+            store
+                .read(|state, _| state.device(&stored.device).is_some())
+                .unwrap_or(false)
+        })
+        .collect();
+    tickets.import(&known, store.now());
     tickets
 }
 

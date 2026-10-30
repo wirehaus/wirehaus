@@ -3023,6 +3023,7 @@ fn the_viewer_can_pick_one_of_several_monitors_and_the_pointer_follows_it() {
     split_into_two_monitors(&xvfb.display);
     let server = Running::start(&xvfb.display);
     let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.send_viewer(ViewerMessage::MonitorsAware);
 
     let mut listed = None;
     for _ in 0..200 {
@@ -3070,4 +3071,25 @@ fn the_viewer_can_pick_one_of_several_monitors_and_the_pointer_follows_it() {
         }
     }
     assert!(whole);
+}
+
+#[test]
+fn a_viewer_that_did_not_say_it_understands_screens_is_never_sent_the_list() {
+    let xvfb = Xvfb::start_sized(200 + (std::process::id() % 300) * 40 + 38, "640x400x24");
+    split_into_two_monitors(&xvfb.display);
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+    client.set_timeout(Duration::from_secs(6));
+    loop {
+        match client.read_desktop() {
+            Received::Got(DesktopMessage::Monitors { .. }) => {
+                panic!("an unaware viewer was sent the screen list")
+            }
+            Received::Got(DesktopMessage::FrameEnd { sequence }) => {
+                client.send_viewer(ViewerMessage::FrameAck { sequence });
+            }
+            Received::Got(_) => {}
+            Received::Timeout | Received::Closed => break,
+        }
+    }
 }
