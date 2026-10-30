@@ -1,7 +1,7 @@
 const HEX = /^[0-9a-f]+$/u;
 const MANUAL = /^[A-Za-z2-7]{4}-?[A-Za-z2-7]{4}$/u;
 
-export type LinkTarget = { id?: string; manual?: string; error?: 'other' | 'invalid' };
+export type LinkTarget = { id?: string; key?: string; manual?: string; error?: 'other' | 'invalid' };
 
 export function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -39,6 +39,9 @@ export function parseLinkText(text: string, origin: string, name: string): LinkT
   if (MANUAL.test(trimmed)) {
     return { manual: trimmed.replace('-', '').toUpperCase() };
   }
+  if (/^[0-9a-f]{64}$/u.test(trimmed)) {
+    return { key: trimmed };
+  }
   if (/^[0-9a-f]{32}$/u.test(trimmed)) {
     return { id: trimmed };
   }
@@ -49,9 +52,12 @@ export function parseLinkText(text: string, origin: string, name: string): LinkT
     return { error: 'invalid' };
   }
   const id = new URLSearchParams(url.hash.replace(/^#/u, '')).get('link') ?? '';
-  if (url.origin !== origin || !/^[0-9a-f]{32}$/u.test(id)) {
+  if (url.origin !== origin || !/^([0-9a-f]{32}|[0-9a-f]{64})$/u.test(id)) {
     return { error: 'invalid' };
   }
   const first = url.pathname.split('/').filter((part) => part !== '')[0]?.toLowerCase();
-  return first === name.toLowerCase() ? { id } : { error: 'other' };
+  if (first !== name.toLowerCase()) {
+    return { error: 'other' };
+  }
+  return id.length === 64 ? { key: id } : { id };
 }

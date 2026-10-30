@@ -1,14 +1,15 @@
 import { fromHex, toHex } from './linkaddr.js';
-import { type LinkReply, encodeApprove, encodeLookup } from './linkprotocol.js';
+import { type LinkReply, encodeApprove, encodeApproveId, encodeApproveKey, encodeLookup } from './linkprotocol.js';
 import { linkGenerate, linkOpen, linkVerification, loadCrypto, qrDecode, qrMatrix } from './secure.js';
 
-export type LinkStart = { id: string; manual: string; verify: string; ttl: number; link: string | undefined };
+export type LinkStart = { id: string; manual: string | undefined; verify: string; ttl: number; link: string | undefined };
 
 export type LinkEnd = 'expired' | 'busy' | 'slow' | 'failed' | 'cancelled';
 
 const POLL_MS = 1500;
 const PROBE_MS = 4000;
 const REQUEST_MS = 8000;
+const V2_TTL = 600;
 
 async function getJson(url: string, timeout = REQUEST_MS): Promise<{ status: number; body: Record<string, unknown> }> {
   const controller = new AbortController();
@@ -27,31 +28,98 @@ async function getJson(url: string, timeout = REQUEST_MS): Promise<{ status: num
   }
 }
 
-export async function probeLink(base: string): Promise<boolean> {
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+export type LinkLevel = 'unknown' | 'none' | 1 | 2;
+
+export async function probeLink(base: string): Promise<LinkLevel> {
   try {
     const { status, body } = await getJson(`${base}/link/ping`, PROBE_MS);
-    return status === 200 && body['link'] === 1;
+    if (status !== 200) {
+      return status === 404 ? 'none' : 'unknown';
+    }
+    const level = body['link'];
+    return level === 1 || level === 2 ? level : 'none';
   } catch {
-    return false;
+    return 'unknown';
   }
+}
+
+export async function probeLinkPatiently(base: string, tries = 3): Promise<LinkLevel> {
+  let level: LinkLevel = 'unknown';
+  for (let attempt = 0; attempt < tries && level === 'unknown'; attempt += 1) {
+    level = await probeLink(base);
+  }
+  return level;
 }
 
 export class ComputerLink {
   private timer: number | undefined;
   private ended = false;
   private secret: Uint8Array | undefined;
+  private ids: string[] = [];
 
   constructor(
     private readonly base: string,
     private readonly hooks: {
       started: (info: LinkStart) => void;
+      manual?: (manual: string) => void;
       code: (pairingCode: string) => void;
       ended: (reason: LinkEnd) => void;
     },
     private readonly addressOf: (idHex: string) => string | undefined,
   ) {}
 
-  async start(): Promise<void> {
+  async start(level: LinkLevel = 2): Promise<void> {
+    if (level === 1) {
+      await this.startRegistered();
+      return;
+    }
+    try {
+      await loadCrypto();
+      const keys = linkGenerate();
+      this.secret = keys.slice(0, 32);
+      const publicKey = keys.slice(32);
+      keys.fill(0);
+      const id = publicKey.slice(0, 16);
+      this.ids = [toHex(id)];
+      this.hooks.started({
+        id: toHex(id),
+        manual: undefined,
+        verify: linkVerification(publicKey, id),
+        ttl: V2_TTL,
+        link: this.addressOf(toHex(publicKey)),
+      });
+      this.schedule(Date.now() + V2_TTL * 1000);
+      void this.registerManual(publicKey);
+    } catch {
+      this.finish('failed');
+    }
+  }
+
+  private async registerManual(publicKey: Uint8Array): Promise<void> {
+    for (let attempt = 0; attempt < 4 && !this.ended; attempt += 1) {
+      try {
+        const { status, body } = await getJson(`${this.base}/link/start?k=${toHex(publicKey)}`);
+        if (status === 200 && typeof body['id'] === 'string' && typeof body['manual'] === 'string') {
+          this.ids = [...this.ids, body['id']];
+          this.hooks.manual?.(body['manual']);
+          return;
+        }
+        if (status !== 429) {
+          return;
+        }
+      } catch {
+        await pause(3000);
+        continue;
+      }
+      await pause(3000);
+    }
+  }
+
+  private async startRegistered(): Promise<void> {
     try {
       await loadCrypto();
       const keys = linkGenerate();
@@ -80,8 +148,8 @@ export class ComputerLink {
         ttl,
         link: this.addressOf(toHex(id)),
       });
-      const deadline = Date.now() + ttl * 1000;
-      this.schedule(toHex(id), deadline);
+      this.ids = [toHex(id)];
+      this.schedule(Date.now() + ttl * 1000);
     } catch {
       this.finish('failed');
     }
@@ -91,11 +159,11 @@ export class ComputerLink {
     this.finish('cancelled');
   }
 
-  private schedule(id: string, deadline: number): void {
-    this.timer = window.setTimeout(() => void this.poll(id, deadline), POLL_MS);
+  private schedule(deadline: number): void {
+    this.timer = window.setTimeout(() => void this.poll(deadline), POLL_MS);
   }
 
-  private async poll(id: string, deadline: number): Promise<void> {
+  private async poll(deadline: number): Promise<void> {
     if (this.ended) {
       return;
     }
@@ -103,33 +171,35 @@ export class ComputerLink {
       this.finish('expired');
       return;
     }
-    try {
-      const { body } = await getJson(`${this.base}/link/poll?i=${id}`);
-      if (this.ended) {
-        return;
-      }
-      if (body['state'] === 'ready' && typeof body['sealed'] === 'string' && this.secret !== undefined) {
-        const sealed = fromHex(body['sealed']);
-        if (sealed === undefined) {
-          this.finish('failed');
+    for (const id of [...this.ids]) {
+      try {
+        const { body } = await getJson(`${this.base}/link/poll?i=${id}`);
+        if (this.ended) {
           return;
         }
-        const code = linkOpen(this.secret, sealed);
-        this.ended = true;
-        this.wipe();
-        this.hooks.code(code);
-        return;
-      }
-      if (body['state'] === 'gone') {
-        this.finish('expired');
-        return;
-      }
-    } catch {
-      if (this.ended) {
-        return;
+        if (body['state'] === 'ready' && typeof body['sealed'] === 'string' && this.secret !== undefined) {
+          const sealed = fromHex(body['sealed']);
+          if (sealed === undefined) {
+            this.finish('failed');
+            return;
+          }
+          const code = linkOpen(this.secret, sealed);
+          this.ended = true;
+          this.wipe();
+          this.hooks.code(code);
+          return;
+        }
+        if (body['state'] === 'gone' && this.ids.length === 1) {
+          this.finish('expired');
+          return;
+        }
+      } catch {
+        if (this.ended) {
+          return;
+        }
       }
     }
-    this.schedule(id, deadline);
+    this.schedule(deadline);
   }
 
   private wipe(): void {
@@ -168,6 +238,14 @@ export class LinkApprover {
 
   approve(id: Uint8Array, code: string): Promise<LinkReply> {
     return this.ask(encodeApprove(id, code), (reply) => reply.kind === 'approved' || reply.kind === 'failed');
+  }
+
+  approveKey(key: Uint8Array): Promise<LinkReply> {
+    return this.ask(encodeApproveKey(key), (reply) => reply.kind === 'approved' || reply.kind === 'failed');
+  }
+
+  approveId(id: Uint8Array): Promise<LinkReply> {
+    return this.ask(encodeApproveId(id), (reply) => reply.kind === 'approved' || reply.kind === 'failed');
   }
 
   private ask(payload: Uint8Array, accepts: (reply: LinkReply) => boolean): Promise<LinkReply> {

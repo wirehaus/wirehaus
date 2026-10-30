@@ -29,6 +29,20 @@ export function encodeApprove(id: Uint8Array, code: string): Uint8Array {
   return Uint8Array.of(3, ...id, ...encoder.encode(code));
 }
 
+export function encodeApproveKey(key: Uint8Array): Uint8Array {
+  if (key.length !== 32) {
+    throw new ProtocolError('invalid link key');
+  }
+  return Uint8Array.of(6, ...key);
+}
+
+export function encodeApproveId(id: Uint8Array): Uint8Array {
+  if (id.length !== LINK_ID_LEN) {
+    throw new ProtocolError('invalid link id');
+  }
+  return Uint8Array.of(7, ...id);
+}
+
 export function decodeLink(payload: Uint8Array): LinkReply {
   const tag = payload[0];
   if (tag === undefined) {

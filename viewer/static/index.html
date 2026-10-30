@@ -93,6 +93,10 @@
         <button id="shot" type="button" class="tool"></button>
         <button id="record" type="button" class="tool"></button>
         <button id="listen" type="button" class="tool"></button>
+        <span class="monitor-wrap" id="monitor-wrap" hidden>
+          <button id="monitor" type="button" class="tool" aria-haspopup="true" aria-expanded="false"></button>
+          <div id="monitor-menu" class="menu monitor-menu" role="menu" hidden></div>
+        </span>
       </span>
       <button id="reconnect" type="button" class="primary small" hidden></button>
       <div class="menu-wrap">
@@ -186,6 +190,10 @@
           <h1 id="linkpc-title"></h1>
           <p id="linkpc-intro" class="lead"></p>
           <div class="qrbox"><canvas id="linkpc-qr" width="1" height="1"></canvas></div>
+          <div class="linkcopy" id="linkpc-copybox" hidden>
+            <input id="linkpc-link" readonly spellcheck="false" aria-label="Link" />
+            <button id="linkpc-copy" type="button" class="ghost"></button>
+          </div>
           <dl class="linkcodes">
             <div><dt id="linkpc-manual-label"></dt><dd id="linkpc-manual" class="mono"></dd></div>
             <div><dt id="linkpc-verify-label"></dt><dd id="linkpc-verify" class="mono"></dd></div>
@@ -223,6 +231,7 @@
               required
             />
           </label>
+          <label class="check"><input id="code-remember" type="checkbox" checked /><span id="code-remember-label"></span></label>
           <p id="code-error" class="error" role="alert"></p>
           <button id="code-submit" type="submit" class="primary"></button>
           <p class="secure"><svg aria-hidden="true"><use href="#i-lock" /></svg><span id="secure-code"></span></p>
@@ -316,6 +325,7 @@
     <textarea id="softkeys" class="softkeys" aria-label="Keyboard" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" tabindex="-1"></textarea>
     <nav id="tabs" aria-label="Tabs" hidden></nav>
     <div id="update-banner" class="update-banner" role="status" hidden><span id="update-text"></span><button type="button" id="update-reload" class="accent"></button><button type="button" id="update-later"></button></div>
+    <div id="install-banner" class="update-banner" role="status" hidden><span id="install-text"></span><button type="button" id="install-how" class="accent"></button><button type="button" id="install-never"></button></div>
     <div id="capture-hint" class="capture-hint" role="status" hidden></div>
     <button id="immersive-exit" type="button" class="floating icon" hidden><svg aria-hidden="true"><use href="#i-collapse" /></svg></button>
   </body>

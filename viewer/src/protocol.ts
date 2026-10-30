@@ -34,7 +34,14 @@ export type DesktopMessage =
       data: Uint8Array;
     }
   | { kind: 'frameEnd'; sequence: number }
-  | { kind: 'video'; width: number; height: number; keyframe: boolean; data: Uint8Array };
+  | { kind: 'video'; width: number; height: number; keyframe: boolean; data: Uint8Array }
+  | { kind: 'monitors'; active: number; items: MonitorInfo[] };
+
+export type MonitorInfo = { x: number; y: number; width: number; height: number; primary: boolean; all: boolean };
+
+const MONITORS = 4;
+const MONITOR_LEN = 13;
+const MAX_MONITORS = 16;
 
 export type MouseButton = 'left' | 'middle' | 'right';
 
@@ -141,6 +148,29 @@ export function decodeDesktop(payload: Uint8Array): DesktopMessage {
       data: payload.subarray(1 + VIDEO_HEADER_LEN),
     };
   }
+  if (tag === MONITORS) {
+    if (payload.length < 3) {
+      throw new ProtocolError('bad monitors length');
+    }
+    const count = view.getUint8(2);
+    if (count > MAX_MONITORS || payload.length !== 3 + count * MONITOR_LEN) {
+      throw new ProtocolError('bad monitors length');
+    }
+    const items: MonitorInfo[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const at = 3 + index * MONITOR_LEN;
+      const flags = view.getUint8(at + 12);
+      items.push({
+        x: view.getInt32(at),
+        y: view.getInt32(at + 4),
+        width: view.getUint16(at + 8),
+        height: view.getUint16(at + 10),
+        primary: (flags & 1) !== 0,
+        all: (flags & 2) !== 0,
+      });
+    }
+    return { kind: 'monitors', active: view.getUint8(1), items };
+  }
   throw new ProtocolError(`unknown desktop message ${tag}`);
 }
 
@@ -177,6 +207,10 @@ export function encodeInput(event: InputEvent): Uint8Array {
 
 export function encodeCapabilities(video: boolean): Uint8Array {
   return Uint8Array.of(5, video ? 1 : 0);
+}
+
+export function encodeSelectMonitor(index: number): Uint8Array {
+  return Uint8Array.of(6, index);
 }
 
 export function encodeFrameAck(sequence: number): Uint8Array {

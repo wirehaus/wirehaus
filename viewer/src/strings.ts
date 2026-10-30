@@ -24,6 +24,8 @@ export type Messages = {
   linkPcFailed: string;
   linkPcRetry: string;
   linkPcCancel: string;
+  linkPcCopy: string;
+  linkPcCopied: string;
   linkPcCountdown: (seconds: number) => string;
   linkOpen: string;
   linkIntro: string;
@@ -44,9 +46,17 @@ export type Messages = {
   linkGone: string;
   linkUnavailable: string;
   linkClose: string;
+  linkNeedsUpdate: string;
+  codeRemember: string;
+  monitor: string;
+  monitorOne: (number: number, primary: boolean) => string;
+  monitorAll: string;
   linkScanning: string;
   installApp: string;
   installIos: string;
+  installBanner: string;
+  installHow: string;
+  installNever: string;
 
   homeNoAccess: string;
   homeCreate: string;
@@ -243,19 +253,21 @@ const catalog: Record<string, Messages> = {
     linkOr: 'o',
     linkStart: 'Conectar con mi móvil',
     linkPcTitle: 'Conecta con tu móvil',
-    linkPcIntro: 'En tu móvil, abre Wirehaus, entra en este ordenador y elige «Vincular otro equipo» en el menú. Escanea este código o escribe el código de abajo.',
+    linkPcIntro: 'En tu móvil, abre Wirehaus, entra en tu ordenador y pulsa «Conectar dispositivo» en el menú. Escanea este QR. No necesitas escribir nada más.',
     linkPcManual: 'Código',
     linkPcVerify: 'Debe coincidir con tu móvil',
     linkPcWaiting: 'Esperando a tu móvil…',
     linkPcApproved: 'Aprobado. Preparando el emparejamiento…',
-    linkPcExpired: 'El código ha caducado.',
+    linkPcExpired: 'El código ha caducado. Generando otro…',
     linkPcBusy: 'Hay demasiadas vinculaciones en curso. Espera un minuto y vuelve a intentarlo.',
     linkPcSlow: 'Espera un momento y vuelve a intentarlo.',
     linkPcFailed: 'No se ha podido iniciar la vinculación. Usa el código de emparejamiento.',
     linkPcRetry: 'Generar otro código',
     linkPcCancel: 'Volver',
+    linkPcCopy: 'Copiar enlace',
+    linkPcCopied: 'Copiado',
     linkPcCountdown: (seconds) => `Caduca en ${seconds} s`,
-    linkOpen: 'Vincular otro equipo',
+    linkOpen: 'Conectar dispositivo',
     linkIntro: 'Da acceso a otro ordenador o navegador sin escribir el código largo: ábrelo en esa página, elige «Conectar con mi móvil» y escanea el código que aparece.',
     linkScan: 'Escanear con la cámara',
     linkManualLabel: 'O escribe el código que ves',
@@ -267,16 +279,24 @@ const catalog: Record<string, Messages> = {
     linkInvalid: 'Eso no parece un código de Wirehaus.',
     linkVerifyText: 'Comprueba que el otro equipo muestra este número:',
     linkCodeLabel: 'Código de tu aplicación de autenticación',
-    linkCodeHint: 'Lo pedimos otra vez para confirmar que eres tú.',
+    linkCodeHint: 'Este ordenador usa una versión antigua del agente y pide el código otra vez.',
     linkApprove: 'Aprobar',
-    linkDone: 'Listo. En el otro equipo escribe el código de tu aplicación (si te lo rechaza, espera al siguiente).',
+    linkDone: 'Listo. El otro equipo entra solo y la sesión se queda iniciada.',
     linkWrongCode: 'Código incorrecto.',
     linkTooMany: 'Demasiados intentos. Espera un momento.',
     linkGone: 'El código ha caducado. Genera otro en el otro equipo.',
     linkUnavailable: 'No se ha podido completar. Inténtalo de nuevo.',
     linkClose: 'Cerrar',
+    monitor: 'Pantalla',
+    monitorOne: (number, primary) => `Pantalla ${number}${primary ? ' (principal)' : ''}`,
+    monitorAll: 'Todas a la vez',
+    codeRemember: 'Mantener la sesión iniciada en este equipo (30 días)',
+    linkNeedsUpdate: 'Este ordenador todavía no admite este tipo de código. Se actualizará solo en unas horas; mientras tanto usa el código corto.',
     installApp: 'Instalar la aplicación',
     installIos: 'Instalar: pulsa Compartir y «Añadir a pantalla de inicio»',
+    installBanner: 'Instala Wirehaus como aplicación: se abre más rápido y se actualiza sola.',
+    installHow: 'Cómo',
+    installNever: 'No mostrar más',
     homeNoAccess: '¿Todavía no tienes acceso?',
     homeCreate: 'Crear el mío',
     homeInvalid: (name) => `«${name}» no es una dirección válida. Usa de 3 a 32 letras minúsculas, cifras o guiones.`,
@@ -324,7 +344,8 @@ const catalog: Record<string, Messages> = {
     connecting: 'Conectando',
     connected: (width, height) => `Conectado, ${width}x${height}`,
     closed: 'Desconectado.',
-    reconnecting: (attempt) => `Conexión perdida. Reconectando, intento ${attempt}.`,
+    reconnecting: (attempt) =>
+      `Conexión perdida. Reconectando, intento ${attempt}.${attempt >= 3 ? ' Parece que hay poca cobertura; seguimos intentándolo sin que tengas que hacer nada.' : ''}`,
     reconnectingSoft: 'Reconectando…',
     endedIdle: 'Sesión cerrada por inactividad. Vuelve a entrar con tu código.',
     endedRevoked: 'Este equipo ya no tiene acceso al ordenador remoto.',
@@ -499,19 +520,21 @@ const catalog: Record<string, Messages> = {
     linkOr: 'or',
     linkStart: 'Connect with my phone',
     linkPcTitle: 'Connect with your phone',
-    linkPcIntro: 'On your phone, open Wirehaus, connect to this computer and choose "Link another device" in the menu. Scan this code or type the code below.',
+    linkPcIntro: 'On your phone, open Wirehaus, connect to your computer and press "Connect device" in the menu. Scan this QR. You do not need to type anything else.',
     linkPcManual: 'Code',
     linkPcVerify: 'Must match your phone',
     linkPcWaiting: 'Waiting for your phone…',
     linkPcApproved: 'Approved. Preparing the pairing…',
-    linkPcExpired: 'The code has expired.',
+    linkPcExpired: 'The code has expired. Generating another one…',
     linkPcBusy: 'Too many links are in progress. Wait a minute and try again.',
     linkPcSlow: 'Wait a moment and try again.',
     linkPcFailed: 'The link could not be started. Use the pairing code instead.',
     linkPcRetry: 'Generate another code',
     linkPcCancel: 'Back',
+    linkPcCopy: 'Copy link',
+    linkPcCopied: 'Copied',
     linkPcCountdown: (seconds) => `Expires in ${seconds} s`,
-    linkOpen: 'Link another device',
+    linkOpen: 'Connect device',
     linkIntro: 'Give another computer or browser access without typing the long code: open this page there, choose "Connect with my phone" and scan the code it shows.',
     linkScan: 'Scan with the camera',
     linkManualLabel: 'Or type the code you see',
@@ -523,16 +546,24 @@ const catalog: Record<string, Messages> = {
     linkInvalid: 'That does not look like a Wirehaus code.',
     linkVerifyText: 'Check that the other device shows this number:',
     linkCodeLabel: 'Code from your authenticator app',
-    linkCodeHint: 'We ask again to confirm it is you.',
+    linkCodeHint: 'This computer runs an older agent and asks for the code again.',
     linkApprove: 'Approve',
-    linkDone: 'Done. On the other device type the code from your app (if it is rejected, wait for the next one).',
+    linkDone: 'Done. The other device signs in by itself and the session stays signed in.',
     linkWrongCode: 'Wrong code.',
     linkTooMany: 'Too many attempts. Wait a moment.',
     linkGone: 'The code has expired. Generate another on the other device.',
     linkUnavailable: 'It could not be completed. Try again.',
     linkClose: 'Close',
+    monitor: 'Screen',
+    monitorOne: (number, primary) => `Screen ${number}${primary ? ' (main)' : ''}`,
+    monitorAll: 'All at once',
+    codeRemember: 'Keep me signed in on this device (30 days)',
+    linkNeedsUpdate: 'This computer does not support this kind of code yet. It will update itself within a few hours; meanwhile use the short code.',
     installApp: 'Install the app',
     installIos: 'Install: tap Share and "Add to Home Screen"',
+    installBanner: 'Install Wirehaus as an app: it opens faster and updates itself.',
+    installHow: 'How',
+    installNever: 'Do not show again',
     homeNoAccess: "Don't have an access yet?",
     homeCreate: 'Create mine',
     homeInvalid: (name) => `"${name}" is not a valid address. Use 3 to 32 lowercase letters, digits or hyphens.`,
@@ -580,7 +611,8 @@ const catalog: Record<string, Messages> = {
     connecting: 'Connecting',
     connected: (width, height) => `Connected, ${width}x${height}`,
     closed: 'Disconnected.',
-    reconnecting: (attempt) => `Connection lost. Reconnecting, attempt ${attempt}.`,
+    reconnecting: (attempt) =>
+      `Connection lost. Reconnecting, attempt ${attempt}.${attempt >= 3 ? ' Coverage looks poor; we keep trying, you do not need to do anything.' : ''}`,
     reconnectingSoft: 'Reconnecting…',
     endedIdle: 'Session closed after inactivity. Sign in again with your code.',
     endedRevoked: 'This device no longer has access to the remote computer.',

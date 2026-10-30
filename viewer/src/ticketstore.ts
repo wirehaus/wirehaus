@@ -3,12 +3,66 @@ const TICKET_BYTES = 32;
 
 export type TicketStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
-function defaultStorage(): TicketStorage | null {
+const REMEMBER_KEY = 'wirehaus.remember';
+
+function pick(name: 'localStorage' | 'sessionStorage'): Storage | null {
   try {
-    return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+    return typeof window === 'undefined' || window[name] === undefined ? null : window[name];
   } catch {
     return null;
   }
+}
+
+export function remembersDevice(): boolean {
+  try {
+    return pick('localStorage')?.getItem(REMEMBER_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function setRemembersDevice(value: boolean): void {
+  try {
+    pick('localStorage')?.setItem(REMEMBER_KEY, value ? '1' : '0');
+  } catch {
+    return;
+  }
+}
+
+function defaultStorage(): TicketStorage | null {
+  const long = pick('localStorage');
+  const short = pick('sessionStorage');
+  if (long === null && short === null) {
+    return null;
+  }
+  return {
+    getItem: (key) => {
+      try {
+        return long?.getItem(key) ?? short?.getItem(key) ?? null;
+      } catch {
+        return null;
+      }
+    },
+    setItem: (key, value) => {
+      const [keep, drop] = remembersDevice() ? [long ?? short, short] : [short ?? long, long];
+      try {
+        keep?.setItem(key, value);
+        if (drop !== keep) {
+          drop?.removeItem(key);
+        }
+      } catch {
+        return;
+      }
+    },
+    removeItem: (key) => {
+      try {
+        long?.removeItem(key);
+        short?.removeItem(key);
+      } catch {
+        return;
+      }
+    },
+  };
 }
 
 function toHex(bytes: Uint8Array): string {

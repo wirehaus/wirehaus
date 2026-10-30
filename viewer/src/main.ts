@@ -9,6 +9,7 @@ import { DesktopCapture } from './capture.js';
 import { ClipboardPanel } from './clipboard.js';
 import { FilesPanel } from './files.js';
 import { UpdateWatcher } from './updates.js';
+import { remembersDevice, setRemembersDevice } from './ticketstore.js';
 import { KeyBar } from './keybar.js';
 import { deviceLabel } from './devicename.js';
 import { agentBase } from './linkaddr.js';
@@ -102,6 +103,10 @@ const pairCode = element<HTMLInputElement>('pair-code');
 const pairName = element<HTMLInputElement>('pair-name');
 const pairError = element<HTMLElement>('pair-error');
 const codeForm = element<HTMLFormElement>('code-form');
+const codeRemember = element<HTMLInputElement>('code-remember');
+const monitorWrap = element<HTMLElement>('monitor-wrap');
+const monitorButton = element<HTMLButtonElement>('monitor');
+const monitorMenu = element<HTMLElement>('monitor-menu');
 const codeInput = element<HTMLInputElement>('code-input');
 const codeError = element<HTMLElement>('code-error');
 
@@ -120,6 +125,7 @@ const labels: [string, string][] = [
   ['step-verify-on-label', messages.stepVerify],
   ['pair-hint', messages.pairHint],
   ['code-hint', messages.codeHint],
+  ['code-remember-label', messages.codeRemember],
   ['secure-pair', messages.secureNote],
   ['secure-code', messages.secureNote],
   ['layout-label', messages.layoutLabel],
@@ -336,6 +342,10 @@ function show(state: ViewerState): void {
   pairPanel.hidden = state.kind !== 'needsPairing' || linkUi.active();
   linkPanel.hidden = !(state.kind === 'needsPairing' && linkUi.active());
   codePanel.hidden = state.kind !== 'needsCode';
+  if (state.kind !== 'connected') {
+    monitorWrap.hidden = true;
+    closeMonitorMenu();
+  }
   paintSplash(state);
   if (softReconnect) {
     splash.hidden = true;
@@ -535,6 +545,8 @@ window.addEventListener('pageshow', (event) => {
   }
 });
 window.addEventListener('online', () => viewer.retryNow());
+codeRemember.checked = remembersDevice();
+codeRemember.addEventListener('change', () => setRemembersDevice(codeRemember.checked));
 const linkUi = initLinkUi({
   messages,
   base: () => (typeof target === 'string' ? undefined : agentBase(target.socketUrl)),
@@ -1046,6 +1058,105 @@ element<HTMLButtonElement>('update-reload').addEventListener('click', () => wind
 element<HTMLButtonElement>('update-later').addEventListener('click', () => {
   updateBanner.hidden = true;
 });
+let updatePending = false;
 new UpdateWatcher(() => {
+  updatePending = true;
   updateBanner.hidden = false;
+  if (document.visibilityState === 'hidden') {
+    window.location.reload();
+  }
 }).start();
+document.addEventListener('visibilitychange', () => {
+  if (updatePending && document.visibilityState === 'hidden') {
+    window.location.reload();
+  }
+});
+
+function closeMonitorMenu(): void {
+  monitorMenu.hidden = true;
+  monitorButton.setAttribute('aria-expanded', 'false');
+}
+
+viewer.monitorsListener = (active, items) => {
+  monitorMenu.replaceChildren();
+  monitorWrap.hidden = items.length < 2;
+  if (items.length < 2) {
+    return;
+  }
+  let count = 0;
+  items.forEach((item, index) => {
+    const entry = document.createElement('button');
+    entry.type = 'button';
+    entry.className = 'menu-item';
+    entry.setAttribute('role', 'menuitemradio');
+    entry.setAttribute('aria-checked', String(index === active));
+    count += item.all ? 0 : 1;
+    const label = document.createElement('span');
+    label.textContent = item.all ? messages.monitorAll : messages.monitorOne(count, item.primary);
+    const size = document.createElement('small');
+    size.textContent = `${item.width}x${item.height}`;
+    entry.append(label, size);
+    entry.addEventListener('click', () => {
+      viewer.selectMonitor(index);
+      closeMonitorMenu();
+    });
+    monitorMenu.append(entry);
+    if (index === active) {
+      monitorButton.textContent = item.all ? messages.monitorAll : messages.monitorOne(count, false);
+    }
+  });
+};
+monitorButton.textContent = messages.monitor;
+monitorButton.addEventListener('click', () => {
+  const open = monitorMenu.hidden;
+  monitorMenu.hidden = !open;
+  monitorButton.setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', (event) => {
+  if (!monitorWrap.contains(event.target as Node)) {
+    closeMonitorMenu();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeMonitorMenu();
+  }
+});
+
+const installBanner = element<HTMLElement>('install-banner');
+const installSeen = 'wh.installHint';
+function installHintAllowed(): boolean {
+  try {
+    return localStorage.getItem(installSeen) !== '1';
+  } catch {
+    return false;
+  }
+}
+element('install-text').textContent = messages.installBanner;
+element<HTMLButtonElement>('install-how').textContent = messages.installHow;
+element<HTMLButtonElement>('install-never').textContent = messages.installNever;
+element<HTMLButtonElement>('install-how').addEventListener('click', () => {
+  installBanner.hidden = true;
+  const button = element<HTMLButtonElement>('install-app');
+  if (button.hidden) {
+    showHint(messages.installIos);
+  } else {
+    button.click();
+  }
+});
+element<HTMLButtonElement>('install-never').addEventListener('click', () => {
+  installBanner.hidden = true;
+  try {
+    localStorage.setItem(installSeen, '1');
+  } catch {
+    return;
+  }
+});
+window.setTimeout(() => {
+  if (!launchedAsApp() && (phone || navigator.maxTouchPoints > 1) && installHintAllowed()) {
+    installBanner.hidden = false;
+    window.setTimeout(() => {
+      installBanner.hidden = true;
+    }, 25000);
+  }
+}, 4000);

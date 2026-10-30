@@ -39,3 +39,10 @@ test('a typed code or a bare id is understood', () => {
   assert.deepEqual(parseLinkText(ID, ORIGIN, 'x'), { id: ID });
   assert.deepEqual(parseLinkText('ABCD-EFG1', ORIGIN, 'x'), { error: 'invalid' });
 });
+
+test('a public key in the address or on its own is understood as a key, not as an id', () => {
+  const key = 'ab'.repeat(32);
+  assert.deepEqual(parseLinkText(`${ORIGIN}/zz-test#link=${key}`, ORIGIN, 'zz-test'), { key });
+  assert.deepEqual(parseLinkText(key, ORIGIN, 'x'), { key });
+  assert.deepEqual(parseLinkText(`${ORIGIN}/otro#link=${key}`, ORIGIN, 'zz-test'), { error: 'other' });
+});

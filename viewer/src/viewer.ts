@@ -26,7 +26,9 @@ import {
   encodeFrame,
   encodeFrameAck,
   encodeInput,
+  encodeSelectMonitor,
   encodeTotp,
+  type MonitorInfo,
 } from './protocol.js';
 import { Handshake, type Session, generateDeviceKey, loadCrypto } from './secure.js';
 import { type Identity, forgetIdentity, loadIdentity, saveIdentity } from './storage.js';
@@ -60,6 +62,8 @@ type Phase = 'handshake' | 'authenticating' | 'streaming';
 
 const BUTTONS: Record<number, MouseButton> = { 0: 'left', 1: 'middle', 2: 'right' };
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
+const HANDSHAKE_WATCHDOG_MS = 20_000;
+const HANDSHAKE_RETRIES = 4;
 const RESUME_RETRIES = 3;
 const WAKE_RETRY_WINDOW_MS = 120_000;
 const FRESH_TUNNEL_MS = 20 * 60_000;
@@ -95,6 +99,7 @@ export class Viewer {
   private ticketValue: Uint8Array | null = null;
   private resumeSent = false;
   private resumeRetries = 0;
+  private handshakeRetries = 0;
   private videoRetries: number[] = [];
   private retrying = false;
   private retries = 0;
@@ -104,6 +109,7 @@ export class Viewer {
   filesListener: FilesListener | null = null;
   clipboardListener: ClipboardListener | null = null;
   audioListener: AudioListener | null = null;
+  monitorsListener: ((active: number, items: MonitorInfo[]) => void) | null = null;
   linkListener: ((reply: LinkReply) => void) | null = null;
   forcePairing = false;
   private wakeUntil = 0;
@@ -140,6 +146,10 @@ export class Viewer {
     if (!this.scheduleRetry()) {
       this.report({ kind: 'refused', reason: 'failed', retryAfter: 0 });
     }
+  }
+
+  selectMonitor(index: number): void {
+    this.send(DESKTOP_CHANNEL, encodeSelectMonitor(index));
   }
 
   retryNow(): void {
@@ -315,6 +325,12 @@ export class Viewer {
     this.phase = 'handshake';
     const socket = new WebSocket(target.socketUrl);
     socket.binaryType = 'arraybuffer';
+    window.setTimeout(() => {
+      if (this.socket === socket && this.phase === 'handshake') {
+        socket.close();
+        this.closed(socket);
+      }
+    }, HANDSHAKE_WATCHDOG_MS);
     socket.addEventListener('open', () => {
       this.opened = true;
       socket.send(owned(handshake.firstMessage));
@@ -393,7 +409,9 @@ export class Viewer {
       return;
     }
     if (endedBy !== null) {
-      this.setTicket(null);
+      if (endedBy !== 'idle') {
+        this.setTicket(null);
+      }
       this.stopRetrying();
       this.report({ kind: 'ended', reason: endedBy });
       return;
@@ -401,6 +419,17 @@ export class Viewer {
     if (this.ticketValue !== null && (phase === 'streaming' || this.retrying) && this.scheduleRetry()) {
       return;
     }
+    if (phase === 'handshake' && this.lastOpen !== null && this.handshakeRetries < HANDSHAKE_RETRIES) {
+      const { make, pairing } = this.lastOpen;
+      this.handshakeRetries += 1;
+      this.report({ kind: 'connecting' });
+      this.retryTimer = window.setTimeout(() => {
+        this.retryTimer = undefined;
+        this.open(make, pairing);
+      }, 1500 * this.handshakeRetries);
+      return;
+    }
+    this.handshakeRetries = 0;
     this.setTicket(null);
     this.stopRetrying();
     this.report(
@@ -409,10 +438,7 @@ export class Viewer {
   }
 
   private scheduleRetry(): boolean {
-    const delay = RETRY_DELAYS_MS[this.retries];
-    if (delay === undefined) {
-      return false;
-    }
+    const delay = RETRY_DELAYS_MS[Math.min(this.retries, RETRY_DELAYS_MS.length - 1)] ?? 15000;
     this.retrying = true;
     this.retries += 1;
     this.report({ kind: 'reconnecting', attempt: this.retries });
@@ -523,6 +549,7 @@ export class Viewer {
         return;
       case 'authOk':
         this.resumeRetries = 0;
+        this.handshakeRetries = 0;
         this.stopRetrying();
         this.phase = 'streaming';
         this.rememberConnected();
@@ -555,7 +582,9 @@ export class Viewer {
       this.setTicket(message.ticket);
     } else if (message.kind === 'sessionEnded') {
       this.endedBy = message.reason;
-      this.setTicket(null);
+      if (message.reason !== 'idle') {
+        this.setTicket(null);
+      }
     } else {
       throw new ProtocolError('unexpected control message');
     }
@@ -574,6 +603,10 @@ export class Viewer {
   }
 
   private apply(message: DesktopMessage): void {
+    if (message.kind === 'monitors') {
+      this.monitorsListener?.(message.active, message.items);
+      return;
+    }
     if (message.kind === 'resize') {
       this.player.reset();
       this.canvas.width = message.width;

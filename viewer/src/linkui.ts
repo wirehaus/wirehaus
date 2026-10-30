@@ -1,5 +1,14 @@
-import { linkAddress, parseLinkText } from './linkaddr.js';
-import { ComputerLink, LinkApprover, type LinkEnd, drawQr, probeLink, startScanner } from './linkflow.js';
+import { fromHex, linkAddress, parseLinkText } from './linkaddr.js';
+import {
+  ComputerLink,
+  LinkApprover,
+  type LinkEnd,
+  type LinkLevel,
+  drawQr,
+  probeLinkPatiently,
+  startScanner,
+} from './linkflow.js';
+import { linkVerification, loadCrypto } from './secure.js';
 import type { LinkReply } from './linkprotocol.js';
 import type { Messages } from './strings.js';
 
@@ -39,6 +48,7 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
     ['linkpc-verify-label', m.linkPcVerify],
     ['linkpc-retry', m.linkPcRetry],
     ['linkpc-cancel', m.linkPcCancel],
+    ['linkpc-copy', m.linkPcCopy],
     ['link-open', m.linkOpen],
     ['link-title', m.linkOpen],
     ['link-intro', m.linkIntro],
@@ -62,6 +72,7 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
   const pcStatus = byId('linkpc-status');
   const pcError = byId('linkpc-error');
   const pcRetry = byId<HTMLButtonElement>('linkpc-retry');
+  const pcLink = byId<HTMLInputElement>('linkpc-link');
   const dialog = byId<HTMLDialogElement>('link-dialog');
   const stepFind = byId('link-step-find');
   const stepConfirm = byId('link-step-confirm');
@@ -76,22 +87,24 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
   let incoming: string | undefined;
   {
     const fromHash = new URLSearchParams(window.location.hash.replace(/^#/u, '')).get('link') ?? '';
-    if (/^[0-9a-f]{32}$/u.test(fromHash)) {
+    if (/^([0-9a-f]{32}|[0-9a-f]{64})$/u.test(fromHash)) {
       incoming = fromHash;
     }
   }
-  let supported: boolean | undefined;
+  let level: LinkLevel = 'unknown';
+  let reprobe: number | undefined;
   let lastKind = 'loading';
   let computer: ComputerLink | undefined;
   let active = false;
   let countdown: number | undefined;
   let scanner: { stop: () => void } | undefined;
   let pending: Uint8Array | undefined;
+  let pendingKey: Uint8Array | undefined;
   const approver = new LinkApprover((payload) => deps.sendLink(payload));
 
   function refresh(): void {
-    offer.hidden = !(supported === true && lastKind === 'needsPairing');
-    openButton.hidden = !(supported === true && lastKind === 'connected');
+    offer.hidden = !(level !== 'none' && lastKind === 'needsPairing');
+    openButton.hidden = !((level === 1 || level === 2) && lastKind === 'connected');
   }
 
   function stopCountdown(): void {
@@ -112,7 +125,7 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
     }
   }
 
-  function startPc(): void {
+  async function startPc(): Promise<void> {
     const base = deps.base();
     if (base === undefined) {
       return;
@@ -127,13 +140,22 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
     byId('linkpc-manual').textContent = '';
     byId('linkpc-verify').textContent = '';
     pcQr.hidden = true;
+    const wanted = level === 'unknown' ? await probeLinkPatiently(base, 3) : level;
+    if (wanted !== 'unknown') {
+      level = wanted;
+    }
+    if (!active) {
+      return;
+    }
     computer = new ComputerLink(
       base,
       {
         started: (info) => {
           const shown = info.link !== undefined && drawQr(pcQr, info.link);
           pcQr.hidden = !shown;
-          byId('linkpc-manual').textContent = info.manual;
+          pcLink.value = info.link ?? '';
+          byId('linkpc-copybox').hidden = info.link === undefined;
+          byId('linkpc-manual').textContent = info.manual ?? '…';
           byId('linkpc-verify').textContent = info.verify;
           const end = Date.now() + info.ttl * 1000;
           const tick = (): void => {
@@ -142,6 +164,9 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
           };
           tick();
           countdown = window.setInterval(tick, 1000);
+        },
+        manual: (manual) => {
+          byId('linkpc-manual').textContent = manual;
         },
         code: (pairingCode) => {
           stopCountdown();
@@ -155,6 +180,10 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
           if (reason === 'cancelled') {
             return;
           }
+          if (reason === 'expired' && active) {
+            void startPc();
+            return;
+          }
           pcStatus.textContent = '';
           pcError.textContent = endMessage(reason);
           pcRetry.hidden = false;
@@ -165,11 +194,21 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
         return name === undefined ? undefined : linkAddress(location.origin, name, id);
       },
     );
-    void computer.start();
+    void computer.start(wanted === 1 ? 1 : 2);
   }
 
-  byId('link-start').addEventListener('click', startPc);
-  pcRetry.addEventListener('click', startPc);
+  byId('linkpc-copy').addEventListener('click', () => {
+    pcLink.select();
+    const done = (): void => {
+      byId('linkpc-copy').textContent = m.linkPcCopied;
+      window.setTimeout(() => {
+        byId('linkpc-copy').textContent = m.linkPcCopy;
+      }, 1500);
+    };
+    void navigator.clipboard.writeText(pcLink.value).then(done, () => document.execCommand('copy'));
+  });
+  byId('link-start').addEventListener('click', () => void startPc());
+  pcRetry.addEventListener('click', () => void startPc());
   byId('linkpc-cancel').addEventListener('click', () => {
     computer?.cancel();
     stopCountdown();
@@ -189,6 +228,7 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
     stepFind.hidden = false;
     stepConfirm.hidden = true;
     stepDone.hidden = true;
+    pendingKey = undefined;
     dialogError.textContent = '';
     manual.value = '';
     codeInput.value = '';
@@ -208,6 +248,21 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
     }
   }
 
+  function showConfirm(needsCode: boolean): void {
+    stepFind.hidden = true;
+    stepConfirm.hidden = false;
+    for (const element of [codeInput.closest('label'), byId('link-code-hint')]) {
+      if (element !== null) {
+        element.hidden = !needsCode;
+      }
+    }
+    if (needsCode) {
+      codeInput.focus();
+    } else {
+      approveButton.focus();
+    }
+  }
+
   async function find(text: string): Promise<void> {
     dialogError.textContent = '';
     const name = deps.name() ?? '';
@@ -222,6 +277,20 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
       dialogError.textContent = m.linkOther(other);
       return;
     }
+    if (parsed.key !== undefined) {
+      const bytes = fromHex(parsed.key);
+      if (level !== 2 || bytes === undefined) {
+        dialogError.textContent = m.linkNeedsUpdate;
+        return;
+      }
+      await loadCrypto();
+      stopScan();
+      pendingKey = bytes;
+      pending = undefined;
+      byId('link-verification').textContent = linkVerification(bytes, bytes.slice(0, 16));
+      showConfirm(false);
+      return;
+    }
     const key = parsed.id ?? parsed.manual;
     if (key === undefined) {
       dialogError.textContent = m.linkInvalid;
@@ -232,10 +301,9 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
       if (reply.kind === 'info') {
         stopScan();
         pending = reply.id;
+        pendingKey = undefined;
         byId('link-verification').textContent = reply.verification;
-        stepFind.hidden = true;
-        stepConfirm.hidden = false;
-        codeInput.focus();
+        showConfirm(level !== 2);
       } else if (reply.kind === 'notFound') {
         dialogError.textContent = m.linkNotFound;
       } else if (reply.kind === 'failed') {
@@ -284,13 +352,19 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
   approveButton.addEventListener('click', () => void approve());
 
   async function approve(): Promise<void> {
-    if (pending === undefined || !/^[0-9]{6}$/u.test(codeInput.value) || approveButton.disabled) {
+    const direct = pendingKey !== undefined || (pending !== undefined && level === 2);
+    if (approveButton.disabled || (!direct && (pending === undefined || !/^[0-9]{6}$/u.test(codeInput.value)))) {
       return;
     }
     approveButton.disabled = true;
     dialogError.textContent = '';
     try {
-      const reply = await approver.approve(pending, codeInput.value);
+      const reply =
+        pendingKey !== undefined
+          ? await approver.approveKey(pendingKey)
+          : pending !== undefined && level === 2
+            ? await approver.approveId(pending)
+            : await approver.approve(pending ?? new Uint8Array(16), codeInput.value);
       if (reply.kind === 'approved') {
         stepConfirm.hidden = true;
         stepDone.hidden = false;
@@ -299,6 +373,7 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
         codeInput.value = '';
         if (reply.reason === 'gone') {
           pending = undefined;
+          pendingKey = undefined;
           stepConfirm.hidden = true;
           stepFind.hidden = false;
         }
@@ -317,11 +392,27 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
   byId('link-close').addEventListener('click', () => dialog.close());
   dialog.addEventListener('close', resetDialog);
 
+  async function probeAgain(): Promise<void> {
+    const base = deps.base();
+    if (base === undefined || level !== 'unknown') {
+      return;
+    }
+    level = await probeLinkPatiently(base, 1);
+    refresh();
+    if (level === 'unknown') {
+      reprobe = window.setTimeout(() => void probeAgain(), 5000);
+    }
+  }
+
   return {
     probe: async () => {
       const base = deps.base();
-      supported = base === undefined ? false : await probeLink(base);
+      window.clearTimeout(reprobe);
+      level = base === undefined ? 'none' : await probeLinkPatiently(base);
       refresh();
+      if (level === 'unknown') {
+        reprobe = window.setTimeout(() => void probeAgain(), 5000);
+      }
     },
     kind: (kind) => {
       lastKind = kind;

@@ -13,6 +13,7 @@ import {
   encodeFrameAck,
   encodeInput,
   encodeResume,
+  encodeSelectMonitor,
   encodeTerminalClose,
   encodeTerminalInput,
   encodeTerminalOpen,
@@ -215,4 +216,25 @@ test('rejects malformed ticket and end messages', () => {
   for (const bytes of [[5], [5, 1, 2], new Array(34).fill(5), [6], [6, 3], [6, 0, 0]]) {
     assert.throws(() => decodeControl(Uint8Array.from(bytes)), ProtocolError, bytes.join(','));
   }
+});
+
+test('a monitor list is decoded with signed positions and flags, and a bad length is refused', () => {
+  const body = new Uint8Array(3 + 13);
+  const view = new DataView(body.buffer);
+  body[0] = 4;
+  body[1] = 0;
+  body[2] = 1;
+  view.setInt32(3, -1920);
+  view.setInt32(7, 10);
+  view.setUint16(11, 1920);
+  view.setUint16(13, 1080);
+  body[15] = 3;
+  assert.deepEqual(decodeDesktop(body), {
+    kind: 'monitors',
+    active: 0,
+    items: [{ x: -1920, y: 10, width: 1920, height: 1080, primary: true, all: true }],
+  });
+  assert.throws(() => decodeDesktop(body.subarray(0, 10)));
+  assert.throws(() => decodeDesktop(Uint8Array.of(4, 0, 17)));
+  assert.deepEqual([...encodeSelectMonitor(3)], [6, 3]);
 });

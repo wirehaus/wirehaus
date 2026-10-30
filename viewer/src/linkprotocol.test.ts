@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { decodeLink, encodeApprove, encodeLookup } from './linkprotocol.js';
+import { decodeLink, encodeApprove, encodeApproveId, encodeApproveKey, encodeLookup } from './linkprotocol.js';
 
 const bytes = (...values: number[]): Uint8Array => Uint8Array.from(values);
 
@@ -50,4 +50,13 @@ test('malformed replies are rejected', () => {
   assert.throws(() => decodeLink(bytes(5, 77)));
   assert.throws(() => decodeLink(bytes(1, 0, 0)));
   assert.throws(() => decodeLink(bytes(1, ...new Array<number>(16).fill(0), ...new TextEncoder().encode('12ab'))));
+});
+
+test('approving by key or by id carries only that value and is checked for size', () => {
+  const key = new Uint8Array(32).fill(7);
+  assert.deepEqual([...encodeApproveKey(key)], [6, ...key]);
+  const id = new Uint8Array(16).fill(9);
+  assert.deepEqual([...encodeApproveId(id)], [7, ...id]);
+  assert.throws(() => encodeApproveKey(new Uint8Array(31)));
+  assert.throws(() => encodeApproveId(new Uint8Array(17)));
 });
