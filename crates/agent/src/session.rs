@@ -27,6 +27,7 @@ const MAX_MESSAGES_PER_TICK: usize = 256;
 const REVOCATION_CHECK_TICKS: u32 = 30;
 const LINK_ATTEMPTS_PER_SESSION: u32 = 12;
 const PING_INTERVAL: Duration = Duration::from_secs(20);
+const MONITOR_CHECK_INTERVAL: Duration = Duration::from_secs(4);
 
 pub type LinkFound = ([u8; 16], String);
 pub type LinkResult = Result<(), LinkFailure>;
@@ -37,6 +38,8 @@ pub struct Policy<'a> {
     pub superseded: &'a dyn Fn() -> bool,
     pub link_lookup: &'a dyn Fn(&str) -> Option<LinkFound>,
     pub link_approve: &'a dyn Fn(&[u8; 16], &str) -> LinkResult,
+    pub link_approve_key: &'a dyn Fn(&[u8; 32]) -> LinkResult,
+    pub link_approve_id: &'a dyn Fn(&[u8; 16]) -> LinkResult,
     pub terminal_allowed: &'a dyn Fn() -> bool,
     pub audio_allowed: &'a dyn Fn() -> bool,
     pub file_roots: &'a dyn Fn() -> Vec<PathBuf>,
@@ -50,6 +53,7 @@ struct Services<'a> {
     clipboard: &'a mut Requests,
     audio: &'a mut Audio,
     link_budget: &'a mut u32,
+    monitor: &'a mut Option<u8>,
     policy: &'a Policy<'a>,
 }
 
@@ -85,6 +89,7 @@ fn serve(
     let mut viewer_decodes_video = false;
     let mut last_activity = Instant::now();
     let mut link_budget = LINK_ATTEMPTS_PER_SESSION;
+    let mut watch = MonitorWatch::default();
     let mut last_ping = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let deadline = Instant::now() + FRAME_INTERVAL;
@@ -114,6 +119,7 @@ fn serve(
             link.flush()?;
             last_ping = Instant::now();
         }
+        watch.tick(backend, &mut link)?;
         pacer.tick();
         if pacer.may_send() {
             stream.set_viewer_decodes_video(viewer_decodes_video);
@@ -144,6 +150,7 @@ fn serve(
                 clipboard: &mut clipboard,
                 audio: &mut audio,
                 link_budget: &mut link_budget,
+                monitor: &mut watch.request,
                 policy,
             },
             deadline,
@@ -235,6 +242,28 @@ fn link_frame(frame: &Frame, services: &mut Services, link: &mut Link) -> Result
                 }
             }
         }
+        LinkMessage::ApproveKey { key } => {
+            if *services.link_budget == 0 {
+                LinkMessage::Failed(LinkFailure::TooManyAttempts)
+            } else {
+                *services.link_budget -= 1;
+                match (services.policy.link_approve_key)(&key) {
+                    Ok(()) => LinkMessage::Approved,
+                    Err(reason) => LinkMessage::Failed(reason),
+                }
+            }
+        }
+        LinkMessage::ApproveId { id } => {
+            if *services.link_budget == 0 {
+                LinkMessage::Failed(LinkFailure::TooManyAttempts)
+            } else {
+                *services.link_budget -= 1;
+                match (services.policy.link_approve_id)(&id) {
+                    Ok(()) => LinkMessage::Approved,
+                    Err(reason) => LinkMessage::Failed(reason),
+                }
+            }
+        }
         LinkMessage::Info { .. }
         | LinkMessage::NotFound
         | LinkMessage::Approved
@@ -275,6 +304,56 @@ fn audio_frame(frame: &Frame, services: &mut Services, link: &mut Link) -> Resul
         | AudioMessage::Stopped
         | AudioMessage::Packet(_)
         | AudioMessage::Failed(_) => Err(ServerError::UnexpectedMessage),
+    }
+}
+
+#[derive(Default)]
+struct MonitorWatch {
+    request: Option<u8>,
+    announced: wirehaus_capture::Monitors,
+    checked: Option<Instant>,
+}
+
+impl MonitorWatch {
+    fn tick(&mut self, backend: &mut Backend, link: &mut Link) -> Result<(), ServerError> {
+        if let Some(index) = self.request.take()
+            && backend.screen.select_monitor(index)
+        {
+            backend.input.select_monitor(index);
+            self.checked = None;
+        }
+        if self
+            .checked
+            .is_some_and(|at| at.elapsed() < MONITOR_CHECK_INTERVAL)
+        {
+            return Ok(());
+        }
+        self.checked = Some(Instant::now());
+        let current = backend.screen.monitors();
+        if current != self.announced {
+            send_message(link, &monitors_message(&current))?;
+            link.flush()?;
+            self.announced = current;
+        }
+        Ok(())
+    }
+}
+
+fn monitors_message(monitors: &wirehaus_capture::Monitors) -> DesktopMessage {
+    DesktopMessage::Monitors {
+        active: monitors.active,
+        items: monitors
+            .items
+            .iter()
+            .map(|monitor| wirehaus_protocol::MonitorInfo {
+                x: monitor.x,
+                y: monitor.y,
+                width: monitor.width,
+                height: monitor.height,
+                primary: monitor.primary,
+                all: monitor.all,
+            })
+            .collect(),
     }
 }
 
@@ -326,7 +405,15 @@ fn receive(
                 handled += 1;
             }
             Incoming::Frame(frame) => {
-                *active |= handle_frame(&frame, input, pacer, video)?;
+                if frame.channel == Channel::Desktop
+                    && let Ok(ViewerMessage::SelectMonitor { index }) =
+                        ViewerMessage::decode(&frame.payload)
+                {
+                    *services.monitor = Some(index);
+                    *active = true;
+                } else {
+                    *active |= handle_frame(&frame, input, pacer, video)?;
+                }
                 handled += 1;
             }
             Incoming::Idle => {}
@@ -492,6 +579,7 @@ fn handle_frame(
             *video = decodes;
             Ok(false)
         }
+        ViewerMessage::SelectMonitor { .. } => Ok(false),
     }
 }
 

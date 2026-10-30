@@ -6,7 +6,7 @@ use wirehaus_crypto::lockout::Denied;
 use wirehaus_crypto::pairing::VALIDITY_SECONDS;
 
 use crate::i18n::tr;
-use crate::state::{AuthError, ClipboardMode, SecretStorage, State, StateError};
+use crate::state::{AuthError, ClipboardMode, SecretStorage, StateError};
 use crate::store::{Clock, Store, StoreError};
 
 const ISSUER: &str = "Wirehaus";
@@ -61,6 +61,20 @@ impl CommandError {
 
 pub fn init(dir: &Path, clock: Clock, out: &mut impl Write) -> Result<(), CommandError> {
     init_with(dir, clock, None, out)
+}
+
+pub fn init_quiet(
+    dir: &Path,
+    clock: Clock,
+    everything_in: Option<&Path>,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    let store = Store::initialize(dir, clock)?;
+    store.log("init", "agent identity created");
+    if let Some(home) = everything_in {
+        apply_all(&store, home, out)?;
+    }
+    Ok(())
 }
 
 pub fn init_with(
@@ -160,7 +174,11 @@ pub fn allow_all(
     apply_all(store, home, out)
 }
 
-fn write_totp(out: &mut impl Write, secret: &str, uri: &str) -> Result<(), CommandError> {
+pub(crate) fn write_totp(
+    out: &mut impl Write,
+    secret: &str,
+    uri: &str,
+) -> Result<(), CommandError> {
     if let Some(qr) = crate::qr::render(uri) {
         writeln!(
             out,
@@ -258,25 +276,64 @@ pub fn pairing_with_link(
     viewer_url: Option<&str>,
     out: &mut impl Write,
 ) -> Result<(), CommandError> {
-    let code = store.update(State::open_pairing)??;
-    store.log("pairing_opened", "a pairing code was generated");
-    let minutes = VALIDITY_SECONDS / 60;
+    pairing_custom(store, viewer_url, false, None, out)
+}
+
+pub fn pairing_custom(
+    store: &Store,
+    viewer_url: Option<&str>,
+    trusted: bool,
+    days: Option<u32>,
+    out: &mut impl Write,
+) -> Result<(), CommandError> {
+    let validity = match (trusted, days) {
+        (true, _) => 1800,
+        (false, Some(days)) => u64::from(days) * 86_400,
+        (false, None) => VALIDITY_SECONDS,
+    };
+    let code = store.update(|state, now| state.open_pairing_with(now, validity, trusted))??;
+    store.log(
+        "pairing_opened",
+        if trusted {
+            "a trusted pairing code was generated"
+        } else {
+            "a pairing code was generated"
+        },
+    );
     writeln!(
         out,
         "{}: {}",
         tr!("Código de emparejamiento", "Pairing code"),
         code.to_text()
     )?;
+    let span = if validity >= 86_400 {
+        tr!(
+            format!("{} días", validity / 86_400),
+            format!("{} days", validity / 86_400)
+        )
+    } else {
+        tr!(
+            format!("{} minutos", validity / 60),
+            format!("{} minutes", validity / 60)
+        )
+    };
+    let second = if trusted {
+        tr!(
+            "Quien lo abra entra directamente, sin segundo factor: úsalo solo con tu propio móvil, delante de este ordenador.",
+            "Whoever opens it signs in directly, without the second factor: use it only with your own phone, in front of this computer."
+        )
+    } else {
+        tr!(
+            "Para entrar también hará falta el código del segundo factor.",
+            "Signing in also needs the second factor code."
+        )
+    };
     writeln!(
         out,
         "{}",
         tr!(
-            format!(
-                "Vale una sola vez y caduca en {minutes} minutos. Para entrar también hará falta el código del segundo factor."
-            ),
-            format!(
-                "It works once and expires in {minutes} minutes. Signing in also needs the second factor code."
-            )
+            format!("Vale una sola vez y caduca en {span}. {second}"),
+            format!("It works once and expires in {span}. {second}")
         )
     )?;
     if let Some(base) = viewer_url {
@@ -700,7 +757,7 @@ fn verify(store: &Store, code: &str) -> Result<(), CommandError> {
     }
 }
 
-fn host_name() -> String {
+pub(crate) fn host_name() -> String {
     std::fs::read_to_string("/etc/hostname")
         .ok()
         .map(|name| name.trim().to_owned())

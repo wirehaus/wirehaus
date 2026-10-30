@@ -7,6 +7,14 @@ use crate::{Region, ScreenSource, Update};
 
 pub trait Grabber {
     fn grab(&mut self) -> Result<Bitmap, CaptureError>;
+
+    fn monitors(&mut self) -> crate::Monitors {
+        crate::Monitors::default()
+    }
+
+    fn select_monitor(&mut self, _index: u8) -> bool {
+        false
+    }
 }
 
 const BUSY_PERCENT: usize = 2;
@@ -113,6 +121,19 @@ impl<G: Grabber> ScreenSource for PollingScreen<G> {
 
     fn wake(&mut self) {
         self.backoff.wake();
+    }
+
+    fn monitors(&mut self) -> crate::Monitors {
+        self.grabber.monitors()
+    }
+
+    fn select_monitor(&mut self, index: u8) -> bool {
+        let changed = self.grabber.select_monitor(index);
+        if changed {
+            self.previous = None;
+            self.backoff.wake();
+        }
+        changed
     }
 }
 

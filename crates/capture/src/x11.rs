@@ -3,13 +3,14 @@ use std::time::{Duration, Instant};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::damage::{ConnectionExt as DamageExt, ReportLevel};
+use x11rb::protocol::randr::ConnectionExt as RandrExt;
 use x11rb::protocol::xproto::{ConnectionExt, ImageFormat, ImageOrder};
 use x11rb::rust_connection::RustConnection;
 
 use crate::bitmap::{Bitmap, Rect};
 use crate::damage::{all_tiles, changed_tiles, coalesce, tile_count, tiles_touching};
 use crate::error::CaptureError;
-use crate::{Region, ScreenSource, Update};
+use crate::{Monitor, Monitors, Region, ScreenSource, Update};
 
 const SIZE_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 const FULL_GRAB_PERCENT: usize = 60;
@@ -18,8 +19,12 @@ const FULL_GRAB_PERCENT: usize = 60;
 pub struct X11Screen {
     connection: RustConnection,
     root: u32,
+    root_width: u16,
+    root_height: u16,
     width: u16,
     height: u16,
+    view: Option<u8>,
+    origin: (u16, u16),
     damage: Option<u32>,
     previous: Option<Bitmap>,
     needs_full: bool,
@@ -54,8 +59,12 @@ impl X11Screen {
         Ok(Self {
             connection,
             root,
+            root_width: width,
+            root_height: height,
             width,
             height,
+            view: None,
+            origin: (0, 0),
             damage,
             previous: None,
             needs_full: true,
@@ -88,8 +97,8 @@ impl X11Screen {
             .get_image(
                 ImageFormat::Z_PIXMAP,
                 self.root,
-                to_coordinate(rect.x)?,
-                to_coordinate(rect.y)?,
+                to_coordinate(rect.x.saturating_add(self.origin.0))?,
+                to_coordinate(rect.y.saturating_add(self.origin.1))?,
                 rect.width,
                 rect.height,
                 u32::MAX,
@@ -113,10 +122,73 @@ impl X11Screen {
             .map_err(request_error)?
             .reply()
             .map_err(request_error)?;
-        let changed = geometry.width != self.width || geometry.height != self.height;
-        self.width = geometry.width;
-        self.height = geometry.height;
-        Ok(changed)
+        if geometry.width == self.root_width && geometry.height == self.root_height {
+            return Ok(false);
+        }
+        self.root_width = geometry.width;
+        self.root_height = geometry.height;
+        let before = (self.width, self.height, self.origin);
+        self.apply_view(self.view);
+        Ok(before != (self.width, self.height, self.origin))
+    }
+
+    fn list(&self) -> Vec<Monitor> {
+        let Ok(reply) = self
+            .connection
+            .randr_get_monitors(self.root, true)
+            .map_err(request_error)
+            .and_then(|cookie| cookie.reply().map_err(request_error))
+        else {
+            return Vec::new();
+        };
+        let mut items: Vec<Monitor> = reply
+            .monitors
+            .iter()
+            .filter(|monitor| {
+                monitor.width > 0 && monitor.height > 0 && monitor.x >= 0 && monitor.y >= 0
+            })
+            .map(|monitor| Monitor {
+                x: i32::from(monitor.x),
+                y: i32::from(monitor.y),
+                width: monitor.width,
+                height: monitor.height,
+                primary: monitor.primary,
+                all: false,
+            })
+            .collect();
+        items.sort_by_key(|monitor| (!monitor.primary, monitor.x, monitor.y));
+        if items.len() > 1 {
+            items.retain(|monitor| {
+                (monitor.x, monitor.y, monitor.width, monitor.height)
+                    != (0, 0, self.root_width, self.root_height)
+            });
+        }
+        items
+    }
+
+    fn apply_view(&mut self, view: Option<u8>) {
+        let list = self.list();
+        let picked = view.and_then(|index| list.get(usize::from(index)));
+        if let Some(monitor) = picked {
+            self.view = view;
+            self.origin = (
+                u16::try_from(monitor.x).unwrap_or(0),
+                u16::try_from(monitor.y).unwrap_or(0),
+            );
+            self.width = monitor
+                .width
+                .min(self.root_width.saturating_sub(self.origin.0));
+            self.height = monitor
+                .height
+                .min(self.root_height.saturating_sub(self.origin.1));
+        } else {
+            self.view = None;
+            self.origin = (0, 0);
+            self.width = self.root_width;
+            self.height = self.root_height;
+        }
+        self.needs_full = true;
+        self.previous = None;
     }
 
     fn drain_damage(&mut self) -> Result<Vec<Rect>, CaptureError> {
@@ -125,13 +197,10 @@ impl X11Screen {
         };
         let mut rects = Vec::new();
         while let Some(event) = self.connection.poll_for_event().map_err(request_error)? {
-            if let Event::DamageNotify(notify) = event {
-                rects.push(Rect {
-                    x: u16::try_from(notify.area.x.max(0)).unwrap_or(0),
-                    y: u16::try_from(notify.area.y.max(0)).unwrap_or(0),
-                    width: notify.area.width,
-                    height: notify.area.height,
-                });
+            if let Event::DamageNotify(notify) = event
+                && let Some(rect) = self.within_view(notify.area)
+            {
+                rects.push(rect);
             }
         }
         if !rects.is_empty() {
@@ -141,6 +210,24 @@ impl X11Screen {
             self.connection.flush().map_err(request_error)?;
         }
         Ok(rects)
+    }
+
+    fn within_view(&self, area: x11rb::protocol::xproto::Rectangle) -> Option<Rect> {
+        let left = i32::from(area.x).max(i32::from(self.origin.0));
+        let top = i32::from(area.y).max(i32::from(self.origin.1));
+        let right = (i32::from(area.x) + i32::from(area.width))
+            .min(i32::from(self.origin.0) + i32::from(self.width));
+        let bottom = (i32::from(area.y) + i32::from(area.height))
+            .min(i32::from(self.origin.1) + i32::from(self.height));
+        if right <= left || bottom <= top {
+            return None;
+        }
+        Some(Rect {
+            x: u16::try_from(left - i32::from(self.origin.0)).ok()?,
+            y: u16::try_from(top - i32::from(self.origin.1)).ok()?,
+            width: u16::try_from(right - left).ok()?,
+            height: u16::try_from(bottom - top).ok()?,
+        })
     }
 
     fn full_update(&mut self, resized: bool) -> Result<Update, CaptureError> {
@@ -217,6 +304,39 @@ impl ScreenSource for X11Screen {
         } else {
             self.polling_update()
         }
+    }
+
+    fn monitors(&mut self) -> Monitors {
+        let mut items = self.list();
+        if items.len() < 2 {
+            return Monitors::default();
+        }
+        items.push(Monitor {
+            x: 0,
+            y: 0,
+            width: self.root_width,
+            height: self.root_height,
+            primary: false,
+            all: true,
+        });
+        let active = self
+            .view
+            .unwrap_or_else(|| u8::try_from(items.len() - 1).unwrap_or(u8::MAX));
+        Monitors { items, active }
+    }
+
+    fn select_monitor(&mut self, index: u8) -> bool {
+        let count = self.list().len();
+        let wanted = if usize::from(index) < count {
+            Some(index)
+        } else {
+            None
+        };
+        if usize::from(index) > count || wanted == self.view {
+            return false;
+        }
+        self.apply_view(wanted);
+        true
     }
 }
 

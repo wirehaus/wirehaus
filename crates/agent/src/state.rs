@@ -7,7 +7,7 @@ use wirehaus_crypto::base32;
 use wirehaus_crypto::handshake::validate_device_name;
 use wirehaus_crypto::keys::{PublicKey, StaticKey};
 use wirehaus_crypto::lockout::{Denied, FailureTracker, MAX_LOCK_SECONDS, SUSPEND_AT};
-use wirehaus_crypto::pairing::{PSK_BYTES, PairingCode, PairingGrant};
+use wirehaus_crypto::pairing::{PSK_BYTES, PairingCode, PairingGrant, VALIDITY_SECONDS};
 use wirehaus_crypto::totp::TotpSecret;
 
 use crate::i18n::tr;
@@ -308,9 +308,25 @@ impl State {
     }
 
     pub fn open_pairing(&mut self, now: u64) -> Result<PairingCode, StateError> {
+        self.open_pairing_with(now, VALIDITY_SECONDS, false)
+    }
+
+    pub fn open_pairing_with(
+        &mut self,
+        now: u64,
+        validity: u64,
+        trusted: bool,
+    ) -> Result<PairingCode, StateError> {
         let code = PairingCode::generate()?;
-        self.pairing = Some(PairingGrant::new(&code, now));
+        self.pairing = Some(PairingGrant::with(&code, now, validity, trusted));
         Ok(code)
+    }
+
+    #[must_use]
+    pub fn pairing_trusted(&self, now: u64) -> bool {
+        self.pairing
+            .as_ref()
+            .is_some_and(|grant| grant.usable(now) && grant.trusted())
     }
 
     #[must_use]
@@ -488,6 +504,9 @@ impl State {
                 grant.expires_at(),
                 grant.failures()
             );
+            if grant.trusted() {
+                let _ = writeln!(out, "pairing_trusted 1");
+            }
         }
         let _ = writeln!(
             out,
@@ -562,6 +581,7 @@ struct Parser {
     clipboard: Option<ClipboardMode>,
     file_roots: Vec<PathBuf>,
     pairing: Option<PairingGrant>,
+    pairing_trusted: Option<bool>,
     local: Option<FailureTracker>,
     devices: Vec<Device>,
 }
@@ -606,6 +626,7 @@ impl Parser {
                 Ok(())
             }
             "pairing" => once(&mut self.pairing, parse_pairing(rest)?, key),
+            "pairing_trusted" => once(&mut self.pairing_trusted, parse_flag(rest)?, key),
             "local" => once(&mut self.local, parse_local(rest)?, key),
             "device" => {
                 if self.devices.len() >= MAX_DEVICES {
@@ -661,7 +682,9 @@ impl Parser {
             audio_allowed: self.audio.unwrap_or(false),
             clipboard: self.clipboard.unwrap_or_default(),
             file_roots: self.file_roots,
-            pairing: self.pairing,
+            pairing: self
+                .pairing
+                .map(|grant| grant.with_trusted(self.pairing_trusted.unwrap_or(false))),
             local: self.local.unwrap_or_default(),
             devices: self.devices,
         })

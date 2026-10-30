@@ -19,24 +19,105 @@ pub fn request_screen_capture() -> bool {
     ScreenCaptureAccess.request()
 }
 
-#[derive(Debug)]
-pub struct MacDisplay;
+#[derive(Debug, Default)]
+pub struct MacDisplay {
+    selected: u8,
+}
 
 impl MacDisplay {
     pub fn connect() -> Result<Self, CaptureError> {
         if !screen_capture_allowed() {
             return Err(CaptureError::PermissionDenied);
         }
-        Ok(Self)
+        Ok(Self::default())
     }
+
+    fn current(&self) -> CGDisplay {
+        let ordered = ordered_displays();
+        ordered
+            .get(usize::from(self.selected))
+            .or_else(|| ordered.first())
+            .map_or_else(CGDisplay::main, |id| CGDisplay::new(*id))
+    }
+}
+
+fn pixel_size(display: CGDisplay) -> (u64, u64) {
+    display
+        .display_mode()
+        .map_or((display.pixels_wide(), display.pixels_high()), |mode| {
+            (mode.pixel_width(), mode.pixel_height())
+        })
+}
+
+fn whole(points: f64) -> i32 {
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        points.round() as i32
+    }
+}
+
+#[must_use]
+pub fn ordered_displays() -> Vec<u32> {
+    let mut ids = CGDisplay::active_displays().unwrap_or_default();
+    let main = CGDisplay::main().id;
+    ids.sort_by(|a, b| {
+        let key = |id: &u32| {
+            let bounds = CGDisplay::new(*id).bounds();
+            (
+                *id != main,
+                whole(bounds.origin.x),
+                whole(bounds.origin.y),
+                *id,
+            )
+        };
+        key(a).cmp(&key(b))
+    });
+    if ids.is_empty() {
+        ids.push(main);
+    }
+    ids
 }
 
 impl Grabber for MacDisplay {
     fn grab(&mut self) -> Result<Bitmap, CaptureError> {
-        let image = CGDisplay::main()
+        let image = self
+            .current()
             .image()
             .ok_or_else(|| CaptureError::Request("the display returned no image".to_owned()))?;
         to_bitmap(&image)
+    }
+
+    fn monitors(&mut self) -> crate::Monitors {
+        let main = CGDisplay::main().id;
+        let items: Vec<crate::Monitor> = ordered_displays()
+            .into_iter()
+            .map(|id| {
+                let display = CGDisplay::new(id);
+                let bounds = display.bounds();
+                crate::Monitor {
+                    x: whole(bounds.origin.x),
+                    y: whole(bounds.origin.y),
+                    width: u16::try_from(pixel_size(display).0).unwrap_or(u16::MAX),
+                    height: u16::try_from(pixel_size(display).1).unwrap_or(u16::MAX),
+                    primary: id == main,
+                    all: false,
+                }
+            })
+            .collect();
+        let active = if usize::from(self.selected) < items.len() {
+            self.selected
+        } else {
+            0
+        };
+        crate::Monitors { items, active }
+    }
+
+    fn select_monitor(&mut self, index: u8) -> bool {
+        if usize::from(index) >= ordered_displays().len() || index == self.selected {
+            return false;
+        }
+        self.selected = index;
+        true
     }
 }
 
@@ -113,5 +194,21 @@ mod tests {
             pack_rows(&[0; 64], 4, 2, 2),
             Err(CaptureError::ShortImage { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod monitor_tests {
+    use super::*;
+
+    #[test]
+    fn the_main_display_is_listed_first_and_selecting_beyond_the_list_is_refused() {
+        let mut display = MacDisplay::default();
+        let list = display.monitors();
+        assert_ne!(list.items.len(), 0);
+        assert!(list.items[0].primary);
+        assert_eq!(list.active, 0);
+        assert!(!display.select_monitor(200));
+        assert!(!display.select_monitor(0));
     }
 }

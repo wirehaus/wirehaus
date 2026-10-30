@@ -14,7 +14,7 @@ authors.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = { workspace = true, features = ["damage"] }
+x11rb = { workspace = true, features = ["damage", "randr"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics.workspace = true

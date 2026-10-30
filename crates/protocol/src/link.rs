@@ -5,6 +5,7 @@ pub const LINK_KEY_MIN: usize = 4;
 pub const LINK_KEY_MAX: usize = 40;
 pub const LINK_VERIFY_LEN: usize = 4;
 pub const LINK_CODE_LEN: usize = 6;
+pub const LINK_PUBLIC_LEN: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkFailure {
@@ -49,6 +50,12 @@ pub enum LinkMessage {
     },
     Approved,
     Failed(LinkFailure),
+    ApproveKey {
+        key: [u8; LINK_PUBLIC_LEN],
+    },
+    ApproveId {
+        id: [u8; LINK_ID_LEN],
+    },
 }
 
 const LOOKUP: u8 = 0;
@@ -57,6 +64,8 @@ const NOT_FOUND: u8 = 2;
 const APPROVE: u8 = 3;
 const APPROVED: u8 = 4;
 const FAILED: u8 = 5;
+const APPROVE_KEY: u8 = 6;
+const APPROVE_ID: u8 = 7;
 
 fn digits(text: &str, len: usize) -> bool {
     text.len() == len && text.bytes().all(|b| b.is_ascii_digit())
@@ -86,6 +95,16 @@ impl LinkMessage {
             }
             LinkMessage::Approved => vec![APPROVED],
             LinkMessage::Failed(reason) => vec![FAILED, reason.tag()],
+            LinkMessage::ApproveKey { key } => {
+                let mut out = vec![APPROVE_KEY];
+                out.extend_from_slice(key);
+                out
+            }
+            LinkMessage::ApproveId { id } => {
+                let mut out = vec![APPROVE_ID];
+                out.extend_from_slice(id);
+                out
+            }
         }
     }
 
@@ -149,6 +168,16 @@ impl LinkMessage {
                     LinkMessage::Approved
                 })
             }
+            APPROVE_KEY => Ok(LinkMessage::ApproveKey {
+                key: body
+                    .try_into()
+                    .map_err(|_| bad_length(tag, LINK_PUBLIC_LEN, body.len()))?,
+            }),
+            APPROVE_ID => Ok(LinkMessage::ApproveId {
+                id: body
+                    .try_into()
+                    .map_err(|_| bad_length(tag, LINK_ID_LEN, body.len()))?,
+            }),
             FAILED => match body {
                 [reason] => Ok(LinkMessage::Failed(LinkFailure::from_tag(*reason)?)),
                 _ => Err(bad_length(tag, 1, body.len())),
@@ -183,6 +212,12 @@ mod tests {
                 code: "123456".to_owned(),
             },
             LinkMessage::Approved,
+            LinkMessage::ApproveKey {
+                key: [5; LINK_PUBLIC_LEN],
+            },
+            LinkMessage::ApproveId {
+                id: [6; LINK_ID_LEN],
+            },
             LinkMessage::Failed(LinkFailure::WrongCode),
             LinkMessage::Failed(LinkFailure::TooManyAttempts),
             LinkMessage::Failed(LinkFailure::Gone),

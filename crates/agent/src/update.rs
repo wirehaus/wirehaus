@@ -243,6 +243,8 @@ pub fn asset_suffix() -> Option<&'static str> {
         Some("windows-x64.zip")
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         Some("darwin-arm64.tar.gz")
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        Some("darwin-x86_64.tar.gz")
     } else {
         None
     }

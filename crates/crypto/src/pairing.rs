@@ -73,6 +73,7 @@ pub struct PairingGrant {
     psk: [u8; PSK_BYTES],
     expires_at: u64,
     failures: u8,
+    trusted: bool,
 }
 
 impl std::fmt::Debug for PairingGrant {
@@ -80,6 +81,7 @@ impl std::fmt::Debug for PairingGrant {
         f.debug_struct("PairingGrant")
             .field("expires_at", &self.expires_at)
             .field("failures", &self.failures)
+            .field("trusted", &self.trusted)
             .finish_non_exhaustive()
     }
 }
@@ -93,10 +95,16 @@ impl Drop for PairingGrant {
 impl PairingGrant {
     #[must_use]
     pub fn new(code: &PairingCode, now: u64) -> Self {
+        Self::with(code, now, VALIDITY_SECONDS, false)
+    }
+
+    #[must_use]
+    pub fn with(code: &PairingCode, now: u64, validity: u64, trusted: bool) -> Self {
         Self {
             psk: code.psk(),
-            expires_at: now.saturating_add(VALIDITY_SECONDS),
+            expires_at: now.saturating_add(validity),
             failures: 0,
+            trusted,
         }
     }
 
@@ -106,7 +114,19 @@ impl PairingGrant {
             psk,
             expires_at,
             failures,
+            trusted: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_trusted(mut self, trusted: bool) -> Self {
+        self.trusted = trusted;
+        self
+    }
+
+    #[must_use]
+    pub fn trusted(&self) -> bool {
+        self.trusted
     }
 
     #[must_use]

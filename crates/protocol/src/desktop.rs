@@ -43,12 +43,30 @@ pub enum DesktopMessage {
         keyframe: bool,
         data: Vec<u8>,
     },
+    Monitors {
+        active: u8,
+        items: Vec<MonitorInfo>,
+    },
+}
+
+pub const MAX_MONITORS: usize = 16;
+const MONITOR_LEN: usize = 13;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MonitorInfo {
+    pub x: i32,
+    pub y: i32,
+    pub width: u16,
+    pub height: u16,
+    pub primary: bool,
+    pub all: bool,
 }
 
 const RESIZE: u8 = 0;
 const TILE: u8 = 1;
 const FRAME_END: u8 = 2;
 const VIDEO: u8 = 3;
+const MONITORS: u8 = 4;
 const VIDEO_HEADER_LEN: usize = 5;
 const TILE_HEADER_LEN: usize = 9;
 
@@ -96,6 +114,20 @@ impl DesktopMessage {
                 out.extend_from_slice(&height.to_be_bytes());
                 out.push(u8::from(*keyframe));
                 out.extend_from_slice(data);
+                out
+            }
+            DesktopMessage::Monitors { active, items } => {
+                let mut out = Vec::with_capacity(3 + items.len() * MONITOR_LEN);
+                out.push(MONITORS);
+                out.push(*active);
+                out.push(u8::try_from(items.len().min(MAX_MONITORS)).unwrap_or(0));
+                for item in items.iter().take(MAX_MONITORS) {
+                    out.extend_from_slice(&item.x.to_be_bytes());
+                    out.extend_from_slice(&item.y.to_be_bytes());
+                    out.extend_from_slice(&item.width.to_be_bytes());
+                    out.extend_from_slice(&item.height.to_be_bytes());
+                    out.push(u8::from(item.primary) | (u8::from(item.all) << 1));
+                }
                 out
             }
         }
@@ -154,6 +186,28 @@ impl DesktopMessage {
                     data: data.to_vec(),
                 })
             }
+            MONITORS => {
+                let (&active, rest) = body.split_first().ok_or_else(|| bad_length(tag, 2, 0))?;
+                let (&count, list) = rest.split_first().ok_or_else(|| bad_length(tag, 2, 1))?;
+                let count = usize::from(count);
+                if count > MAX_MONITORS || list.len() != count * MONITOR_LEN {
+                    return Err(bad_length(tag, 2 + count * MONITOR_LEN, body.len()));
+                }
+                let items = list
+                    .as_chunks::<MONITOR_LEN>()
+                    .0
+                    .iter()
+                    .map(|chunk| MonitorInfo {
+                        x: i32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]),
+                        y: i32::from_be_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
+                        width: u16::from_be_bytes([chunk[8], chunk[9]]),
+                        height: u16::from_be_bytes([chunk[10], chunk[11]]),
+                        primary: chunk[12] & 1 != 0,
+                        all: chunk[12] & 2 != 0,
+                    })
+                    .collect();
+                Ok(DesktopMessage::Monitors { active, items })
+            }
             other => Err(ProtocolError::UnknownDesktop(other)),
         }
     }
@@ -190,6 +244,35 @@ mod tests {
                 height: 1080,
             },
             tile(),
+            DesktopMessage::Monitors {
+                active: 1,
+                items: vec![
+                    MonitorInfo {
+                        x: -1920,
+                        y: 0,
+                        width: 1920,
+                        height: 1080,
+                        primary: false,
+                        all: false,
+                    },
+                    MonitorInfo {
+                        x: 0,
+                        y: 0,
+                        width: 3456,
+                        height: 2234,
+                        primary: true,
+                        all: false,
+                    },
+                    MonitorInfo {
+                        x: 0,
+                        y: 0,
+                        width: 5376,
+                        height: 2234,
+                        primary: false,
+                        all: true,
+                    },
+                ],
+            },
         ] {
             assert_eq!(DesktopMessage::decode(&message.encode()).unwrap(), message);
         }
@@ -317,6 +400,27 @@ mod tests {
         assert_eq!(
             DesktopMessage::decode(&bytes),
             Err(ProtocolError::UnknownCodec(77))
+        );
+    }
+}
+
+#[cfg(test)]
+mod monitor_tests {
+    use super::*;
+
+    #[test]
+    fn a_monitor_list_with_the_wrong_length_or_too_many_entries_is_refused() {
+        assert!(DesktopMessage::decode(&[MONITORS, 0]).is_err());
+        assert!(DesktopMessage::decode(&[MONITORS, 0, 1, 0, 0]).is_err());
+        let mut many = vec![MONITORS, 0, 17];
+        many.extend(vec![0; 17 * MONITOR_LEN]);
+        assert!(DesktopMessage::decode(&many).is_err());
+        assert_eq!(
+            DesktopMessage::decode(&[MONITORS, 0, 0]).unwrap(),
+            DesktopMessage::Monitors {
+                active: 0,
+                items: Vec::new()
+            }
         );
     }
 }

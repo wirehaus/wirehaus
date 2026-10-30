@@ -28,4 +28,6 @@ pub trait InputSink {
     fn release_all(&mut self) -> Result<(), InputError> {
         Ok(())
     }
+
+    fn select_monitor(&mut self, _index: u8) {}
 }

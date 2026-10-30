@@ -43,10 +43,15 @@ fn home_dir() -> Option<std::path::PathBuf> {
 fn initialize(
     dir: &std::path::Path,
     allow_all: bool,
+    quiet: bool,
     out: &mut impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let home = allow_all.then(home_dir).flatten();
-    commands::init_with(dir, system_clock(), home.as_deref(), out)?;
+    if quiet {
+        commands::init_quiet(dir, system_clock(), home.as_deref(), out)?;
+    } else {
+        commands::init_with(dir, system_clock(), home.as_deref(), out)?;
+    }
     Ok(())
 }
 
@@ -60,21 +65,81 @@ fn allow_everything(
     Ok(())
 }
 
+fn onboard(
+    store: &Store,
+    dir: &std::path::Path,
+    phone: bool,
+    card: bool,
+    no_wait: bool,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let address = commands::viewer_url(dir);
+    let mode = if phone {
+        Some(wirehaus_agent::onboard::Mode::Phone)
+    } else if card {
+        Some(wirehaus_agent::onboard::Mode::Card)
+    } else {
+        None
+    };
+    let plan = wirehaus_agent::onboard::Plan {
+        store,
+        address: address.as_deref(),
+        mode,
+        wait: if no_wait {
+            std::time::Duration::ZERO
+        } else {
+            std::time::Duration::from_secs(600)
+        },
+    };
+    wirehaus_agent::onboard::run(
+        &plan,
+        &wirehaus_agent::onboard::Style::detect(),
+        &mut wirehaus_agent::onboard::Tty::open(),
+        out,
+    )?;
+    Ok(())
+}
+
+fn pairing(
+    store: &Store,
+    dir: &std::path::Path,
+    trusted: bool,
+    days: Option<u32>,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    commands::pairing_custom(
+        store,
+        commands::viewer_url(dir).as_deref(),
+        trusted,
+        days,
+        out,
+    )?;
+    Ok(())
+}
+
+fn info() {
+    println!(
+        "wirehaus-agent {} (protocol {})",
+        env!("CARGO_PKG_VERSION"),
+        PROTOCOL_VERSION
+    );
+}
+
 fn run(command: Command, dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut out = stdout().lock();
     let open = || Store::open(dir, system_clock());
     match command {
-        Command::Info => {
-            println!(
-                "wirehaus-agent {} (protocol {})",
-                env!("CARGO_PKG_VERSION"),
-                PROTOCOL_VERSION
-            );
-        }
-        Command::Init { allow_all } => initialize(dir, allow_all, &mut out)?,
+        Command::Info => info(),
+        Command::Init { allow_all, quiet } => initialize(dir, allow_all, quiet, &mut out)?,
+        Command::Onboard {
+            phone,
+            card,
+            no_wait,
+        } => onboard(&open()?, dir, phone, card, no_wait, &mut out)?,
         Command::AllowAll { code } => allow_everything(&open()?, &code, &mut out)?,
-        Command::Pairing => {
-            commands::pairing_with_link(&open()?, commands::viewer_url(dir).as_deref(), &mut out)?;
+        Command::Pairing { phone, card, days } => {
+            let days = if card { Some(30) } else { days };
+            pairing(&open()?, dir, phone, days, &mut out)?;
         }
         Command::Totp => commands::totp(&open()?, &mut out)?,
         #[cfg(any(target_os = "macos", target_os = "linux", windows))]

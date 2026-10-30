@@ -171,6 +171,7 @@ impl Server {
         let clock = config.clock.clone().unwrap_or_else(system_clock);
         let vault = config.vault.clone().unwrap_or_else(system_vault);
         let store = Arc::new(Store::open_with(&config.state_dir, clock, vault)?);
+        let tickets = restored_tickets(&store);
         let viewer = Viewer::open(&config.viewer_dir, config.viewer_hash.as_deref())?;
         let clipboard = Arc::new(Hub::new(platform::clipboard_factory(
             config.display.clone(),
@@ -181,7 +182,7 @@ impl Server {
             store,
             clipboard,
             viewer,
-            tickets: Mutex::new(Tickets::new()),
+            tickets: Mutex::new(tickets),
             links: Mutex::new(Links::default()),
             sessions: AtomicUsize::new(0),
             last_used: Mutex::new(Instant::now()),
@@ -346,7 +347,7 @@ impl Server {
         let now = self.store.read(|_, now| now).unwrap_or(0);
         let mut links = self.links.lock().unwrap_or_else(PoisonError::into_inner);
         match route {
-            "/link/ping" => ("200 OK", r#"{"link":1}"#.to_owned()),
+            "/link/ping" => ("200 OK", r#"{"link":2}"#.to_owned()),
             "/link/start" => {
                 let Some(public) = param("k").and_then(from_hex) else {
                     return ("400 Bad Request", r#"{"error":"key"}"#.to_owned());
@@ -388,7 +389,6 @@ impl Server {
                         "200 OK",
                         format!(r#"{{"state":"ready","sealed":"{}"}}"#, to_hex(&sealed)),
                     ),
-                    Poll::Gone => ("200 OK", r#"{"state":"gone"}"#.to_owned()),
                 }
             }
             _ => ("404 Not Found", r#"{"error":"not found"}"#.to_owned()),
@@ -445,6 +445,55 @@ impl Server {
         } else {
             Err(LinkFailure::Gone)
         }
+    }
+
+    fn link_grant(
+        &self,
+        device: &PublicKey,
+        public: &[u8; 32],
+        mut links: std::sync::MutexGuard<'_, Links>,
+        now: u64,
+        registered: Option<[u8; 16]>,
+    ) -> Result<(), LinkFailure> {
+        let pairing = self
+            .store
+            .update(|state, now| state.open_pairing_with(now, LINK_PAIRING_SECS, true))
+            .map_err(|_| LinkFailure::Unavailable)?
+            .map_err(|_| LinkFailure::Unavailable)?;
+        let sealed = wirehaus_crypto::link::seal(public, pairing.to_text().as_bytes())
+            .map_err(|_| LinkFailure::Unavailable)?;
+        let stored = match registered {
+            Some(id) => links.approve(&id, sealed, now),
+            None => links.approve_key(public, sealed, now),
+        };
+        if stored {
+            self.store.log(
+                "link_approved",
+                &format!("{} authorised a new computer", device.to_text()),
+            );
+            Ok(())
+        } else {
+            Err(LinkFailure::Gone)
+        }
+    }
+
+    fn link_approve_key(&self, device: &PublicKey, key: &[u8; 32]) -> Result<(), LinkFailure> {
+        let now = self
+            .store
+            .read(|_, now| now)
+            .map_err(|_| LinkFailure::Unavailable)?;
+        let links = self.links.lock().unwrap_or_else(PoisonError::into_inner);
+        self.link_grant(device, key, links, now, None)
+    }
+
+    fn link_approve_id(&self, device: &PublicKey, id: &[u8; 16]) -> Result<(), LinkFailure> {
+        let now = self
+            .store
+            .read(|_, now| now)
+            .map_err(|_| LinkFailure::Unavailable)?;
+        let mut links = self.links.lock().unwrap_or_else(PoisonError::into_inner);
+        let public = links.public_of(id, now).ok_or(LinkFailure::Gone)?;
+        self.link_grant(device, &public, links, now, Some(*id))
     }
 
     fn upgrade(
@@ -563,6 +612,8 @@ impl Server {
                 superseded: &|| superseded.load(Ordering::SeqCst),
                 link_lookup: &|key| self.link_lookup(key),
                 link_approve: &|id, code| self.link_approve(&identity.device, id, code),
+                link_approve_key: &|key| self.link_approve_key(&identity.device, key),
+                link_approve_id: &|id| self.link_approve_id(&identity.device, id),
                 terminal_allowed: &|| {
                     self.store
                         .read(|state, _| state.terminal_allowed())
@@ -602,6 +653,7 @@ impl Server {
         let mut tickets = self.tickets.lock().unwrap_or_else(PoisonError::into_inner);
         let ticket = tickets.issue(*device, now)?;
         let superseded = tickets.superseded_flag(device, &ticket).unwrap_or_default();
+        self.save_tickets(&tickets, now);
         Ok((ticket, superseded))
     }
 
@@ -614,7 +666,6 @@ impl Server {
         let keeps_grace = !matches!(
             result,
             Err(ServerError::AccessRevoked
-                | ServerError::IdleTimeout
                 | ServerError::Protocol(_)
                 | ServerError::UnexpectedChannel(_)
                 | ServerError::UnexpectedMessage
@@ -628,7 +679,25 @@ impl Server {
         } else {
             tickets.revoke(device, ticket);
         }
+        self.save_tickets(&tickets, now);
     }
+
+    fn save_tickets(&self, tickets: &Tickets, now: u64) {
+        if self.store.save_resume(&tickets.export(now)).is_err() {
+            self.store.log(
+                "resume_not_saved",
+                "the resume tickets could not be written",
+            );
+        }
+    }
+}
+
+const LINK_PAIRING_SECS: u64 = 600;
+
+fn restored_tickets(store: &Store) -> Tickets {
+    let mut tickets = Tickets::new();
+    tickets.import(&store.load_resume(), store.now());
+    tickets
 }
 
 fn read_head(stream: &mut TcpStream) -> Result<Option<(RequestHead, usize)>, ServerError> {

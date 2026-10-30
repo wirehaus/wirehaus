@@ -21,12 +21,29 @@ pub enum Command {
     Init {
         #[arg(long)]
         allow_all: bool,
+        #[arg(long)]
+        quiet: bool,
+    },
+    Onboard {
+        #[arg(long, conflicts_with = "card")]
+        phone: bool,
+        #[arg(long)]
+        card: bool,
+        #[arg(long)]
+        no_wait: bool,
     },
     AllowAll {
         #[arg(long, value_name = "SIX DIGITS", help = CODE_HELP)]
         code: String,
     },
-    Pairing,
+    Pairing {
+        #[arg(long, conflicts_with_all = ["card", "days"])]
+        phone: bool,
+        #[arg(long, conflicts_with = "days")]
+        card: bool,
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=90))]
+        days: Option<u32>,
+    },
     Totp,
     #[cfg(target_os = "macos")]
     Permissions,

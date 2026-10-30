@@ -54,13 +54,17 @@ impl Xvfb {
     }
 
     fn start(number: u32) -> Self {
+        Self::start_sized(number, "320x200x24")
+    }
+
+    fn start_sized(number: u32, geometry: &str) -> Self {
         let display = format!(":{number}");
         let child = Command::new("Xvfb")
             .args([
                 &display,
                 "-screen",
                 "0",
-                "320x200x24",
+                geometry,
                 "-nolisten",
                 "tcp",
                 "-noreset",
@@ -1847,6 +1851,7 @@ fn a_ticket_resumes_a_dropped_session_without_a_new_code_and_only_once() {
     let _screen = next_tile_or_resize(&mut second);
     drop(second);
     sleep(Duration::from_millis(600));
+    server.time.fetch_add(601, Ordering::SeqCst);
     assert!(refused_ticket(&server, &device, ticket));
     assert!(resume_when_possible(&server, &device, renewed).is_some());
 }
@@ -1869,22 +1874,70 @@ fn a_ticket_takes_over_a_session_the_agent_still_believes_is_alive() {
     assert_ne!(renewed, ticket);
     assert!(first.wait_closed(Duration::from_secs(5)));
     sleep(Duration::from_millis(600));
+    server.time.fetch_add(601, Ordering::SeqCst);
     assert!(refused_ticket(&server, &device, ticket));
 }
 
 #[test]
-fn a_ticket_stops_working_after_the_grace_period() {
+fn a_ticket_keeps_the_device_signed_in_for_thirty_days_and_not_longer() {
     let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let (mut first, device) = pair_and_login(&server, "Aula 3");
     let ticket = first.wait_for_ticket();
     drop(first);
     sleep(Duration::from_millis(600));
-    server.time.fetch_add(299, Ordering::SeqCst);
-    assert!(resume_when_possible(&server, &device, ticket).is_some());
+    server.time.fetch_add(29 * 86_400, Ordering::SeqCst);
+    let mut second = resume_when_possible(&server, &device, ticket).expect("resumption");
+    let renewed = second.wait_for_ticket();
+    drop(second);
     sleep(Duration::from_millis(600));
-    server.time.fetch_add(301, Ordering::SeqCst);
+    server.time.fetch_add(29 * 86_400, Ordering::SeqCst);
+    assert!(resume_when_possible(&server, &device, renewed).is_some());
+    sleep(Duration::from_millis(600));
+    server.time.fetch_add(31 * 86_400, Ordering::SeqCst);
     assert!(refused_ticket(&server, &device, ticket));
+}
+
+#[test]
+fn a_used_ticket_still_works_for_a_few_minutes_if_the_reply_was_lost() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let (mut first, device) = pair_and_login(&server, "Aula 3");
+    let ticket = first.wait_for_ticket();
+    drop(first);
+    let second = resume_when_possible(&server, &device, ticket).expect("resumption");
+    drop(second);
+    sleep(Duration::from_millis(600));
+    server.time.fetch_add(120, Ordering::SeqCst);
+    assert!(resume_when_possible(&server, &device, ticket).is_some());
+}
+
+#[test]
+fn a_trusted_pairing_signs_the_device_in_without_the_second_factor_and_only_once() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let device = StaticKey::generate().unwrap();
+    let code = server
+        .store
+        .update(|state, now| state.open_pairing_with(now, 600, true))
+        .unwrap()
+        .unwrap();
+    let mut client = start_pairing(&server, &device, &code, "Movil").expect("pairing handshake");
+    match client.read_control() {
+        Received::Got(ControlMessage::AuthOk) => {}
+        other => panic!("expected AuthOk, got {}", describe(&other)),
+    }
+    let ticket = client.wait_for_ticket();
+    assert_ne!(ticket, [0; 32]);
+    drop(client);
+    let again = start_pairing(&server, &StaticKey::generate().unwrap(), &code, "Otro");
+    assert!(
+        again.is_none()
+            || matches!(
+                again.map(|mut c| c.read_control()),
+                Some(Received::Closed | Received::Timeout)
+            )
+    );
 }
 
 #[test]
@@ -1945,7 +1998,7 @@ fn a_protocol_violation_revokes_the_ticket() {
 }
 
 #[test]
-fn an_idle_session_is_closed_with_a_notice_and_loses_its_ticket() {
+fn an_idle_session_is_closed_with_a_notice_and_keeps_its_ticket_so_the_device_stays_signed_in() {
     let xvfb = Xvfb::start_unique();
     let server = Running::start_with_idle(&xvfb.display, Duration::from_secs(2));
     let (mut client, device) = pair_and_login(&server, "Aula 3");
@@ -1953,7 +2006,7 @@ fn an_idle_session_is_closed_with_a_notice_and_loses_its_ticket() {
     let reason = client.read_until_session_ends(Duration::from_secs(10));
     assert_eq!(reason, Some(EndReason::Idle));
     sleep(Duration::from_millis(600));
-    assert!(refused_ticket(&server, &device, ticket));
+    assert!(resume_when_possible(&server, &device, ticket).is_some());
 }
 
 #[test]
@@ -2914,4 +2967,107 @@ fn the_agent_pings_an_idle_viewer_so_proxies_keep_the_connection_open() {
         }
     }
     assert!(client.pings >= 1, "no ping within 30 seconds");
+}
+
+fn split_into_two_monitors(display: &str) {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::randr::{ConnectionExt as _, MonitorInfo};
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    let (connection, number) = x11rb::connect(Some(display)).unwrap();
+    let root = connection.setup().roots[number].root;
+    for (index, (name, x, primary)) in [("left", 0_i16, true), ("right", 320, false)]
+        .into_iter()
+        .enumerate()
+    {
+        let atom = connection
+            .intern_atom(false, name.as_bytes())
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        connection
+            .randr_set_monitor(
+                root,
+                MonitorInfo {
+                    name: atom,
+                    primary,
+                    automatic: false,
+                    x,
+                    y: 0,
+                    width: 320,
+                    height: 400,
+                    width_in_millimeters: 100,
+                    height_in_millimeters: 100,
+                    outputs: Vec::new(),
+                },
+            )
+            .unwrap()
+            .check()
+            .unwrap_or_else(|error| panic!("monitor {index}: {error}"));
+    }
+    connection.sync().unwrap();
+}
+
+fn pointer_position(display: &str) -> (i16, i16) {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    let (connection, number) = x11rb::connect(Some(display)).unwrap();
+    let root = connection.setup().roots[number].root;
+    let reply = connection.query_pointer(root).unwrap().reply().unwrap();
+    (reply.root_x, reply.root_y)
+}
+
+#[test]
+fn the_viewer_can_pick_one_of_several_monitors_and_the_pointer_follows_it() {
+    let xvfb = Xvfb::start_sized(200 + (std::process::id() % 300) * 40 + 39, "640x400x24");
+    split_into_two_monitors(&xvfb.display);
+    let server = Running::start(&xvfb.display);
+    let (mut client, _device) = pair_and_login(&server, "Aula 3");
+
+    let mut listed = None;
+    for _ in 0..200 {
+        if let DesktopMessage::Monitors { active, items } = next_tile_or_resize(&mut client) {
+            listed = Some((active, items));
+            break;
+        }
+    }
+    let (active, items) = listed.expect("the agent never listed the monitors");
+    assert_eq!(items.len(), 3, "{items:?}");
+    assert!(items[0].primary && !items[0].all);
+    assert!(items[2].all);
+    assert_eq!(active, 2);
+
+    client.send_viewer(ViewerMessage::SelectMonitor { index: 1 });
+    let mut resized = None;
+    for _ in 0..400 {
+        if let DesktopMessage::Resize { width, height } = next_tile_or_resize(&mut client)
+            && (width, height) == (320, 400)
+        {
+            resized = Some((width, height));
+            break;
+        }
+    }
+    assert_eq!(resized, Some((320, 400)));
+
+    client.send_viewer(ViewerMessage::Input(InputEvent::PointerMove {
+        x: 10,
+        y: 20,
+    }));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pointer_position(&xvfb.display) != (330, 20) && Instant::now() < deadline {
+        sleep(Duration::from_millis(50));
+    }
+    assert_eq!(pointer_position(&xvfb.display), (330, 20));
+
+    client.send_viewer(ViewerMessage::SelectMonitor { index: 2 });
+    let mut whole = false;
+    for _ in 0..400 {
+        if let DesktopMessage::Resize { width, height } = next_tile_or_resize(&mut client)
+            && (width, height) == (640, 400)
+        {
+            whole = true;
+            break;
+        }
+    }
+    assert!(whole);
 }

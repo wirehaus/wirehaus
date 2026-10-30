@@ -13,6 +13,7 @@ pub mod launcher;
 mod link;
 mod linkbox;
 mod mode;
+pub mod onboard;
 mod pacer;
 mod platform;
 pub mod qr;

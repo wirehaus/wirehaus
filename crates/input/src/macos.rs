@@ -29,6 +29,7 @@ pub fn request_input() -> bool {
 }
 
 pub struct MacInput {
+    selected: u8,
     position: CGPoint,
     held: Vec<Button>,
     modifiers: Modifiers,
@@ -55,6 +56,7 @@ impl MacInput {
             .map_err(|()| request_error("cannot read the pointer position"))?
             .location();
         Ok(Self {
+            selected: 0,
             position,
             held: Vec::new(),
             modifiers: Modifiers::default(),
@@ -78,17 +80,25 @@ impl MacInput {
         flags
     }
 
+    fn current_display(&self) -> CGDisplay {
+        let ordered = ordered_displays();
+        ordered
+            .get(usize::from(self.selected))
+            .or_else(|| ordered.first())
+            .map_or_else(CGDisplay::main, |id| CGDisplay::new(*id))
+    }
+
     fn move_pointer(&mut self, x: u16, y: u16) -> Result<(), InputError> {
-        let display = CGDisplay::main();
-        let (wide, high) = (display.pixels_wide(), display.pixels_high());
+        let display = self.current_display();
+        let (wide, high) = pixel_size(display);
         if u64::from(x) >= wide || u64::from(y) >= high {
             return Err(InputError::PointerOutOfRange { x, y });
         }
         let bounds = display.bounds();
         let (width, height) = (bounds.size.width, bounds.size.height);
         self.position = CGPoint::new(
-            to_points(x, width, u64_to_f64(wide)),
-            to_points(y, height, u64_to_f64(high)),
+            bounds.origin.x + to_points(x, width, u64_to_f64(wide)),
+            bounds.origin.y + to_points(y, height, u64_to_f64(high)),
         );
         let (kind, button) = match self.held.last() {
             Some(Button::Left) => (CGEventType::LeftMouseDragged, CGMouseButton::Left),
@@ -165,7 +175,51 @@ impl MacInput {
     }
 }
 
+fn pixel_size(display: CGDisplay) -> (u64, u64) {
+    display
+        .display_mode()
+        .map_or((display.pixels_wide(), display.pixels_high()), |mode| {
+            (mode.pixel_width(), mode.pixel_height())
+        })
+}
+
+fn whole(points: f64) -> i32 {
+    #[allow(clippy::cast_possible_truncation)]
+    {
+        points.round() as i32
+    }
+}
+
+fn ordered_displays() -> Vec<u32> {
+    let mut ids = CGDisplay::active_displays().unwrap_or_default();
+    let main = CGDisplay::main().id;
+    ids.sort_by(|a, b| {
+        let key = |id: &u32| {
+            let bounds = CGDisplay::new(*id).bounds();
+            (
+                *id != main,
+                whole(bounds.origin.x),
+                whole(bounds.origin.y),
+                *id,
+            )
+        };
+        key(a).cmp(&key(b))
+    });
+    if ids.is_empty() {
+        ids.push(main);
+    }
+    ids
+}
+
 impl InputSink for MacInput {
+    fn select_monitor(&mut self, index: u8) {
+        self.selected = if usize::from(index) < ordered_displays().len() {
+            index
+        } else {
+            0
+        };
+    }
+
     fn send(&mut self, event: InputEvent) -> Result<(), InputError> {
         match event {
             InputEvent::PointerMove { x, y } => self.move_pointer(x, y),

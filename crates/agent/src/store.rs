@@ -8,15 +8,20 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use wirehaus_crypto::base32;
+use wirehaus_crypto::keys::PublicKey;
+use wirehaus_crypto::ticket::Stored;
 use wirehaus_vault::{Vault, VaultError};
 
 use crate::i18n::tr;
+use crate::linkbox::{from_hex, to_hex};
 use crate::state::{SecretStorage, Secrets, State, StateError};
 
 pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
 pub type VaultSource = Arc<dyn Fn() -> Result<Box<dyn Vault>, VaultError> + Send + Sync>;
 
 const STATE_FILE: &str = "state";
+const RESUME_FILE: &str = "resume";
+const RESUME_TEMP: &str = "resume.tmp";
 const STATE_TEMP: &str = "state.tmp";
 const LOCK_FILE: &str = "state.lock";
 const LOG_FILE: &str = "access.log";
@@ -250,6 +255,37 @@ impl Store {
         (self.clock)()
     }
 
+    #[must_use]
+    pub fn load_resume(&self) -> Vec<Stored> {
+        let Ok(text) = fs::read_to_string(self.dir.join(RESUME_FILE)) else {
+            return Vec::new();
+        };
+        text.lines().filter_map(parse_resume_line).collect()
+    }
+
+    pub fn save_resume(&self, items: &[Stored]) -> Result<(), StoreError> {
+        let text = items.iter().fold(String::new(), |mut text, item| {
+            text.push_str(&item.device.to_text());
+            text.push(' ');
+            text.push_str(&item.until.to_string());
+            text.push(' ');
+            text.push_str(&to_hex(&item.digest));
+            text.push('\n');
+            text
+        });
+        let temp = self.dir.join(RESUME_TEMP);
+        let mut file = private_options()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temp)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp, self.dir.join(RESUME_FILE))?;
+        Ok(())
+    }
+
     pub fn read<R>(&self, f: impl FnOnce(&State, u64) -> R) -> Result<R, StoreError> {
         let mut cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
         self.refresh(&mut cached)?;
@@ -394,6 +430,18 @@ fn clean(text: &str, max: usize) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .take(max)
         .collect()
+}
+
+fn parse_resume_line(line: &str) -> Option<Stored> {
+    let mut fields = line.split(' ');
+    let device = PublicKey::from_text(fields.next()?).ok()?;
+    let until = fields.next()?.parse().ok()?;
+    let digest = from_hex(fields.next()?)?.try_into().ok()?;
+    fields.next().is_none().then_some(Stored {
+        device,
+        digest,
+        until,
+    })
 }
 
 fn write_text(dir: &Path, text: &str) -> Result<(), StoreError> {

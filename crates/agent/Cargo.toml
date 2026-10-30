@@ -45,7 +45,7 @@ wirehaus-vault = { path = "../vault" }
 openh264 = "0.9"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-x11rb.workspace = true
+x11rb = { workspace = true, features = ["randr"] }
 
 [lints]
 workspace = true

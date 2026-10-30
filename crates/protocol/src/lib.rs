@@ -15,7 +15,7 @@ pub use audio::{AudioFailure, AudioMessage, MAX_AUDIO_PACKET};
 pub use channel::Channel;
 pub use clipboard::{ClipboardFailure, ClipboardMessage, MAX_CLIPBOARD_TEXT};
 pub use control::{AuthFailure, CODE_LEN, ControlMessage, EndReason, TICKET_LEN};
-pub use desktop::{Codec, DesktopMessage};
+pub use desktop::{Codec, DesktopMessage, MAX_MONITORS, MonitorInfo};
 pub use error::ProtocolError;
 pub use files::{
     Entry, EntryKind, FailureReason, FilesMessage, MAX_CHUNK, MAX_ENTRIES, MAX_NAME_LEN,

@@ -6,10 +6,12 @@ pub enum ViewerMessage {
     Input(InputEvent),
     FrameAck { sequence: u32 },
     Capabilities { video: bool },
+    SelectMonitor { index: u8 },
 }
 
 const FRAME_ACK: u8 = 4;
 const CAPABILITIES: u8 = 5;
+const SELECT_MONITOR: u8 = 6;
 
 impl ViewerMessage {
     #[must_use]
@@ -22,6 +24,7 @@ impl ViewerMessage {
                 out
             }
             ViewerMessage::Capabilities { video } => vec![CAPABILITIES, u8::from(*video)],
+            ViewerMessage::SelectMonitor { index } => vec![SELECT_MONITOR, *index],
         }
     }
 
@@ -48,6 +51,14 @@ impl ViewerMessage {
                     actual: body.len(),
                 }),
             },
+            Some((&SELECT_MONITOR, body)) => match body {
+                [index] => Ok(ViewerMessage::SelectMonitor { index: *index }),
+                _ => Err(ProtocolError::BadInputLength {
+                    tag: SELECT_MONITOR,
+                    expected: 1,
+                    actual: body.len(),
+                }),
+            },
             _ => InputEvent::decode(bytes).map(ViewerMessage::Input),
         }
     }
@@ -69,6 +80,7 @@ mod tests {
             ViewerMessage::FrameAck {
                 sequence: 0xFFFF_FFFE,
             },
+            ViewerMessage::SelectMonitor { index: 2 },
         ] {
             assert_eq!(ViewerMessage::decode(&message.encode()).unwrap(), message);
         }

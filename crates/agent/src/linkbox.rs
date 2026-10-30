@@ -5,11 +5,11 @@ use crate::http::ip_key;
 use wirehaus_crypto::base32;
 use wirehaus_crypto::link::{ID_BYTES, new_id, verification_code};
 
-pub const TTL_SECS: u64 = 180;
-pub const MAX_PENDING: usize = 4;
-pub const MIN_GAP_SECS: u64 = 2;
-pub const MAX_PENDING_PER_IP: usize = 2;
-pub const IP_GAP_SECS: u64 = 10;
+pub const TTL_SECS: u64 = 600;
+pub const MAX_PENDING: usize = 16;
+pub const MIN_GAP_SECS: u64 = 1;
+pub const MAX_PENDING_PER_IP: usize = 8;
+pub const IP_GAP_SECS: u64 = 2;
 const MANUAL_LEN: usize = 8;
 const KEY_BYTES: usize = 32;
 
@@ -31,7 +31,6 @@ pub struct Started {
 pub enum Poll {
     Pending,
     Ready(Vec<u8>),
-    Gone,
 }
 
 #[derive(Debug)]
@@ -180,10 +179,35 @@ impl Links {
         }
     }
 
+    pub fn approve_key(&mut self, public: &[u8; KEY_BYTES], sealed: Vec<u8>, now: u64) -> bool {
+        self.prune(now);
+        let mut id = [0_u8; ID_BYTES];
+        id.copy_from_slice(&public[..ID_BYTES]);
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.id == id) {
+            if entry.public != *public {
+                return false;
+            }
+            entry.sealed = Some(sealed);
+            entry.created = now;
+            return true;
+        }
+        if self.entries.len() >= MAX_PENDING {
+            self.entries.remove(0);
+        }
+        self.entries.push(Entry {
+            id,
+            public: *public,
+            created: now,
+            origin: IpAddr::from([0, 0, 0, 0]),
+            sealed: Some(sealed),
+        });
+        true
+    }
+
     pub fn poll(&mut self, id: &[u8; ID_BYTES], now: u64) -> Poll {
         self.prune(now);
         match self.entries.iter().find(|e| e.id == *id) {
-            None => Poll::Gone,
+            None => Poll::Pending,
             Some(entry) => match &entry.sealed {
                 None => Poll::Pending,
                 Some(sealed) => Poll::Ready(sealed.clone()),
@@ -240,7 +264,7 @@ mod tests {
             links.poll(&started.id, 2 + TTL_SECS),
             Poll::Ready(vec![1, 2, 3])
         );
-        assert_eq!(links.poll(&started.id, 2 + TTL_SECS + 1), Poll::Gone);
+        assert_eq!(links.poll(&started.id, 2 + TTL_SECS + 1), Poll::Pending);
     }
 
     #[test]
@@ -248,16 +272,16 @@ mod tests {
         let mut links = Links::default();
         let started = links.start(&key(3), 0, ip(1)).unwrap();
         assert_eq!(links.poll(&started.id, TTL_SECS), Poll::Pending);
-        assert_eq!(links.poll(&started.id, TTL_SECS + 1), Poll::Gone);
+        assert_eq!(links.poll(&started.id, TTL_SECS + 1), Poll::Pending);
         assert!(links.find(&to_hex(&started.id), TTL_SECS + 1).is_none());
-        assert_eq!(links.poll(&[0; ID_BYTES], 5), Poll::Gone);
+        assert_eq!(links.poll(&[0; ID_BYTES], 5), Poll::Pending);
     }
 
     #[test]
     fn pending_links_are_capped_and_spaced() {
         let mut links = Links::default();
         assert_eq!(links.start(&key(1), 0, ip(1)).map(|_| ()), Ok(()));
-        assert_eq!(links.start(&key(2), 1, ip(2)), Err(StartError::TooSoon));
+        assert_eq!(links.start(&key(2), 0, ip(2)), Err(StartError::TooSoon));
         for n in 1..MAX_PENDING {
             let now = u64::try_from(n).unwrap() * (MIN_GAP_SECS + 1);
             let seed = u8::try_from(n).unwrap();
@@ -271,17 +295,17 @@ mod tests {
     fn one_address_cannot_fill_the_mailbox() {
         let mut links = Links::default();
         assert!(links.start(&key(1), 0, ip(1)).is_ok());
-        assert_eq!(
-            links.start(&key(2), MIN_GAP_SECS + 1, ip(1)),
-            Err(StartError::TooSoon)
-        );
-        assert!(links.start(&key(3), MIN_GAP_SECS + 1, ip(2)).is_ok());
-        assert!(links.start(&key(4), IP_GAP_SECS + 1, ip(1)).is_ok());
-        assert_eq!(
-            links.start(&key(5), 2 * IP_GAP_SECS + 2, ip(1)),
-            Err(StartError::Busy)
-        );
-        assert!(links.start(&key(6), 2 * IP_GAP_SECS + 2, ip(3)).is_ok());
+        assert_eq!(links.start(&key(2), 1, ip(1)), Err(StartError::TooSoon));
+        assert!(links.start(&key(3), 1, ip(2)).is_ok());
+        let mut now = 1;
+        for n in 1..MAX_PENDING_PER_IP {
+            now += IP_GAP_SECS + 1;
+            let seed = u8::try_from(n).unwrap();
+            assert!(links.start(&key(20 + seed), now, ip(1)).is_ok());
+        }
+        now += IP_GAP_SECS + 1;
+        assert_eq!(links.start(&key(5), now, ip(1)), Err(StartError::Busy));
+        assert!(links.start(&key(6), now, ip(3)).is_ok());
     }
 
     #[test]
@@ -295,5 +319,30 @@ mod tests {
         assert_eq!(from_hex(&to_hex(&[0, 255, 16])), Some(vec![0, 255, 16]));
         assert_eq!(from_hex("abc"), None);
         assert_eq!(from_hex("zz"), None);
+    }
+
+    #[test]
+    fn a_key_can_be_approved_without_registering_first_and_only_that_key_reads_it() {
+        let mut links = Links::default();
+        let public = [7_u8; KEY_BYTES];
+        let mut id = [0_u8; ID_BYTES];
+        id.copy_from_slice(&public[..ID_BYTES]);
+        assert_eq!(links.poll(&id, 0), Poll::Pending);
+        assert!(links.approve_key(&public, vec![4, 5], 1));
+        assert_eq!(links.poll(&id, 2), Poll::Ready(vec![4, 5]));
+        let mut impostor = public;
+        impostor[31] = 8;
+        assert!(!links.approve_key(&impostor, vec![9], 3));
+        assert_eq!(links.poll(&id, 4), Poll::Ready(vec![4, 5]));
+        assert_eq!(links.poll(&id, 1 + TTL_SECS + 1), Poll::Pending);
+    }
+
+    #[test]
+    fn approvals_never_pile_up_beyond_the_cap() {
+        let mut links = Links::default();
+        for n in 0..(u8::try_from(MAX_PENDING).unwrap() + 5) {
+            assert!(links.approve_key(&[n; KEY_BYTES], vec![n], 10));
+        }
+        assert_eq!(links.entries.len(), MAX_PENDING);
     }
 }

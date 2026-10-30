@@ -17,7 +17,7 @@ use crate::link::{Incoming, Link, is_timeout};
 use crate::state::AuthError;
 use crate::store::Store;
 
-pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 pub const CODE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_CODE_ATTEMPTS: u32 = 3;
 pub const INBOUND_LIMIT: usize = wirehaus_protocol::MAX_VIEWER_MESSAGE;
@@ -43,11 +43,12 @@ pub fn negotiate(
     let Some(first) = read_binary(&mut socket, Instant::now() + HANDSHAKE_TIMEOUT)? else {
         return Ok(Outcome::Refused);
     };
-    let (locked, agent, psk) = store.read(|state, now| {
+    let (locked, agent, psk, trusted) = store.read(|state, now| {
         (
             state.is_locked(),
             state.agent_key().clone(),
             state.pairing_psk(now),
+            state.pairing_trusted(now),
         )
     })?;
     if locked {
@@ -69,7 +70,7 @@ pub fn negotiate(
     };
     match accepted.mode() {
         Mode::Reconnect => reconnect(socket, store, tickets, accepted),
-        Mode::Pairing => pair(socket, store, accepted),
+        Mode::Pairing => pair(socket, store, accepted, trusted),
     }
 }
 
@@ -104,6 +105,7 @@ fn reconnect(
         Some(tickets),
         device,
         name,
+        false,
     )
 }
 
@@ -111,6 +113,7 @@ fn pair(
     mut socket: WebSocket<TcpStream>,
     store: &Store,
     accepted: Accepted,
+    trusted: bool,
 ) -> Result<Outcome, ServerError> {
     let Replied::AwaitingFinal { message, pending } = accepted.reply()? else {
         close(&mut socket);
@@ -134,7 +137,14 @@ fn pair(
         }
     };
     let name = device_name.unwrap_or_default();
-    authenticate(Link::new(socket, session), store, None, device, name)
+    authenticate(
+        Link::new(socket, session),
+        store,
+        None,
+        device,
+        name,
+        trusted,
+    )
 }
 
 fn authenticate(
@@ -143,8 +153,13 @@ fn authenticate(
     tickets: Option<&Mutex<Tickets>>,
     device: PublicKey,
     name: String,
+    trusted: bool,
 ) -> Result<Outcome, ServerError> {
     let pairing = tickets.is_none();
+    if pairing && trusted {
+        store.log("pairing_trusted", &name);
+        return succeed(link, store, device, name, true, false);
+    }
     if !pairing && let Err(denied) = store.read(|state, now| state.check_device(&device, now))? {
         return Ok(refuse(&mut link, store, &name, denied_failure(denied)));
     }

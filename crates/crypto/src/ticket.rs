@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use blake2::Blake2s256;
+use blake2::digest::Digest;
 use subtle::ConstantTimeEq;
 
 use crate::error::CryptoError;
@@ -8,16 +10,26 @@ use crate::keys::PublicKey;
 use crate::random;
 
 pub const TICKET_BYTES: usize = 32;
-pub const GRACE_SECONDS: u64 = 300;
+pub const DIGEST_BYTES: usize = 32;
+pub const REMEMBER_SECONDS: u64 = 30 * 24 * 3600;
+pub const OVERLAP_SECONDS: u64 = 600;
 pub const MAX_PER_DEVICE: usize = 4;
 const MAX_ENTRIES: usize = 64;
 
 #[derive(Clone)]
 struct Entry {
     device: PublicKey,
-    secret: [u8; TICKET_BYTES],
+    digest: [u8; DIGEST_BYTES],
     valid_until: Option<u64>,
+    used: bool,
     superseded: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stored {
+    pub device: PublicKey,
+    pub digest: [u8; DIGEST_BYTES],
+    pub until: u64,
 }
 
 #[derive(Default)]
@@ -30,6 +42,19 @@ impl std::fmt::Debug for Tickets {
         f.debug_struct("Tickets")
             .field("entries", &self.entries.len())
             .finish_non_exhaustive()
+    }
+}
+
+fn digest_of(secret: &[u8; TICKET_BYTES]) -> [u8; DIGEST_BYTES] {
+    let mut hasher = Blake2s256::new();
+    hasher.update(b"wirehaus resume ticket");
+    hasher.update(secret);
+    hasher.finalize().into()
+}
+
+impl Entry {
+    fn matches(&self, device: &PublicKey, secret: &[u8; TICKET_BYTES]) -> bool {
+        self.device == *device && bool::from(self.digest.ct_eq(&digest_of(secret)))
     }
 }
 
@@ -52,8 +77,13 @@ impl Tickets {
             .count()
             >= MAX_PER_DEVICE
         {
-            if let Some(oldest) = self.entries.iter().position(|entry| entry.device == device) {
-                self.entries.remove(oldest);
+            let victim = self
+                .entries
+                .iter()
+                .position(|entry| entry.device == device && entry.used)
+                .or_else(|| self.entries.iter().position(|entry| entry.device == device));
+            if let Some(index) = victim {
+                self.entries.remove(index);
             }
         }
         if self.entries.len() >= MAX_ENTRIES {
@@ -63,8 +93,9 @@ impl Tickets {
         random::fill(&mut secret)?;
         self.entries.push(Entry {
             device,
-            secret,
+            digest: digest_of(&secret),
             valid_until: None,
+            used: false,
             superseded: Arc::new(AtomicBool::new(false)),
         });
         Ok(secret)
@@ -78,7 +109,7 @@ impl Tickets {
     ) -> Option<Arc<AtomicBool>> {
         self.entries
             .iter()
-            .find(|entry| entry.device == *device && bool::from(entry.secret.ct_eq(secret)))
+            .find(|entry| entry.matches(device, secret))
             .map(|entry| entry.superseded.clone())
     }
 
@@ -86,15 +117,14 @@ impl Tickets {
         if let Some(entry) = self
             .entries
             .iter_mut()
-            .find(|entry| entry.device == *device && bool::from(entry.secret.ct_eq(secret)))
+            .find(|entry| entry.matches(device, secret) && !entry.used)
         {
-            entry.valid_until = Some(now.saturating_add(GRACE_SECONDS));
+            entry.valid_until = Some(now.saturating_add(REMEMBER_SECONDS));
         }
     }
 
     pub fn revoke(&mut self, device: &PublicKey, secret: &[u8; TICKET_BYTES]) {
-        self.entries
-            .retain(|entry| !(entry.device == *device && bool::from(entry.secret.ct_eq(secret))));
+        self.entries.retain(|entry| !entry.matches(device, secret));
     }
 
     pub fn revoke_device(&mut self, device: &PublicKey) {
@@ -103,19 +133,58 @@ impl Tickets {
 
     pub fn verify(&mut self, device: &PublicKey, presented: &[u8; TICKET_BYTES], now: u64) -> bool {
         self.prune(now);
-        let found = self
+        let Some(entry) = self
             .entries
-            .iter()
-            .position(|entry| entry.device == *device && bool::from(entry.secret.ct_eq(presented)));
-        match found {
-            Some(index) => {
-                let entry = self.entries.remove(index);
-                if entry.valid_until.is_none() {
-                    entry.superseded.store(true, Ordering::SeqCst);
-                }
-                true
+            .iter_mut()
+            .find(|entry| entry.matches(device, presented))
+        else {
+            return false;
+        };
+        if !entry.used {
+            entry.used = true;
+            if entry.valid_until.is_none() {
+                entry.superseded.store(true, Ordering::SeqCst);
             }
-            None => false,
+            let overlap = now.saturating_add(OVERLAP_SECONDS);
+            entry.valid_until = Some(
+                entry
+                    .valid_until
+                    .map_or(overlap, |until| until.min(overlap)),
+            );
+        }
+        true
+    }
+
+    #[must_use]
+    pub fn export(&self, now: u64) -> Vec<Stored> {
+        self.entries
+            .iter()
+            .filter(|entry| !entry.used)
+            .map(|entry| Stored {
+                device: entry.device,
+                digest: entry.digest,
+                until: entry
+                    .valid_until
+                    .unwrap_or_else(|| now.saturating_add(REMEMBER_SECONDS)),
+            })
+            .collect()
+    }
+
+    pub fn import(&mut self, stored: &[Stored], now: u64) {
+        for item in stored {
+            if item.until <= now || self.entries.len() >= MAX_ENTRIES {
+                continue;
+            }
+            if self.entries.iter().any(|entry| entry.digest == item.digest) {
+                continue;
+            }
+            self.entries.push(Entry {
+                device: item.device,
+                digest: item.digest,
+                valid_until: Some(item.until),
+                used: false,
+                superseded: Arc::new(AtomicBool::new(false)),
+            });
         }
     }
 
@@ -166,7 +235,8 @@ mod tests {
         assert!(!flag.load(Ordering::SeqCst));
         assert!(tickets.verify(&key, &ticket, 100));
         assert!(flag.load(Ordering::SeqCst));
-        assert!(!tickets.verify(&key, &ticket, 100));
+        assert!(tickets.verify(&key, &ticket, 100 + OVERLAP_SECONDS));
+        assert!(!tickets.verify(&key, &ticket, 100 + OVERLAP_SECONDS + 1));
     }
 
     #[test]
@@ -181,13 +251,14 @@ mod tests {
     }
 
     #[test]
-    fn a_suspended_ticket_verifies_once_within_the_grace_period() {
+    fn a_used_ticket_still_works_for_a_short_overlap_so_a_lost_reply_does_not_log_anyone_out() {
         let mut tickets = Tickets::new();
         let key = device();
         let ticket = tickets.issue(key, 100).unwrap();
         tickets.suspend(&key, &ticket, 1000);
-        assert!(tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS));
-        assert!(!tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS));
+        assert!(tickets.verify(&key, &ticket, 2000));
+        assert!(tickets.verify(&key, &ticket, 2000 + OVERLAP_SECONDS));
+        assert!(!tickets.verify(&key, &ticket, 2000 + OVERLAP_SECONDS + 1));
     }
 
     #[test]
@@ -196,7 +267,7 @@ mod tests {
         let key = device();
         let ticket = tickets.issue(key, 100).unwrap();
         tickets.suspend(&key, &ticket, 1000);
-        assert!(!tickets.verify(&key, &ticket, 1000 + GRACE_SECONDS + 1));
+        assert!(!tickets.verify(&key, &ticket, 1000 + REMEMBER_SECONDS + 1));
         assert!(tickets.is_empty());
     }
 
@@ -272,5 +343,46 @@ mod tests {
         assert!(!tickets.verify(&keys[0], &issued[0], 1));
         let last = keys.len() - 1;
         assert!(tickets.verify(&keys[last], &issued[last], 1));
+    }
+
+    #[test]
+    fn exported_tickets_survive_a_restart_without_keeping_the_secret() {
+        let mut tickets = Tickets::new();
+        let key = device();
+        let ticket = tickets.issue(key, 100).unwrap();
+        let exported = tickets.export(200);
+        assert_eq!(exported.len(), 1);
+        assert!(!exported[0].digest.windows(4).any(|w| w == &ticket[..4]));
+        let mut restarted = Tickets::new();
+        restarted.import(&exported, 300);
+        assert!(restarted.verify(&key, &ticket, 400));
+        let mut late = Tickets::new();
+        late.import(&exported, 200 + REMEMBER_SECONDS + 1);
+        assert!(late.is_empty());
+    }
+
+    #[test]
+    fn a_used_ticket_is_not_exported_and_replacing_it_prunes_used_ones_first() {
+        let mut tickets = Tickets::new();
+        let key = device();
+        let first = tickets.issue(key, 0).unwrap();
+        tickets.suspend(&key, &first, 0);
+        assert!(tickets.verify(&key, &first, 1));
+        assert_eq!(tickets.export(2).len(), 0);
+        let live: Vec<_> = (0..MAX_PER_DEVICE)
+            .map(|_| tickets.issue(key, 3).unwrap())
+            .collect();
+        assert!(!tickets.verify(&key, &first, 4));
+        assert!(tickets.verify(&key, &live[0], 4));
+    }
+
+    #[test]
+    fn suspending_a_ticket_that_was_already_taken_over_does_not_extend_its_life() {
+        let mut tickets = Tickets::new();
+        let key = device();
+        let ticket = tickets.issue(key, 0).unwrap();
+        assert!(tickets.verify(&key, &ticket, 10));
+        tickets.suspend(&key, &ticket, 20);
+        assert!(!tickets.verify(&key, &ticket, 10 + OVERLAP_SECONDS + 1));
     }
 }
