@@ -545,8 +545,18 @@ window.addEventListener('pageshow', (event) => {
   }
 });
 window.addEventListener('online', () => viewer.retryNow());
+const linkRemember = element<HTMLInputElement>('linkpc-remember');
+element('linkpc-remember-label').textContent = messages.codeRemember;
 codeRemember.checked = remembersDevice();
-codeRemember.addEventListener('change', () => setRemembersDevice(codeRemember.checked));
+linkRemember.checked = codeRemember.checked;
+codeRemember.addEventListener('change', () => {
+  setRemembersDevice(codeRemember.checked);
+  linkRemember.checked = codeRemember.checked;
+});
+linkRemember.addEventListener('change', () => {
+  setRemembersDevice(linkRemember.checked);
+  codeRemember.checked = linkRemember.checked;
+});
 const linkUi = initLinkUi({
   messages,
   base: () => (typeof target === 'string' ? undefined : agentBase(target.socketUrl)),

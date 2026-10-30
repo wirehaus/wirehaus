@@ -1,5 +1,7 @@
 import { ALTGR_WINDOW_MS, AltGrFilter, type KeyChange } from './altgr.js';
 import { AUDIO_CHANNEL, type AudioMessage, decodeAudio } from './audioprotocol.js';
+import { agentBase } from './linkaddr.js';
+import { probeLinkPatiently } from './linkflow.js';
 import { LINK_CHANNEL, type LinkReply, decodeLink } from './linkprotocol.js';
 import { CLIPBOARD_CHANNEL, type ClipboardMessage, decodeClipboard } from './clipboardprotocol.js';
 import { FILES_CHANNEL, type FilesMessage, decodeFiles } from './filesprotocol.js';
@@ -26,6 +28,7 @@ import {
   encodeFrame,
   encodeFrameAck,
   encodeInput,
+  encodeMonitorsAware,
   encodeSelectMonitor,
   encodeTotp,
   type MonitorInfo,
@@ -64,6 +67,7 @@ const BUTTONS: Record<number, MouseButton> = { 0: 'left', 1: 'middle', 2: 'right
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 const HANDSHAKE_WATCHDOG_MS = 20_000;
 const HANDSHAKE_RETRIES = 4;
+const AGENT_REFUSALS = 5;
 const RESUME_RETRIES = 3;
 const WAKE_RETRY_WINDOW_MS = 120_000;
 const FRESH_TUNNEL_MS = 20 * 60_000;
@@ -100,6 +104,7 @@ export class Viewer {
   private resumeSent = false;
   private resumeRetries = 0;
   private handshakeRetries = 0;
+  private agentRefusals = 0;
   private videoRetries: number[] = [];
   private retrying = false;
   private retries = 0;
@@ -371,6 +376,18 @@ export class Viewer {
     this.fail(socket);
   }
 
+  private async announceMonitors(socket: WebSocket): Promise<void> {
+    const target = this.target;
+    const base = typeof target === 'string' ? undefined : agentBase(target.socketUrl);
+    if (base === undefined) {
+      return;
+    }
+    const level = await probeLinkPatiently(base, 2);
+    if (level === 2 && this.socket === socket && this.phase === 'streaming') {
+      this.send(DESKTOP_CHANNEL, encodeMonitorsAware());
+    }
+  }
+
   private async announceCapabilities(): Promise<void> {
     this.send(DESKTOP_CHANNEL, encodeCapabilities(this.desktopEnabled && (await videoSupported())));
   }
@@ -415,6 +432,16 @@ export class Viewer {
       this.stopRetrying();
       this.report({ kind: 'ended', reason: endedBy });
       return;
+    }
+    if (this.opened && phase !== 'streaming' && this.retrying && this.ticketValue !== null) {
+      this.agentRefusals += 1;
+      if (this.agentRefusals >= AGENT_REFUSALS) {
+        this.agentRefusals = 0;
+        this.setTicket(null);
+        this.stopRetrying();
+        this.report({ kind: 'refused', reason: 'unknown', retryAfter: 0 });
+        return;
+      }
     }
     if (this.ticketValue !== null && (phase === 'streaming' || this.retrying) && this.scheduleRetry()) {
       return;
@@ -550,12 +577,14 @@ export class Viewer {
       case 'authOk':
         this.resumeRetries = 0;
         this.handshakeRetries = 0;
+        this.agentRefusals = 0;
         this.stopRetrying();
         this.phase = 'streaming';
         this.rememberConnected();
         this.report({ kind: 'connecting' });
         void this.pinAgent();
         void this.announceCapabilities();
+        void this.announceMonitors(socket);
         return;
       case 'authFailed':
         if (message.reason === 'wrongCode') {

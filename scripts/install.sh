@@ -369,5 +369,6 @@ if [ -n "$public_host" ]; then
   run_agent onboard $onboard_mode $wait_flag
 else
   echo "Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code."
+  run_agent totp
   run_agent pairing
 fi

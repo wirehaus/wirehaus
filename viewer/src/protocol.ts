@@ -209,6 +209,10 @@ export function encodeCapabilities(video: boolean): Uint8Array {
   return Uint8Array.of(5, video ? 1 : 0);
 }
 
+export function encodeMonitorsAware(): Uint8Array {
+  return Uint8Array.of(7);
+}
+
 export function encodeSelectMonitor(index: number): Uint8Array {
   return Uint8Array.of(6, index);
 }

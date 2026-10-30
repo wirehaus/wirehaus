@@ -267,5 +267,6 @@ if ($PublicHost) {
     Invoke-Agent $onboard
 } else {
     Write-Host 'Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code.'
+    Invoke-Agent @('totp')
     Invoke-Agent @('pairing')
 }
