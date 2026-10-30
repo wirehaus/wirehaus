@@ -4,6 +4,14 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ## [Sin publicar]
 
+### Seguridad
+
+- El gestor de archivos rechaza siempre, aunque estén dentro de una carpeta compartida, el directorio de estado del agente, el de instalación y las rutas de arranque y credenciales (`~/.ssh`, `~/.gnupg`, los ficheros de inicio de la shell, `autostart`, `systemd/user`, `LaunchAgents` y la carpeta Inicio de Windows). No aparecen en los listados y tampoco se puede entrar por enlaces simbólicos.
+- Mover con reemplazo ya no sobrescribe ficheros ocultos ni ejecutables.
+- Antes de instalar una actualización se vuelve a comprobar el contenido extraído.
+- Las conexiones sin autenticar se limitan por dirección real del cliente (4 a la vez) y el buzón de vinculación admite 2 altas pendientes por dirección.
+- El instalador de Windows solo quita la marca de descarga web a los ficheros cuando el paquete llega verificado por el instalador de arranque.
+
 ### Corregido
 
 - La actualización automática reintenta enseguida (30 s, 1, 2, 4... hasta 30 min) si la comprobación falla por falta de red al arrancar, no se queda dormida cuando el equipo se suspende y no vuelve a bajar un paquete que el agente ya rechazó.

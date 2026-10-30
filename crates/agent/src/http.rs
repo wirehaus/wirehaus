@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv6Addr};
+
 pub const MAX_HEAD_LEN: usize = 8192;
 const MAX_HEADERS: usize = 32;
 
@@ -8,6 +10,7 @@ pub struct RequestHead {
     pub host: Option<String>,
     pub origin: Option<String>,
     pub wants_websocket: bool,
+    pub client_ip: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +47,34 @@ pub fn parse_head(bytes: &[u8]) -> Result<Option<RequestHead>, HeadError> {
         host,
         origin,
         wants_websocket,
+        client_ip: find(request.headers, "cf-connecting-ip"),
     }))
+}
+
+#[must_use]
+pub fn real_client_ip(peer: IpAddr, header: Option<&str>) -> IpAddr {
+    if peer.is_loopback()
+        && let Some(claimed) = header.and_then(|text| text.trim().parse::<IpAddr>().ok())
+    {
+        return claimed;
+    }
+    peer
+}
+
+#[must_use]
+pub fn ip_key(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                IpAddr::V4(v4)
+            } else {
+                let mut octets = v6.octets();
+                octets[8..].fill(0);
+                IpAddr::V6(Ipv6Addr::from(octets))
+            }
+        }
+        v4 @ IpAddr::V4(_) => v4,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -239,6 +269,30 @@ mod tests {
         assert_eq!(parsed.host.as_deref(), Some("127.0.0.1:7878"));
         assert_eq!(parsed.origin.as_deref(), Some("http://127.0.0.1:7878"));
         assert!(parsed.wants_websocket);
+    }
+
+    #[test]
+    fn the_real_client_address_is_taken_from_the_header_only_behind_loopback() {
+        let local: IpAddr = "127.0.0.1".parse().unwrap();
+        let remote: IpAddr = "203.0.113.9".parse().unwrap();
+        let claimed: IpAddr = "198.51.100.7".parse().unwrap();
+        assert_eq!(real_client_ip(local, Some("198.51.100.7")), claimed);
+        assert_eq!(real_client_ip(local, Some(" 198.51.100.7 ")), claimed);
+        assert_eq!(real_client_ip(local, Some("not an ip")), local);
+        assert_eq!(real_client_ip(local, None), local);
+        assert_eq!(real_client_ip(remote, Some("198.51.100.7")), remote);
+        let parsed = parse_head(&head("CF-Connecting-IP: 198.51.100.7\r\n"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.client_ip.as_deref(), Some("198.51.100.7"));
+    }
+
+    #[test]
+    fn addresses_are_grouped_by_the_network_an_attacker_controls() {
+        let key = |text: &str| ip_key(text.parse().unwrap());
+        assert_eq!(key("::ffff:192.0.2.1"), key("192.0.2.1"));
+        assert_eq!(key("2001:db8:1:2:aaaa::1"), key("2001:db8:1:2:bbbb::2"));
+        assert_ne!(key("2001:db8:1:2::1"), key("2001:db8:1:3::1"));
     }
 
     #[test]

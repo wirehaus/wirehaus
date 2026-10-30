@@ -198,7 +198,9 @@ if ($Uninstall) {
     exit 0
 }
 
-Get-ChildItem -Recurse -File $source | Unblock-File
+if ($env:WIREHAUS_VERIFIED -eq '1') {
+    Get-ChildItem -Recurse -File $source | Unblock-File
+}
 Test-Package
 Say '[1/4] Instalando el agente...' '[1/4] Installing the agent...'
 

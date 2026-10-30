@@ -32,9 +32,16 @@ enum Transfer {
     },
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Files {
     transfers: HashMap<u32, Transfer>,
+    protected: Vec<PathBuf>,
+}
+
+impl Default for Files {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 type Reply = (u32, FilesMessage);
@@ -42,7 +49,15 @@ type Reply = (u32, FilesMessage);
 impl Files {
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self::with_protected(protected_paths())
+    }
+
+    #[must_use]
+    pub fn with_protected(protected: Vec<PathBuf>) -> Self {
+        Self {
+            transfers: HashMap::new(),
+            protected,
+        }
     }
 
     #[must_use]
@@ -52,26 +67,41 @@ impl Files {
 
     pub fn handle(&mut self, stream: u32, message: FilesMessage, roots: &[PathBuf]) -> Vec<Reply> {
         let roots = canonical_roots(roots);
+        let protected = canonical_protected(&self.protected);
+        let protected = protected.as_slice();
         if roots.is_empty() && !matches!(message, FilesMessage::ListRoots | FilesMessage::Cancel) {
             self.abort_all();
             return vec![failed(stream, FailureReason::NotAllowed)];
         }
         let outcome = match message {
             FilesMessage::ListRoots => Ok(vec![(stream, FilesMessage::Roots(root_names(&roots)))]),
-            FilesMessage::List { root, path } => list(&roots, root, &path, stream, &self.parts()),
-            FilesMessage::Mkdir { root, path } => mkdir(&roots, root, &path, stream),
+            FilesMessage::List { root, path } => {
+                list(&roots, root, &path, stream, &self.parts(), protected)
+            }
+            FilesMessage::Mkdir { root, path } => mkdir(&roots, root, &path, stream, protected),
             FilesMessage::Remove { root, path } => {
-                remove(&roots, root, &path, stream, &self.parts())
+                remove(&roots, root, &path, stream, &self.parts(), protected)
             }
             FilesMessage::Rename {
                 root,
                 from,
                 to,
                 replace,
-            } => rename(&roots, root, &from, &to, replace, stream, &self.parts()),
-            FilesMessage::Download { root, path } => self.download(&roots, root, &path, stream),
+            } => rename(
+                &roots,
+                root,
+                &from,
+                &to,
+                replace,
+                stream,
+                &self.parts(),
+                protected,
+            ),
+            FilesMessage::Download { root, path } => {
+                self.download(&roots, root, &path, stream, protected)
+            }
             FilesMessage::Upload { root, path, size } => {
-                self.upload(&roots, root, &path, size, stream)
+                self.upload(&roots, root, &path, size, stream, protected)
             }
             FilesMessage::Data(data) => self.receive(stream, &data),
             FilesMessage::Ack { bytes } => self.acknowledge(stream, bytes),
@@ -146,9 +176,10 @@ impl Files {
         root: u8,
         path: &str,
         stream: u32,
+        protected: &[PathBuf],
     ) -> Result<Vec<Reply>, FailureReason> {
         self.admit(stream)?;
-        let real = existing(root_at(roots, root)?, path)?;
+        let real = existing(root_at(roots, root)?, path, protected)?;
         if self.parts().contains(&real) {
             return Err(FailureReason::InvalidPath);
         }
@@ -186,12 +217,13 @@ impl Files {
         path: &str,
         size: u64,
         stream: u32,
+        protected: &[PathBuf],
     ) -> Result<Vec<Reply>, FailureReason> {
         self.admit(stream)?;
         if size > MAX_UPLOAD_BYTES {
             return Err(FailureReason::TooLarge);
         }
-        let (parent, name) = creatable(root_at(roots, root)?, path)?;
+        let (parent, name) = creatable(root_at(roots, root)?, path, protected)?;
         let target = parent.join(&name);
         let part = parent.join(part_name(stream));
         let file = create_private_file(&part).map_err(|error| map_io(&error))?;
@@ -356,8 +388,9 @@ fn list(
     path: &str,
     stream: u32,
     busy: &[PathBuf],
+    protected: &[PathBuf],
 ) -> Result<Vec<Reply>, FailureReason> {
-    let directory = existing(root_at(roots, root)?, path)?;
+    let directory = existing(root_at(roots, root)?, path, protected)?;
     if !directory.is_dir() {
         return Err(FailureReason::NotADirectory);
     }
@@ -366,6 +399,9 @@ fn list(
     for item in fs::read_dir(&directory).map_err(|error| map_io(&error))? {
         let Ok(item) = item else { continue };
         if busy.contains(&item.path()) {
+            continue;
+        }
+        if is_protected(&visible_path(&directory, &item), protected) {
             continue;
         }
         let Some(entry) = describe(&item) else {
@@ -432,8 +468,9 @@ fn mkdir(
     root: u8,
     path: &str,
     stream: u32,
+    protected: &[PathBuf],
 ) -> Result<Vec<Reply>, FailureReason> {
-    let (parent, name) = creatable(root_at(roots, root)?, path)?;
+    let (parent, name) = creatable(root_at(roots, root)?, path, protected)?;
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = DirBuilder::new();
     #[cfg(unix)]
@@ -450,11 +487,12 @@ fn remove(
     path: &str,
     stream: u32,
     busy: &[PathBuf],
+    protected: &[PathBuf],
 ) -> Result<Vec<Reply>, FailureReason> {
     let base = root_at(roots, root)?;
-    let (parent, name) = creatable_parent(base, path)?;
+    let (parent, name) = creatable_parent(base, path, protected)?;
     let target = parent.join(name);
-    if busy.contains(&target) {
+    if busy.contains(&target) || shields(&target, protected) {
         return Err(FailureReason::InvalidPath);
     }
     let metadata = fs::symlink_metadata(&target).map_err(|error| map_io(&error))?;
@@ -472,6 +510,7 @@ fn remove(
     Ok(vec![(stream, FilesMessage::Done)])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn rename(
     roots: &[PathBuf],
     root: u8,
@@ -480,13 +519,14 @@ fn rename(
     replace: bool,
     stream: u32,
     busy: &[PathBuf],
+    protected: &[PathBuf],
 ) -> Result<Vec<Reply>, FailureReason> {
     let base = root_at(roots, root)?;
-    let (from_parent, from_name) = creatable_parent(base, from)?;
-    let (to_parent, to_name) = creatable_parent(base, to)?;
+    let (from_parent, from_name) = creatable_parent(base, from, protected)?;
+    let (to_parent, to_name) = creatable_parent(base, to, protected)?;
     let source = from_parent.join(from_name);
     let target = to_parent.join(to_name);
-    if busy.contains(&source) || busy.contains(&target) {
+    if busy.contains(&source) || busy.contains(&target) || shields(&source, protected) {
         return Err(FailureReason::InvalidPath);
     }
     let source_meta = fs::symlink_metadata(&source).map_err(|error| map_io(&error))?;
@@ -500,6 +540,9 @@ fn rename(
         Ok(target_meta) => {
             if !replace || !source_meta.is_file() || !target_meta.is_file() {
                 return Err(FailureReason::AlreadyExists);
+            }
+            if !replaceable(&target, &target_meta) {
+                return Err(FailureReason::NotAllowed);
             }
             fs::set_permissions(&source, target_meta.permissions())
                 .map_err(|error| map_io(&error))?;
@@ -593,34 +636,205 @@ fn valid_component(part: &str) -> Result<&str, FailureReason> {
     Ok(part)
 }
 
-fn existing(root: &Path, relative: &str) -> Result<PathBuf, FailureReason> {
+fn existing(root: &Path, relative: &str, protected: &[PathBuf]) -> Result<PathBuf, FailureReason> {
     let joined = components(relative)?
         .into_iter()
         .fold(root.to_path_buf(), |path, part| path.join(part));
     let real = joined.canonicalize().map_err(|error| map_io(&error))?;
-    if real.starts_with(root) {
+    if real.starts_with(root) && !is_protected(&real, protected) {
         Ok(real)
     } else {
         Err(FailureReason::InvalidPath)
     }
 }
 
-fn creatable_parent(root: &Path, relative: &str) -> Result<(PathBuf, String), FailureReason> {
+fn creatable_parent(
+    root: &Path,
+    relative: &str,
+    protected: &[PathBuf],
+) -> Result<(PathBuf, String), FailureReason> {
     let mut parts = components(relative)?;
     let name = parts.pop().ok_or(FailureReason::InvalidPath)?.to_owned();
-    let parent = existing(root, &parts.join("/"))?;
+    let parent = existing(root, &parts.join("/"), protected)?;
     if !parent.is_dir() {
         return Err(FailureReason::NotADirectory);
+    }
+    if is_protected(&parent.join(&name), protected) {
+        return Err(FailureReason::InvalidPath);
     }
     Ok((parent, name))
 }
 
-fn creatable(root: &Path, relative: &str) -> Result<(PathBuf, String), FailureReason> {
-    let (parent, name) = creatable_parent(root, relative)?;
+fn creatable(
+    root: &Path,
+    relative: &str,
+    protected: &[PathBuf],
+) -> Result<(PathBuf, String), FailureReason> {
+    let (parent, name) = creatable_parent(root, relative, protected)?;
     if fs::symlink_metadata(parent.join(&name)).is_ok() {
         return Err(FailureReason::AlreadyExists);
     }
     Ok((parent, name))
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
+fn absolute_env(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
+fn protected_paths() -> Vec<PathBuf> {
+    let mut paths = vec![crate::store::default_dir()];
+    if let Ok(exe) = std::env::current_exe() {
+        let exe = exe.canonicalize().unwrap_or(exe);
+        if let Some(dir) = exe.parent() {
+            paths.push(dir.to_path_buf());
+        }
+    }
+    if let Some(home) = home_dir() {
+        let mut homes = vec![home.clone()];
+        if let Ok(real) = home.canonicalize()
+            && real != home
+        {
+            homes.push(real);
+        }
+        for home in homes {
+            for relative in HOME_PROTECTED {
+                paths.push(
+                    relative
+                        .iter()
+                        .fold(home.clone(), |path, part| path.join(part)),
+                );
+            }
+        }
+    }
+    if let Some(appdata) = absolute_env("APPDATA") {
+        paths.push(appdata.join(WINDOWS_STARTUP.iter().collect::<PathBuf>()));
+    }
+    if let Some(programdata) = absolute_env("PROGRAMDATA") {
+        paths.push(programdata.join(WINDOWS_STARTUP.iter().collect::<PathBuf>()));
+    }
+    paths
+}
+
+const HOME_PROTECTED: &[&[&str]] = &[
+    &[".ssh"],
+    &[".gnupg"],
+    &[".bashrc"],
+    &[".bash_profile"],
+    &[".profile"],
+    &[".zshrc"],
+    &[".zprofile"],
+    &[".zshenv"],
+    &[".config", "fish"],
+    &[".config", "autostart"],
+    &[".config", "systemd", "user"],
+    &["Library", "LaunchAgents"],
+    &[
+        "AppData",
+        "Roaming",
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs",
+        "Startup",
+    ],
+    &[".bash_login"],
+    &[".bash_logout"],
+    &[".zlogin"],
+    &[".zlogout"],
+    &[".xprofile"],
+    &[".xinitrc"],
+    &[".gitconfig"],
+    &[".bashrc.d"],
+    &[".profile.d"],
+    &[".local", "bin"],
+    &[".local", "share", "systemd", "user"],
+    &[".config", "environment.d"],
+    &[".config", "plasma-workspace"],
+];
+
+const WINDOWS_STARTUP: [&str; 5] = ["Microsoft", "Windows", "Start Menu", "Programs", "Startup"];
+
+fn canonical_protected(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::with_capacity(paths.len() * 2);
+    for path in paths {
+        if let Ok(real) = path.canonicalize()
+            && real != *path
+        {
+            out.push(real);
+        }
+        out.push(path.clone());
+    }
+    out
+}
+
+fn fold_case(path: &Path) -> PathBuf {
+    if cfg!(any(windows, target_os = "macos")) {
+        PathBuf::from(path.to_string_lossy().to_lowercase())
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn is_protected(path: &Path, protected: &[PathBuf]) -> bool {
+    let path = fold_case(path);
+    protected
+        .iter()
+        .any(|guarded| path.starts_with(fold_case(guarded)))
+}
+
+fn shields(path: &Path, protected: &[PathBuf]) -> bool {
+    let path = fold_case(path);
+    protected.iter().any(|guarded| {
+        let guarded = fold_case(guarded);
+        path.starts_with(&guarded) || guarded.starts_with(&path)
+    })
+}
+
+fn visible_path(directory: &Path, item: &fs::DirEntry) -> PathBuf {
+    let path = directory.join(item.file_name());
+    if item.file_type().is_ok_and(|kind| kind.is_symlink()) {
+        path.canonicalize().unwrap_or(path)
+    } else {
+        path
+    }
+}
+
+#[cfg(not(unix))]
+const WINDOWS_EXECUTABLE: &[&str] = &[
+    "exe", "bat", "cmd", "ps1", "com", "scr", "msi", "lnk", "dll", "vbs", "js", "jar", "reg",
+    "hta", "url", "psm1", "wsf",
+];
+
+fn replaceable(target: &Path, metadata: &fs::Metadata) -> bool {
+    let hidden = target
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with('.'));
+    if hidden {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o111 == 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        target
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_none_or(|extension| {
+                !WINDOWS_EXECUTABLE.contains(&extension.to_ascii_lowercase().as_str())
+            })
+    }
 }
 
 fn map_io(error: &std::io::Error) -> FailureReason {
@@ -1095,8 +1309,9 @@ mod tests {
             fs::write(sandbox.root().join("run.sh.tmp"), b"#!/bin/sh\necho\n").unwrap();
             assert_eq!(
                 done(&mut files, "run.sh.tmp", "run.sh", true),
-                FilesMessage::Done
+                FilesMessage::Failed(FailureReason::NotAllowed)
             );
+            assert_eq!(fs::read(&script).unwrap(), b"#!/bin/sh\n");
             let mode = fs::metadata(&script).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o755);
         }
@@ -1104,6 +1319,165 @@ mod tests {
             done(&mut files, "missing", "x", false),
             FilesMessage::Failed(FailureReason::NotFound)
         );
+    }
+
+    fn guarded(sandbox: &Sandbox) -> (Files, Vec<PathBuf>) {
+        let root = sandbox.root();
+        fs::create_dir_all(root.join(".ssh")).unwrap();
+        fs::write(root.join(".ssh/id"), b"key").unwrap();
+        fs::write(root.join(".bashrc"), b"rc").unwrap();
+        fs::create_dir_all(root.join("state")).unwrap();
+        fs::write(root.join("state/agent.db"), b"db").unwrap();
+        fs::create_dir_all(root.join("app/viewer")).unwrap();
+        fs::write(root.join("app/agent"), b"bin").unwrap();
+        let files = Files::with_protected(vec![
+            root.join(".ssh"),
+            root.join(".bashrc"),
+            root.join("state"),
+            root.join("app"),
+        ]);
+        (files, sandbox.roots())
+    }
+
+    #[test]
+    fn protected_paths_are_hidden_and_refused_everywhere() {
+        let sandbox = Sandbox::new("protected");
+        let (mut files, roots) = guarded(&sandbox);
+        let refused = FilesMessage::Failed(FailureReason::InvalidPath);
+        let listed = names(only(files.handle(
+            1,
+            list_message(0, String::new()),
+            &roots,
+        )));
+        for hidden in [".ssh", ".bashrc", "state", "app"] {
+            assert!(!listed.contains(&hidden.to_owned()), "{listed:?}");
+        }
+        assert!(listed.contains(&"a.txt".to_owned()));
+        for path in [".ssh", "state", "app/viewer"] {
+            assert_eq!(
+                only(files.handle(2, list_message(0, path.into()), &roots)),
+                refused,
+                "{path}"
+            );
+        }
+        for path in [".ssh/id", ".bashrc", "state/agent.db", "app/agent"] {
+            assert_eq!(
+                only(files.handle(3, download_message(0, path.into()), &roots)),
+                refused,
+                "{path}"
+            );
+            assert_eq!(
+                only(files.handle(4, remove_message(0, path.into()), &roots)),
+                refused,
+                "{path}"
+            );
+            assert_eq!(
+                only(files.handle(
+                    5,
+                    FilesMessage::Upload {
+                        root: 0,
+                        path: path.into(),
+                        size: 1
+                    },
+                    &roots
+                )),
+                refused,
+                "{path}"
+            );
+            assert_eq!(
+                only(files.handle(6, rename_message("a.txt", path, true), &roots)),
+                refused,
+                "{path}"
+            );
+            assert_eq!(
+                only(files.handle(7, rename_message(path, "moved", false), &roots)),
+                refused,
+                "{path}"
+            );
+        }
+        assert_eq!(
+            only(files.handle(8, mkdir_message(0, ".ssh/new".into()), &roots)),
+            refused
+        );
+        assert_eq!(
+            only(files.handle(8, mkdir_message(0, "state/new".into()), &roots)),
+            refused
+        );
+        assert!(sandbox.root().join(".ssh/id").exists());
+        assert!(sandbox.root().join("a.txt").exists());
+    }
+
+    #[test]
+    fn protected_paths_are_refused_through_links_and_ancestors() {
+        let sandbox = Sandbox::new("protected-links");
+        let (mut files, roots) = guarded(&sandbox);
+        let refused = FilesMessage::Failed(FailureReason::InvalidPath);
+        symlink(sandbox.root().join(".ssh"), sandbox.root().join("shortcut")).unwrap();
+        assert_eq!(
+            only(files.handle(1, download_message(0, "shortcut/id".into()), &roots)),
+            refused
+        );
+        assert_eq!(
+            only(files.handle(2, list_message(0, "shortcut".into()), &roots)),
+            refused
+        );
+        let listed = names(only(files.handle(
+            3,
+            list_message(0, String::new()),
+            &roots,
+        )));
+        assert!(!listed.contains(&"shortcut".to_owned()), "{listed:?}");
+        fs::create_dir_all(sandbox.root().join("up/in")).unwrap();
+        let mut nested = Files::with_protected(vec![sandbox.root().join("up/in")]);
+        assert_eq!(
+            only(nested.handle(4, rename_message("up", "up2", false), &roots)),
+            refused
+        );
+        assert_eq!(
+            only(nested.handle(5, remove_message(0, "up".into()), &roots)),
+            refused
+        );
+    }
+
+    #[test]
+    fn replacing_never_overwrites_hidden_files_or_executables() {
+        let sandbox = Sandbox::new("replace-guard");
+        let mut files = Files::with_protected(Vec::new());
+        let roots = sandbox.roots();
+        let root = sandbox.root();
+        fs::write(root.join(".hidden"), b"old").unwrap();
+        fs::write(root.join("new"), b"new").unwrap();
+        assert_eq!(
+            only(files.handle(1, rename_message("new", ".hidden", true), &roots)),
+            FilesMessage::Failed(FailureReason::NotAllowed)
+        );
+        assert_eq!(fs::read(root.join(".hidden")).unwrap(), b"old");
+        assert_eq!(
+            only(files.handle(2, rename_message("new", ".fresh", false), &roots)),
+            FilesMessage::Done
+        );
+        fs::write(root.join("new"), b"new").unwrap();
+        fs::write(root.join("plain.txt"), b"old").unwrap();
+        assert_eq!(
+            only(files.handle(3, rename_message("new", "plain.txt", true), &roots)),
+            FilesMessage::Done
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(root.join("tool"), b"old").unwrap();
+            fs::set_permissions(root.join("tool"), fs::Permissions::from_mode(0o700)).unwrap();
+            fs::write(root.join("new"), b"new").unwrap();
+            assert_eq!(
+                only(files.handle(4, rename_message("new", "tool", true), &roots)),
+                FilesMessage::Failed(FailureReason::NotAllowed)
+            );
+            assert_eq!(fs::read(root.join("tool")).unwrap(), b"old");
+            assert_eq!(
+                only(files.handle(5, rename_message("new", "fresh", false), &roots)),
+                FilesMessage::Done
+            );
+        }
     }
 
     #[test]

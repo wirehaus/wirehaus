@@ -359,6 +359,20 @@ fn tar_program() -> PathBuf {
     }
 }
 
+fn verify_extracted(root: &Path) -> Result<Vec<(String, String)>, UpdateError> {
+    let sums = fs::read_to_string(root.join("SHA256SUMS"))
+        .map_err(|_| UpdateError::Package("SHA256SUMS missing"))?;
+    let listed = parse_sums(&sums)?;
+    for (hash, file) in &listed {
+        if sha256_file(&root.join(file)).map_err(|_| UpdateError::Package("listed file missing"))?
+            != *hash
+        {
+            return Err(UpdateError::Checksum);
+        }
+    }
+    Ok(listed)
+}
+
 pub fn stage(
     fetch: &dyn Fetch,
     base: &str,
@@ -392,16 +406,7 @@ pub fn stage(
         (Some(entry), true) if entry.path().is_dir() => entry.path(),
         _ => return Err(UpdateError::Package("unexpected layout")),
     };
-    let sums = fs::read_to_string(root.join("SHA256SUMS"))
-        .map_err(|_| UpdateError::Package("SHA256SUMS missing"))?;
-    for (hash, file) in parse_sums(&sums)? {
-        if sha256_file(&root.join(&file))
-            .map_err(|_| UpdateError::Package("listed file missing"))?
-            != hash
-        {
-            return Err(UpdateError::Checksum);
-        }
-    }
+    verify_extracted(&root)?;
     let binary = if cfg!(windows) {
         "wirehaus-agent.exe"
     } else {
@@ -524,9 +529,16 @@ pub fn swap(layout: &Layout, root: &Path, from: Version, to: Version) -> Result<
 }
 
 fn swap_files(layout: &Layout, root: &Path) -> Result<(), UpdateError> {
+    let listed = verify_extracted(root)?;
     let new_exe = layout.side("new");
     remove_any(&new_exe);
     fs::copy(root.join(&layout.exe_name), &new_exe)?;
+    if let Some((hash, _)) = listed.iter().find(|(_, file)| *file == layout.exe_name)
+        && sha256_file(&new_exe)? != *hash
+    {
+        remove_any(&new_exe);
+        return Err(UpdateError::Checksum);
+    }
     #[cfg(unix)]
     fs::set_permissions(
         &new_exe,
@@ -811,6 +823,7 @@ fn wait_until_idle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
     const RELEASE_KEY: &str =
         "AAAAC3NzaC1lZDI1NTE5AAAAIALukD9B1SrSO6OWUzWaWSoqVJ6IVl87Dwkm6oGhpYFu";
@@ -966,7 +979,38 @@ mod tests {
         fs::create_dir_all(root.join("viewer")).unwrap();
         fs::write(root.join("agent"), b"new").unwrap();
         fs::write(root.join("viewer/index.html"), b"new viewer").unwrap();
+        let mut sums = String::new();
+        for file in ["agent", "viewer/index.html"] {
+            let hash = sha256_file(&root.join(file)).unwrap();
+            writeln!(sums, "{hash}  {file}").unwrap();
+        }
+        fs::write(root.join("SHA256SUMS"), sums).unwrap();
         root
+    }
+
+    #[test]
+    fn swap_rechecks_the_extracted_files_and_installs_nothing_if_they_changed() {
+        let (base, layout) = layout("tampered");
+        let root = package(&base);
+        fs::write(root.join("agent"), b"evil").unwrap();
+        assert!(matches!(
+            swap(&layout, &root, Version(0, 3, 0), Version(0, 3, 1)),
+            Err(UpdateError::Checksum)
+        ));
+        assert_eq!(fs::read(layout.install_dir.join("agent")).unwrap(), b"old");
+        assert!(!layout.install_dir.join("agent.prev").exists());
+        assert_eq!(read_pending(&layout.state_dir), None);
+        let root = package(&base);
+        fs::write(root.join("viewer/index.html"), b"evil viewer").unwrap();
+        assert!(matches!(
+            swap(&layout, &root, Version(0, 3, 0), Version(0, 3, 1)),
+            Err(UpdateError::Checksum)
+        ));
+        assert_eq!(
+            fs::read(layout.install_dir.join("viewer/index.html")).unwrap(),
+            b"old viewer"
+        );
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]

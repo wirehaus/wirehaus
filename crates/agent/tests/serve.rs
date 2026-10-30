@@ -213,6 +213,18 @@ impl Running {
     }
 
     fn connect_raw(&self, origin: Option<&str>) -> Result<Socket, tungstenite::Error> {
+        self.connect_raw_as(origin, None)
+    }
+
+    fn connect_as(&self, ip: &str) -> Result<Socket, tungstenite::Error> {
+        self.connect_raw_as(Some(&self.origin()), Some(ip))
+    }
+
+    fn connect_raw_as(
+        &self,
+        origin: Option<&str>,
+        ip: Option<&str>,
+    ) -> Result<Socket, tungstenite::Error> {
         let mut request = format!("ws://127.0.0.1:{}/ws", self.port)
             .into_client_request()
             .unwrap();
@@ -220,6 +232,11 @@ impl Running {
             request
                 .headers_mut()
                 .insert("Origin", origin.parse().unwrap());
+        }
+        if let Some(ip) = ip {
+            request
+                .headers_mut()
+                .insert("CF-Connecting-IP", ip.parse().unwrap());
         }
         let stream = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
         stream
@@ -970,13 +987,35 @@ fn only_a_few_unauthenticated_connections_are_accepted_at_once() {
     let xvfb = Xvfb::start_unique();
     let server = Running::start(&xvfb.display);
     let mut idle = Vec::new();
-    for _ in 0..16 {
-        idle.push(server.connect());
+    for i in 0..16 {
+        idle.push(
+            server
+                .connect_as(&format!("198.51.100.{}", i / 4 + 1))
+                .unwrap(),
+        );
         sleep(Duration::from_millis(20));
     }
-    let error = server.connect_raw(Some(&server.origin())).unwrap_err();
+    let error = server.connect_as("198.51.100.200").unwrap_err();
     assert!(error.to_string().contains("503"), "{error}");
     drop(idle);
+}
+
+#[test]
+fn one_address_cannot_hold_more_than_a_few_unauthenticated_connections() {
+    let xvfb = Xvfb::start_unique();
+    let server = Running::start(&xvfb.display);
+    let mut idle = Vec::new();
+    for _ in 0..4 {
+        idle.push(server.connect_as("198.51.100.1").unwrap());
+        sleep(Duration::from_millis(20));
+    }
+    let error = server.connect_as("198.51.100.1").unwrap_err();
+    assert!(error.to_string().contains("503"), "{error}");
+    let other = server.connect_as("198.51.100.2");
+    assert!(other.is_ok());
+    drop(idle);
+    sleep(Duration::from_millis(300));
+    assert!(server.connect_as("198.51.100.1").is_ok());
 }
 
 #[test]

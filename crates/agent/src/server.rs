@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -12,7 +13,8 @@ use crate::auth::{self, INBOUND_LIMIT, Outcome};
 use crate::clipboard::Hub;
 use crate::error::ServerError;
 use crate::http::{
-    Exposure, HeadError, MAX_HEAD_LEN, RequestHead, json_response, parse_head, response,
+    Exposure, HeadError, MAX_HEAD_LEN, RequestHead, ip_key, json_response, parse_head,
+    real_client_ip, response,
 };
 use crate::linkbox::{Links, Poll, StartError, from_hex, to_hex};
 use crate::pacer::Pacer;
@@ -34,6 +36,7 @@ const HEAD_POLL: Duration = Duration::from_millis(5);
 const MAX_INBOUND_MESSAGE: usize = INBOUND_LIMIT + 64;
 const MAX_CONNECTIONS: usize = 64;
 const MAX_UNAUTHENTICATED: usize = 16;
+const MAX_UNAUTHENTICATED_PER_IP: usize = 4;
 const MAX_SESSIONS: usize = 5;
 const HEAD_END: &[u8] = b"\r\n\r\n";
 const TEXT: &str = "text/plain; charset=utf-8";
@@ -81,6 +84,7 @@ pub struct Server {
     last_used: Mutex<Instant>,
     connections: AtomicUsize,
     unauthenticated: AtomicUsize,
+    unauthenticated_by_ip: IpLimiter,
 }
 
 struct CountGuard<'a>(&'a AtomicUsize);
@@ -98,6 +102,45 @@ impl<'a> CountGuard<'a> {
 impl Drop for CountGuard<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[derive(Debug, Default)]
+struct IpLimiter {
+    counts: Mutex<HashMap<IpAddr, usize>>,
+}
+
+struct IpGuard<'a> {
+    limiter: &'a IpLimiter,
+    key: IpAddr,
+}
+
+impl IpLimiter {
+    fn enter(&self, ip: IpAddr, limit: usize) -> Option<IpGuard<'_>> {
+        let key = ip_key(ip);
+        let mut counts = self.counts.lock().unwrap_or_else(PoisonError::into_inner);
+        let count = counts.entry(key).or_insert(0);
+        if *count >= limit {
+            return None;
+        }
+        *count += 1;
+        Some(IpGuard { limiter: self, key })
+    }
+}
+
+impl Drop for IpGuard<'_> {
+    fn drop(&mut self) {
+        let mut counts = self
+            .limiter
+            .counts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = counts.get_mut(&self.key) {
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(&self.key);
+            }
+        }
     }
 }
 
@@ -144,6 +187,7 @@ impl Server {
             last_used: Mutex::new(Instant::now()),
             connections: AtomicUsize::new(0),
             unauthenticated: AtomicUsize::new(0),
+            unauthenticated_by_ip: IpLimiter::default(),
         })
     }
 
@@ -187,7 +231,7 @@ impl Server {
                         };
                         scope.spawn(move || {
                             let _guard = guard;
-                            if let Err(error) = self.serve_connection(stream, port, stop) {
+                            if let Err(error) = self.serve_connection(stream, peer, port, stop) {
                                 eprintln!("connection ended: {error}");
                             }
                         });
@@ -213,6 +257,7 @@ impl Server {
     fn serve_connection(
         &self,
         mut stream: TcpStream,
+        peer: SocketAddr,
         port: u16,
         stop: &AtomicBool,
     ) -> Result<(), ServerError> {
@@ -235,10 +280,11 @@ impl Server {
                 b"forbidden host",
             );
         }
+        let client = real_client_ip(peer.ip(), head.client_ip.as_deref());
         if head.wants_websocket {
-            self.upgrade(stream, &head, port, stop)
+            self.upgrade(stream, &head, client, port, stop)
         } else {
-            self.serve_file(&mut stream, &head, head_len)
+            self.serve_file(&mut stream, &head, head_len, client)
         }
     }
 
@@ -247,6 +293,7 @@ impl Server {
         stream: &mut TcpStream,
         head: &RequestHead,
         head_len: usize,
+        client: IpAddr,
     ) -> Result<(), ServerError> {
         if head.method != "GET" {
             return reply(
@@ -258,7 +305,7 @@ impl Server {
             );
         }
         if head.path == "/link/ping" || head.path.starts_with("/link/") {
-            return self.serve_link(stream, head, head_len);
+            return self.serve_link(stream, head, head_len, client);
         }
         match self.viewer.get(&head.path) {
             Some(file) => {
@@ -274,6 +321,7 @@ impl Server {
         stream: &mut TcpStream,
         head: &RequestHead,
         head_len: usize,
+        client: IpAddr,
     ) -> Result<(), ServerError> {
         consume(stream, head_len)?;
         let port = self.local_addr()?.port();
@@ -284,11 +332,11 @@ impl Server {
                 &json_response("403 Forbidden", r#"{"error":"origin"}"#, None),
             );
         }
-        let (status, body) = self.link_answer(&head.path);
+        let (status, body) = self.link_answer(&head.path, client);
         finish(stream, &json_response(status, &body, origin))
     }
 
-    fn link_answer(&self, path: &str) -> (&'static str, String) {
+    fn link_answer(&self, path: &str, client: IpAddr) -> (&'static str, String) {
         let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let param = |name: &str| {
             query
@@ -303,7 +351,7 @@ impl Server {
                 let Some(public) = param("k").and_then(from_hex) else {
                     return ("400 Bad Request", r#"{"error":"key"}"#.to_owned());
                 };
-                match links.start(&public, now) {
+                match links.start(&public, now, client) {
                     Ok(started) => {
                         self.store
                             .log("link_started", "a computer asked to be linked");
@@ -403,6 +451,7 @@ impl Server {
         &self,
         mut stream: TcpStream,
         head: &RequestHead,
+        client: IpAddr,
         port: u16,
         stop: &AtomicBool,
     ) -> Result<(), ServerError> {
@@ -425,6 +474,18 @@ impl Server {
                 b"too many connections in progress",
             );
         };
+        let Some(pending_from_ip) = self
+            .unauthenticated_by_ip
+            .enter(client, MAX_UNAUTHENTICATED_PER_IP)
+        else {
+            return reply(
+                &mut stream,
+                0,
+                false,
+                "503 Service Unavailable",
+                b"too many connections in progress",
+            );
+        };
         stream.set_read_timeout(Some(HEAD_DEADLINE))?;
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_INBOUND_MESSAGE))
@@ -433,6 +494,7 @@ impl Server {
             .map_err(|e| ServerError::WebSocket(e.to_string()))?;
         let outcome = auth::negotiate(socket, &self.store, &self.tickets)?;
         drop(pending);
+        drop(pending_from_ip);
         match outcome {
             Outcome::Refused => Ok(()),
             Outcome::Authenticated(link, identity) => {
@@ -647,6 +709,45 @@ mod tests {
             assert!(failures.record());
         }
         assert!(!failures.record());
+    }
+
+    #[test]
+    fn unauthenticated_connections_are_limited_per_client_address() {
+        let limiter = IpLimiter::default();
+        let first: IpAddr = "198.51.100.1".parse().unwrap();
+        let second: IpAddr = "198.51.100.2".parse().unwrap();
+        let mut held: Vec<_> = (0..MAX_UNAUTHENTICATED_PER_IP)
+            .map(|_| limiter.enter(first, MAX_UNAUTHENTICATED_PER_IP).unwrap())
+            .collect();
+        assert!(limiter.enter(first, MAX_UNAUTHENTICATED_PER_IP).is_none());
+        let other = limiter.enter(second, MAX_UNAUTHENTICATED_PER_IP);
+        assert!(other.is_some());
+        held.pop();
+        assert!(limiter.enter(first, MAX_UNAUTHENTICATED_PER_IP).is_some());
+        drop(held);
+        drop(other);
+        assert!(limiter.counts.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_mapped_or_same_network_address_shares_the_budget() {
+        let limiter = IpLimiter::default();
+        let _held: Vec<_> = (0..2)
+            .map(|_| {
+                limiter
+                    .enter("::ffff:192.0.2.1".parse().unwrap(), 2)
+                    .unwrap()
+            })
+            .collect();
+        assert!(limiter.enter("192.0.2.1".parse().unwrap(), 2).is_none());
+        let _v6 = limiter
+            .enter("2001:db8:1:2::1".parse().unwrap(), 1)
+            .unwrap();
+        assert!(
+            limiter
+                .enter("2001:db8:1:2::9".parse().unwrap(), 1)
+                .is_none()
+        );
     }
 
     #[test]
