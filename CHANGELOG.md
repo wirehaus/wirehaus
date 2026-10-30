@@ -6,6 +6,9 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Cambiado
 
+- El visor reintenta la conexión sin rendirse mientras haya un billete de reanudación (antes paraba a los 30 segundos), vigila los apretones de manos que se quedan colgados con poca cobertura y los repite solo; el agente da 15 segundos (antes 5) para completar el apretón de manos.
+- Cerrar la sesión por inactividad ya no revoca el billete: al volver, el equipo recupera la sesión sin pedir el segundo factor.
+- El menú «Vincular otro equipo» pasa a llamarse «Conectar dispositivo» y ya no pide el segundo factor al aprobar. Los límites del código corto se relajan (16 pendientes, 8 por dirección) porque ya no hace falta para el QR.
 - El instalador ya no enciende terminal, archivos, portapapeles y audio: quedan apagados, como dicen los documentos, y el propio instalador explica cómo encenderlos. Quien quiera la instalación con todo encendido pasa `--allow-all` (`-AllowAll` en Windows, y también al instalador de arranque de `wirehaus.dev`). Los equipos ya instalados conservan lo que tengan activado.
 
 ### Seguridad
@@ -18,10 +21,19 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- El QR de «Conectar con mi móvil» podía no salir (sonda de 4 segundos sin reintento, o límites por dirección en redes compartidas como la de un instituto). Ahora se dibuja en el navegador sin depender del agente y la oferta no desaparece si una comprobación falla.
+- El billete de reanudación se quemaba al usarlo: si la respuesta se perdía por mala cobertura, el equipo caía al segundo factor. Ahora sigue valiendo diez minutos tras usarse.
 - La actualización automática reintenta enseguida (30 s, 1, 2, 4... hasta 30 min) si la comprobación falla por falta de red al arrancar, no se queda dormida cuando el equipo se suspende y no vuelve a bajar un paquete que el agente ya rechazó.
 
 ### Añadido
 
+- Sesión recordada: el billete de reanudación dura 30 días, se renueva en cada uso y se guarda en el navegador (opción «Mantener la sesión iniciada en este equipo», activa por defecto). El agente conserva solo su huella en un fichero aparte (`resume`), de modo que sobrevive a reinicios y actualizaciones.
+- Vincular un equipo desde el móvil sin servidor intermedio: el equipo nuevo genera su clave en el navegador, enseña el QR al instante (con enlace para copiar y número de comprobación) y el móvil aprueba con un toque, sin segundo factor; el equipo nuevo entra y su sesión queda iniciada. Código corto opcional. Mensajes `ApproveKey` y `ApproveId` del canal de vinculación; `/link/ping` anuncia el nivel 2 y el visor sigue funcionando con agentes anteriores.
+- Emparejamiento de confianza: `wirehaus-agent pairing --phone` genera un código de un solo uso, de 30 minutos, que entra sin segundo factor (lo usan el QR del instalador y la aprobación desde el móvil). `pairing --card` y `--days` generan una tarjeta de acceso de hasta 90 días que sí exige el segundo factor.
+- `wirehaus-agent onboard`: asistente paso a paso, bilingüe, con móvil o con tarjeta de acceso, que los instaladores de Linux, macOS y Windows lanzan al terminar (`--phone` y `--card` fijan la opción). `init --quiet` crea la identidad sin imprimir el segundo factor.
+- Selector de pantallas en el visor: cada pantalla del ordenador o todas a la vez (Linux con X11 y macOS; en Windows solo la principal). El puntero sigue a la pantalla elegida y la lista se actualiza al conectar o desconectar monitores. En macOS, el tamaño de las pantallas Retina usa los píxeles reales.
+- Paquete de macOS para Intel (`darwin-x86_64`) además del de Apple Silicon; el instalador, el actualizador y la web los distinguen.
+- Aviso para instalar la aplicación en el móvil y recarga automática del visor en segundo plano cuando hay una versión nueva.
 - El túnel se apaga tras 30 minutos sin uso (`serve --tunnel-sleep-minutes`, 0 lo desactiva) y se vuelve a crear cuando alguien abre el visor (el servicio solo lo acepta cuando va justo de túneles; mientras haya hueco el túnel se queda como siempre): el agente avisa de que está inactivo, consulta cada pocos segundos mientras duerme y, al despertar, guarda el token nuevo y reinicia el conector (`systemctl --user`, `launchctl` o la tarea de Windows). El visor pide el despertar antes de conectar, enseña «preparando acceso» y reintenta solo; si conectó hace menos de 20 minutos va directo.
 - Actualización automática del agente: comprueba cada hora (y 30 segundos después de arrancar) la lista de versiones firmada de `wirehaus.dev`, verifica la firma SSH con la clave fijada en el binario, nunca baja de versión, comprueba el hash del paquete, espera a que no haya sesión, cambia el binario y el visor de forma atómica y se reinicia por el gestor del sistema. Si la versión nueva no llega a arrancar tres veces, vuelve a la anterior y la descarta. Comandos `update status`, `check`, `apply`, `enable`, `disable` y `rollback`. Solo actúa en instalaciones con el diseño del instalador (`serve --no-auto-update` la desactiva).
 - El conector del túnel de Cloudflare vuelve a usar su actualizador propio (los instaladores ya no pasan `--no-autoupdate`).

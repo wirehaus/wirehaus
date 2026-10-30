@@ -7,14 +7,23 @@ sum() {
 }
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 system=$(uname -s | tr '[:upper:]' '[:lower:]')
-machine=$(uname -m)
+target=${WIREHAUS_TARGET:-}
+if [ -n "$target" ]; then
+  machine=${target%%-*}
+  built=target/$target/release
+  build_target="--target $target"
+else
+  machine=$(uname -m)
+  built=target/release
+  build_target=
+fi
 name="wirehaus-$version-$system-$machine"
 out="target/dist/$name"
 
-cargo build --release --locked -p wirehaus-agent
+cargo build --release --locked $build_target -p wirehaus-agent
 rm -rf "$out" "$out.tar.gz"
 mkdir -p "$out"
-cp target/release/wirehaus-agent scripts/install.sh LICENSE "$out/"
+cp "$built/wirehaus-agent" scripts/install.sh LICENSE "$out/"
 cp -r viewer/dist "$out/viewer"
 if [ "$system" = darwin ] && [ -z "${WIREHAUS_SKIP_SIGN:-}" ]; then
   scripts/macos-sign.sh "$out/wirehaus-agent"

@@ -3,6 +3,8 @@ param(
     [switch]$Uninstall,
     [switch]$Purge,
     [switch]$AllowAll,
+    [switch]$Phone,
+    [switch]$Card,
     [string]$Name = '',
     [string]$Zone = 'wirehaus.dev',
     [string]$ViewerOrigin = 'https://app.wirehaus.dev',
@@ -199,11 +201,20 @@ if ($Uninstall) {
     exit 0
 }
 
+function Step([string]$tag, [string]$es, [string]$en) {
+    Write-Host ''
+    Write-Host $tag -ForegroundColor Cyan -NoNewline
+    Write-Host '  ' -NoNewline
+    Say $es $en
+}
+
 if ($env:WIREHAUS_VERIFIED -eq '1') {
     Get-ChildItem -Recurse -File $source | Unblock-File
 }
 Test-Package
-Say '[1/4] Instalando el agente...' '[1/4] Installing the agent...'
+Write-Host ''
+Say 'Wirehaus - acceso remoto a tu ordenador' 'Wirehaus - remote access to your computer'
+Step '[1/4]' 'Instalando el agente...' 'Installing the agent...'
 
 if (Test-Path $agent) {
     try { Invoke-Agent @('service', 'uninstall') } catch { Write-Host 'No previous service to remove.' }
@@ -218,19 +229,17 @@ Copy-Item -Recurse -Force (Join-Path $source 'viewer') $viewer
 
 $firstRun = -not (Test-Path $stateFile)
 if ($firstRun) {
-    Say '[2/4] Segundo factor: escanea este QR con una app de autenticación (2FAS, Aegis, Google Authenticator o Contraseñas de Apple).' '[2/4] Second factor: scan this QR with an authenticator app (2FAS, Aegis, Google Authenticator or Apple Passwords).'
+    Step '[2/4]' 'Creando la identidad de este ordenador...' 'Creating the identity of this computer...'
     if ($AllowAll) {
-        Invoke-Agent @('init', '--allow-all')
+        Invoke-Agent @('init', '--quiet', '--allow-all')
     } else {
-        Invoke-Agent @('init')
-        Write-Host ''
+        Invoke-Agent @('init', '--quiet')
         Say 'Terminal, archivos, portapapeles y audio quedan apagados. Para encenderlos (cuando quieras, con los seis dígitos de la app): wirehaus-agent allow-all --code SEIS_DÍGITOS' 'Terminal, files, clipboard and audio are left off. To turn them on (whenever you like, with the six digits from the app): wirehaus-agent allow-all --code SIX_DIGITS'
     }
-    Write-Host ''
 } else {
-    Say '[2/4] Este equipo ya estaba configurado (segundo factor incluido). Para activar archivos, terminal, portapapeles y audio de golpe: wirehaus-agent allow-all --code SEIS_DÍGITOS' '[2/4] This computer was already set up (second factor included). To turn on files, terminal, clipboard and audio at once: wirehaus-agent allow-all --code SIX_DIGITS'
+    Step '[2/4]' 'Este equipo ya estaba configurado (segundo factor incluido). Para activar archivos, terminal, portapapeles y audio de golpe: wirehaus-agent allow-all --code SEIS_DÍGITOS' 'This computer was already set up (second factor included). To turn on files, terminal, clipboard and audio at once: wirehaus-agent allow-all --code SIX_DIGITS'
 }
-Say '[3/4] Arrancando el servicio y el túnel...' '[3/4] Starting the service and the tunnel...'
+Step '[3/4]' 'Arrancando el servicio y el túnel...' 'Starting the service and the tunnel...'
 
 if ($Name -and -not $PublicHost) {
     $PublicHost = "$Name.$Zone"
@@ -246,38 +255,17 @@ if ($TunnelTokenFile) {
         Confirm-Tunnel
     }
 }
-function Get-DeviceCount {
-    $log = Join-Path $dataDir 'state\access.log'
-    if (-not (Test-Path $log)) { return 0 }
-    return @(Select-String -Path $log -Pattern ' paired ' -SimpleMatch -ErrorAction SilentlyContinue).Count
-}
-
-function Wait-Pairing([int]$Before) {
-    $deadline = (Get-Date).AddSeconds(600)
-    while ((Get-Date) -lt $deadline) {
-        if ((Get-DeviceCount) -gt $Before) { return $true }
-        Start-Sleep -Seconds 3
-    }
-    return $false
-}
-
-Say '[4/4] Empareja tu móvil:' '[4/4] Pair your phone:'
-$devicesBefore = Get-DeviceCount
-Invoke-Agent @('pairing')
-Write-Host ''
+Step '[4/4]' 'Entrar a tu ordenador desde fuera' 'Getting into your computer from outside'
 if ($PublicHost) {
     if (-not $TunnelTokenFile) {
         Say 'Antes conecta el túnel (mira tu panel).' 'First connect the tunnel (see your dashboard).'
     }
-    $Address = "$ViewerOrigin/$($PublicHost.Split('.')[0])"
-    Say "Escanea el QR de arriba con tu móvil (abre $Address con el código puesto) y escribe los seis dígitos de tu app de autenticación." "Scan the QR above with your phone (it opens $Address with the code filled in) and type the six digits from your authenticator app."
-    Say 'Esperando a tu móvil... (pulsa Ctrl+C para saltar este paso y hacerlo luego con: wirehaus-agent pairing)' 'Waiting for your phone... (press Ctrl+C to skip this step and do it later with: wirehaus-agent pairing)'
-    if (Wait-Pairing $devicesBefore) {
-        Say 'Listo: tu móvil está emparejado y conectado. Ya no tienes que tocar nada más en este ordenador.' 'Done: your phone is paired and connected. You do not need to touch anything else on this computer.'
-    } else {
-        Say 'No he visto ningún móvil emparejarse en 10 minutos. Cuando quieras, ejecuta: wirehaus-agent pairing' 'I did not see a phone pair in 10 minutes. Whenever you like, run: wirehaus-agent pairing'
-    }
-    Say 'Más adelante, desde el móvil: menú > Vincular otro equipo, para dar acceso a cualquier ordenador escaneando un QR. Para ver otra vez el segundo factor: wirehaus-agent totp' 'Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR. To see the second factor again: wirehaus-agent totp'
+    $onboard = @('onboard')
+    if ($Phone) { $onboard += '--phone' }
+    if ($Card) { $onboard += '--card' }
+    if ([Console]::IsOutputRedirected -or $env:WIREHAUS_NO_WAIT) { $onboard += '--no-wait' }
+    Invoke-Agent $onboard
 } else {
     Write-Host 'Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code.'
+    Invoke-Agent @('pairing')
 }

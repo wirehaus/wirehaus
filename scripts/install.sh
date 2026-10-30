@@ -7,6 +7,7 @@ agent="$install_dir/wirehaus-agent"
 mode=install
 purge=no
 allow_all=no
+onboard_mode=
 name=
 zone=wirehaus.dev
 viewer_origin=https://app.wirehaus.dev
@@ -19,6 +20,7 @@ cf_version=2026.10.4
 cf_linux_amd64_sha256=ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42
 cf_linux_amd64_gz_sha256=be6c8a8b56fe9e516cee7c6e6dd97da09529bae182677b9d67a9b3642f219588
 cf_darwin_arm64_sha256=68b6bc4080ac1330234db2a9002d07f98b000537a1bd531a687b660d4160fa7f
+cf_darwin_amd64_sha256=f11fbef4207d715892331917dafd437f032cf4b7137ed64dea3008338c1c613d
 
 case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
   es*) lang=es ;;
@@ -27,6 +29,17 @@ esac
 
 say() {
   if [ "$lang" = es ]; then printf '%s\n' "$1"; else printf '%s\n' "$2"; fi
+}
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  c_accent=$(printf '\033[1;36m'); c_off=$(printf '\033[0m')
+else
+  c_accent=; c_off=
+fi
+
+step() {
+  printf '\n%s%s%s  ' "$c_accent" "$1" "$c_off"
+  if [ "$lang" = es ]; then printf '%s\n' "$2"; else printf '%s\n' "$3"; fi
 }
 
 fail() {
@@ -39,6 +52,8 @@ while [ $# -gt 0 ]; do
     --uninstall) mode=uninstall ;;
     --purge) purge=yes ;;
     --allow-all) allow_all=yes ;;
+    --phone) onboard_mode=--phone ;;
+    --card) onboard_mode=--card ;;
     --name) [ $# -ge 2 ] || { echo "--name needs a value" >&2; exit 2; }; name=$2; shift ;;
     --zone) [ $# -ge 2 ] || { echo "--zone needs a value" >&2; exit 2; }; zone=$2; shift ;;
     --viewer-origin) [ $# -ge 2 ] || { echo "--viewer-origin needs a value" >&2; exit 2; }; viewer_origin=$2; shift ;;
@@ -109,6 +124,9 @@ download_cloudflared() {
     Darwin-arm64)
       official=cloudflared-darwin-arm64.tgz; official_sum=$cf_darwin_arm64_sha256
       mirror=cloudflared-$cf_version-darwin-arm64.tgz; mirror_sum=$cf_darwin_arm64_sha256; kind=tgz ;;
+    Darwin-x86_64)
+      official=cloudflared-darwin-amd64.tgz; official_sum=$cf_darwin_amd64_sha256
+      mirror=cloudflared-$cf_version-darwin-amd64.tgz; mirror_sum=$cf_darwin_amd64_sha256; kind=tgz ;;
     *) fail "No hay conector de túnel para $(uname -s) $(uname -m)." "No tunnel connector is available for $(uname -s) $(uname -m)." ;;
   esac
   cf_work=$(mktemp -d)
@@ -298,7 +316,10 @@ mac_permissions() {
 
 verify_package
 
-say "[1/4] Instalando el agente..." "[1/4] Installing the agent..."
+printf '%s' "$c_accent"
+say "Wirehaus - acceso remoto a tu ordenador" "Wirehaus - remote access to your computer"
+printf '%s' "$c_off"
+step "[1/4]" "Instalando el agente..." "Installing the agent..."
 if [ -x "$agent" ]; then
   run_agent service uninstall >/dev/null 2>&1 || true
 fi
@@ -313,20 +334,18 @@ ln -sf "$agent" "$HOME/.local/bin/wirehaus-agent"
 if ! run_agent devices >/dev/null 2>&1; then
   mkdir -p "$data_dir"
   chmod 700 "$data_dir"
-  say "[2/4] Segundo factor: escanea este QR con una app de autenticación (2FAS, Aegis, Google Authenticator o Contraseñas de Apple)." "[2/4] Second factor: scan this QR with an authenticator app (2FAS, Aegis, Google Authenticator or Apple Passwords)."
+  step "[2/4]" "Creando la identidad de este ordenador..." "Creating the identity of this computer..."
   if [ "$allow_all" = yes ]; then
-    run_agent init --allow-all
+    run_agent init --quiet --allow-all
   else
-    run_agent init
-    echo
+    run_agent init --quiet
     say "Terminal, archivos, portapapeles y audio quedan apagados. Para encenderlos (cuando quieras, con los seis dígitos de la app): wirehaus-agent allow-all --code SEIS_DÍGITOS" "Terminal, files, clipboard and audio are left off. To turn them on (whenever you like, with the six digits from the app): wirehaus-agent allow-all --code SIX_DIGITS"
   fi
-  echo
 else
-  say "[2/4] Este equipo ya estaba configurado (segundo factor incluido). Para activar archivos, terminal, portapapeles y audio de golpe: wirehaus-agent allow-all --code SEIS_DÍGITOS" "[2/4] This computer was already set up (second factor included). To turn on files, terminal, clipboard and audio at once: wirehaus-agent allow-all --code SIX_DIGITS"
+  step "[2/4]" "Este equipo ya estaba configurado (segundo factor incluido). Para activar archivos, terminal, portapapeles y audio de golpe: wirehaus-agent allow-all --code SEIS_DÍGITOS" "This computer was already set up (second factor included). To turn on files, terminal, clipboard and audio at once: wirehaus-agent allow-all --code SIX_DIGITS"
 fi
 
-say "[3/4] Arrancando el servicio y el túnel..." "[3/4] Starting the service and the tunnel..."
+step "[3/4]" "Arrancando el servicio y el túnel..." "Starting the service and the tunnel..."
 if [ -n "$public_host" ]; then
   run_agent service install --viewer-dir "$install_dir/viewer" --public-host "$public_host" --viewer-origin "$viewer_origin" >/dev/null
 else
@@ -342,38 +361,13 @@ if [ -n "$tunnel_token_file" ] && [ -n "$public_host" ]; then
   check_tunnel
 fi
 
-device_count() {
-  grep -c " paired " "$data_dir/access.log" 2>/dev/null || true
-}
-
-wait_for_pairing() {
-  waited=0
-  while [ "$waited" -lt 600 ]; do
-    if [ "$(device_count)" -gt "$1" ]; then
-      return 0
-    fi
-    sleep 3
-    waited=$((waited + 3))
-  done
-  return 1
-}
-
-say "[4/4] Empareja tu móvil:" "[4/4] Pair your phone:"
-devices_before=$(device_count)
-run_agent pairing
-echo
+step "[4/4]" "Entrar a tu ordenador desde fuera" "Getting into your computer from outside"
 if [ -n "$public_host" ]; then
-  address=$viewer_origin/${public_host%%.*}
   [ -n "$tunnel_token_file" ] || say "Antes conecta el túnel (mira tu panel)." "First connect the tunnel (see your dashboard)."
-  say "Escanea el QR de arriba con tu móvil (abre $address con el código puesto) y escribe los seis dígitos de tu app de autenticación." "Scan the QR above with your phone (it opens $address with the code filled in) and type the six digits from your authenticator app."
-  if [ ! -t 1 ] || [ -n "${WIREHAUS_NO_WAIT:-}" ]; then
-    say "Cuando emparejes el móvil habrá terminado. Para otro código: wirehaus-agent pairing" "Once the phone is paired you are done. For another code: wirehaus-agent pairing"
-  elif say "Esperando a tu móvil... (pulsa Ctrl+C para saltar este paso y hacerlo luego con: wirehaus-agent pairing)" "Waiting for your phone... (press Ctrl+C to skip this step and do it later with: wirehaus-agent pairing)"; wait_for_pairing "$devices_before"; then
-    say "Listo: tu móvil está emparejado y conectado. Ya no tienes que tocar nada más en este ordenador." "Done: your phone is paired and connected. You do not need to touch anything else on this computer."
-  else
-    say "No he visto ningún móvil emparejarse en 10 minutos. Cuando quieras, ejecuta: wirehaus-agent pairing" "I did not see a phone pair in 10 minutes. Whenever you like, run: wirehaus-agent pairing"
-  fi
-  say "Más adelante, desde el móvil: menú > Vincular otro equipo, para dar acceso a cualquier ordenador escaneando un QR. Para ver otra vez el segundo factor: wirehaus-agent totp" "Later, from your phone: menu > Link another device, to give any other computer access by scanning a QR. To see the second factor again: wirehaus-agent totp"
+  wait_flag=
+  if [ ! -t 1 ] || [ -n "${WIREHAUS_NO_WAIT:-}" ]; then wait_flag=--no-wait; fi
+  run_agent onboard $onboard_mode $wait_flag
 else
   echo "Open http://127.0.0.1:7878 on this computer, or reach it through your tunnel, and enter the pairing code."
+  run_agent pairing
 fi

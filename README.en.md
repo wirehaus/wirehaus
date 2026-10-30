@@ -13,7 +13,7 @@
 You leave the home computer on with the Wirehaus agent and connect from anywhere, without installing anything on the machine you connect from and without opening ports on your router.
 
 - **End-to-end encryption.** The key is negotiated between your browser and your agent; the tunnel and whoever runs it see only opaque bytes.
-- **Two factors you cannot skip.** A one-time pairing code and a TOTP verified by your own agent, not by someone else's server.
+- **Two factors, without making it hard.** A one-time pairing code and a TOTP verified by your own agent, not by someone else's server. If you link your phone with the QR printed on your own computer, or approve another device from that phone, the new device gets in without typing anything and its session stays signed in for 30 days in that browser.
 - **Nothing open.** The agent listens only on `127.0.0.1` and goes out through a tunnel.
 - **One command to install it**, and one to remove it.
 - **Off by default, you decide what to turn on**: terminal, files, clipboard and audio are not enabled at install; you turn them on on your own computer with a second-factor code, all at once (`allow-all`) or one by one.
@@ -30,7 +30,7 @@ On Windows, in PowerShell: `& ([scriptblock]::Create((irm https://wirehaus.dev/i
 
 The installer downloads the package for your system, checks its SHA-256 sum, installs it as a service for your user, downloads `cloudflared` (version and checksum pinned in the script itself) and leaves it connected to your name. It asks for no administrator rights and opens no ports. Remove it with `--uninstall` (and `--purge` to delete the keys too).
 
-The 0.2.0 packages are for Linux x86_64 and Windows x64; the macOS (Apple Silicon) one arrives with the next release and, until then, you can [build it](#build).
+There are packages for Linux x86_64, Windows x64 and macOS (Apple Silicon and Intel). The installer guides you step by step and asks whether you will sign in with a phone (recommended: you link it with a QR) or without one (it gives you an access card to write down); you can set it with `--phone` or `--card`.
 
 If you would rather not run a downloaded script, download the package from [wirehaus.dev/download](https://wirehaus.dev/docs/#download), check its signature and run `install.sh` (or `install.ps1`) from the extracted folder. You can also [build it](#build) yourself.
 
@@ -63,7 +63,8 @@ The agent only listens on `127.0.0.1`. To reach it from outside it is published 
 ## Security
 
 - End-to-end encryption with Noise (`snow`, ChaCha20-Poly1305), with the agent key pinned at pairing. The tunnel and whoever runs it see only opaque bytes.
-- A device paired with a one-time 160-bit code, plus a TOTP second factor verified by the agent. Neither is enough on its own.
+- A device paired with a one-time 160-bit code, plus a TOTP second factor verified by the agent. Neither is enough on its own, except for two deliberate shortcuts that replace the TOTP: the QR printed by the installer on your own computer (`wirehaus-agent pairing --phone`: single use, expires after 30 minutes) and approval from an already connected phone (the new device shows its QR and a check number, and you confirm on the phone). In both the new device registers with its own key and can be revoked with `devices revoke`.
+- Remembered session: after signing in, the browser keeps a 30-day resume ticket that is renewed on every use; the agent stores only its fingerprint, which survives restarts and updates. You can untick it when signing in ("Keep me signed in on this device") and `devices revoke` cancels it.
 - Escalating lockout per device, suspension after ten failures and an access log with no secrets.
 - The key and the second factor secret can optionally live in the system secret store, outside the state file.
 - Terminal, files, clipboard and audio are off by default, also after installing. `wirehaus-agent allow-all --code 123456` turns them all on at once (files: your home folder) and enabling a single one needs a second-factor code on the computer itself; whoever connects also needs the pairing and the second factor. Whoever prefers everything on after installing passes `--allow-all` to the installer.
@@ -78,7 +79,8 @@ Nobody outside the project has audited the design or the code yet: use it knowin
 | System | Status |
 |---|---|
 | Linux (X11) | Works |
-| macOS | Works. Needs the Screen Recording and Accessibility permissions |
+| macOS (Apple Silicon and Intel) | Works. Needs the Screen Recording and Accessibility permissions. Several screens: you choose which to watch |
+| Several screens | Linux (X11) and macOS: screen button in the viewer (each screen, or all at once on Linux). Windows: primary only for now |
 | Windows 10 and 11 | Works. Must run inside the user's desktop session |
 | Linux with Wayland | Planned |
 
@@ -113,7 +115,7 @@ cargo run -p wirehaus-agent -- init
 cargo run -p wirehaus-agent -- serve --viewer-dir viewer/dist
 ```
 
-`init` creates the agent identity and shows the second factor as a QR (and as a typed secret) for any authenticator app (2FAS, Aegis, Google Authenticator, Apple Passwords...); `wirehaus-agent totp` shows it again on that same computer. To give another device access without typing the long code, choose "Connect with my phone" on the pairing page and approve it from the connected phone (menu, "Link another device"). Open `http://127.0.0.1:7878` in the browser. The first time, generate a code with `cargo run -p wirehaus-agent -- pairing` and type it in the page together with the six-digit code from your app; the browser is then paired and later visits only ask for the second factor.
+`init` creates the agent identity and shows the second factor as a QR (and as a typed secret) for any authenticator app (2FAS, Aegis, Google Authenticator, Apple Passwords...); `wirehaus-agent totp` shows it again on that same computer and `wirehaus-agent onboard` repeats the installer guide (with a phone or with an access card). To give another device access without typing the long code, choose "Connect with my phone" on the pairing page and approve it from the connected phone (menu, "Connect device"); if the QR cannot be scanned, copy the link shown below it. Open `http://127.0.0.1:7878` in the browser. The first time, generate a code with `cargo run -p wirehaus-agent -- pairing` and type it in the page together with the six-digit code from your app; the browser is then paired and later visits only ask for the second factor.
 
 The agent keeps its state in `~/.config/wirehaus` (or `--state-dir`), readable only by its owner. `devices` lists the paired devices; `devices revoke`, `devices reactivate`, `lock` and `unlock` need a second factor code with `--code`. `--display` picks another X11 display and `--listen` another port on the local machine. Messages come out in Spanish or English according to `LANG`.
 

@@ -13,7 +13,7 @@ Español | [English](README.en.md)
 Dejas el ordenador de casa encendido con el agente de Wirehaus y te conectas desde donde estés, sin instalar nada en el equipo desde el que entras y sin abrir puertos en tu router.
 
 - **Cifrado de extremo a extremo.** La clave se negocia entre tu navegador y tu agente; el túnel y quien lo opere ven solo bytes opacos.
-- **Dos factores que no se pueden saltar.** Un código de emparejamiento de un solo uso y un TOTP que verifica tu propio agente, no un servidor ajeno.
+- **Dos factores, sin ponértelo difícil.** Un código de emparejamiento de un solo uso y un TOTP que verifica tu propio agente, no un servidor ajeno. Si vinculas tu móvil con el QR que sale en tu propio ordenador, o apruebas otro equipo desde ese móvil, el equipo nuevo entra sin teclear nada y su sesión queda iniciada 30 días en ese navegador.
 - **Nada abierto.** El agente escucha solo en `127.0.0.1` y sale hacia fuera por un túnel.
 - **Un comando para instalarlo**, y otro para quitarlo.
 - **Apagado por defecto, tú decides qué enciendes**: terminal, archivos, portapapeles y audio no se activan al instalar; se encienden en tu propio ordenador con un código del segundo factor, de golpe (`allow-all`) o uno a uno.
@@ -30,7 +30,7 @@ En Windows, en PowerShell: `& ([scriptblock]::Create((irm https://wirehaus.dev/i
 
 El instalador descarga el paquete de tu sistema, comprueba su suma SHA-256, lo instala como servicio de tu usuario, descarga `cloudflared` (versión y suma fijadas en el propio script) y lo deja conectado a tu nombre. No pide administrador ni abre puertos. Quítalo con `--uninstall` (y `--purge` para borrar también las claves).
 
-Los paquetes de la versión 0.2.0 son para Linux x86_64 y Windows x64; el de macOS (Apple Silicon) llega con la siguiente publicación y, mientras tanto, se [compila](#compilar).
+Hay paquetes para Linux x86_64, Windows x64 y macOS (Apple Silicon e Intel). El instalador te guía paso a paso y te pregunta si vas a entrar con móvil (recomendado: lo vinculas con un QR) o sin móvil (te da una tarjeta de acceso para apuntar); se puede fijar con `--phone` o `--card`.
 
 Si prefieres no ejecutar un script descargado, bájate el paquete de [wirehaus.dev/download](https://wirehaus.dev/docs/#descarga), comprueba su firma y ejecuta `install.sh` (o `install.ps1`) desde la carpeta descomprimida. También puedes [compilarlo](#compilar) tú.
 
@@ -63,7 +63,8 @@ El agente solo escucha en `127.0.0.1`. Para llegar a él desde fuera se publica 
 ## Seguridad
 
 - Cifrado de extremo a extremo con Noise (`snow`, ChaCha20-Poly1305), con la clave del agente fijada en el emparejamiento. El túnel y quien lo opere ven solo bytes opacos.
-- Dispositivo emparejado con un código de un solo uso de 160 bits y segundo factor TOTP que verifica el agente. Ninguna de las dos cosas basta por sí sola.
+- Dispositivo emparejado con un código de un solo uso de 160 bits y segundo factor TOTP que verifica el agente. Ninguna de las dos cosas basta por sí sola, salvo en dos atajos deliberados que sustituyen al TOTP: el QR que imprime el propio instalador en tu ordenador (`wirehaus-agent pairing --phone`: vale una vez y caduca a los 30 minutos) y la aprobación desde un móvil ya conectado (el equipo nuevo enseña su QR y un número de comprobación, y se confirma en el móvil). En ambos el equipo nuevo se registra con su propia clave y se revoca con `devices revoke`.
+- Sesión recordada: tras iniciar sesión, el navegador conserva un billete de reanudación de 30 días que se renueva en cada uso; el agente guarda solo su huella, que sobrevive a reinicios y actualizaciones. Se desmarca al entrar («Mantener la sesión iniciada en este equipo») y `devices revoke` lo anula.
 - Bloqueo creciente por dispositivo, suspensión tras diez fallos y registro de accesos sin secretos.
 - Clave y secreto del segundo factor opcionalmente en el almacén de claves del sistema, fuera del fichero de estado.
 - Terminal, archivos, portapapeles y audio están apagados por defecto, también tras instalar. `wirehaus-agent allow-all --code 123456` los enciende de golpe (archivos: tu carpeta personal) y activar uno suelto exige un código del segundo factor en el propio ordenador; quien conecte necesita además el emparejamiento y el segundo factor. Quien prefiera instalar y dejarlo todo encendido pasa `--allow-all` al instalador.
@@ -78,7 +79,8 @@ El diseño y el código todavía no los ha auditado nadie ajeno al proyecto: ús
 | Sistema | Estado |
 |---|---|
 | Linux (X11) | Funciona |
-| macOS | Funciona. Necesita los permisos Grabación de pantalla y Accesibilidad |
+| macOS (Apple Silicon e Intel) | Funciona. Necesita los permisos Grabación de pantalla y Accesibilidad. Varias pantallas: se elige cuál ver |
+| Varias pantallas | Linux (X11) y macOS: botón de pantallas en el visor (cada pantalla o todas a la vez en Linux). Windows: solo la principal por ahora |
 | Windows 10 y 11 | Funciona. Debe ejecutarse dentro de la sesión de escritorio del usuario |
 | Linux con Wayland | Previsto |
 
@@ -113,7 +115,7 @@ cargo run -p wirehaus-agent -- init
 cargo run -p wirehaus-agent -- serve --viewer-dir viewer/dist
 ```
 
-`init` crea la identidad del agente y muestra el segundo factor como un QR (y como secreto escrito) para cualquier aplicación de autenticación (2FAS, Aegis, Google Authenticator, Contraseñas de Apple...); `wirehaus-agent totp` lo vuelve a mostrar en ese mismo ordenador. Para dar acceso a otro equipo sin teclear el código largo, pulsa «Conectar con mi móvil» en la página de emparejamiento y aprueba desde el móvil conectado (menú, «Vincular otro equipo»). Abre `http://127.0.0.1:7878` en el navegador. La primera vez genera un código con `cargo run -p wirehaus-agent -- pairing` y escríbelo en la página junto al código de seis dígitos de tu aplicación; el navegador queda emparejado y las siguientes veces solo pide el segundo factor.
+`init` crea la identidad del agente y muestra el segundo factor como un QR (y como secreto escrito) para cualquier aplicación de autenticación (2FAS, Aegis, Google Authenticator, Contraseñas de Apple...); `wirehaus-agent totp` lo vuelve a mostrar en ese mismo ordenador y `wirehaus-agent onboard` repite la guía del instalador (con móvil o con tarjeta de acceso). Para dar acceso a otro equipo sin teclear el código largo, pulsa «Conectar con mi móvil» en la página de emparejamiento y aprueba desde el móvil conectado (menú, «Conectar dispositivo»); si el QR no se puede escanear, copia el enlace que aparece debajo. Abre `http://127.0.0.1:7878` en el navegador. La primera vez genera un código con `cargo run -p wirehaus-agent -- pairing` y escríbelo en la página junto al código de seis dígitos de tu aplicación; el navegador queda emparejado y las siguientes veces solo pide el segundo factor.
 
 El agente guarda su estado en `~/.config/wirehaus` (o en `--state-dir`), solo legible por su dueño. `devices` lista los dispositivos emparejados; `devices revoke`, `devices reactivate`, `lock` y `unlock` exigen un código del segundo factor con `--code`. Con `--display` eliges otra pantalla de X11 y con `--listen` otro puerto de la máquina local. Los mensajes salen en español o en inglés según `LANG`.
 
