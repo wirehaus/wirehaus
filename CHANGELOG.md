@@ -4,6 +4,10 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ## [Sin publicar]
 
+### Cambiado
+
+- El instalador ya no enciende terminal, archivos, portapapeles y audio: quedan apagados, como dicen los documentos, y el propio instalador explica cómo encenderlos. Quien quiera la instalación con todo encendido pasa `--allow-all` (`-AllowAll` en Windows, y también al instalador de arranque de `wirehaus.dev`). Los equipos ya instalados conservan lo que tengan activado.
+
 ### Seguridad
 
 - El gestor de archivos rechaza siempre, aunque estén dentro de una carpeta compartida, el directorio de estado del agente, el de instalación y las rutas de arranque y credenciales (`~/.ssh`, `~/.gnupg`, los ficheros de inicio de la shell, `autostart`, `systemd/user`, `LaunchAgents` y la carpeta Inicio de Windows). No aparecen en los listados y tampoco se puede entrar por enlaces simbólicos.

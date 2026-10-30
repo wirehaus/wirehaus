@@ -6,6 +6,7 @@ install_dir=${WIREHAUS_INSTALL_DIR:-"$HOME/.local/share/wirehaus"}
 agent="$install_dir/wirehaus-agent"
 mode=install
 purge=no
+allow_all=no
 name=
 zone=wirehaus.dev
 viewer_origin=https://app.wirehaus.dev
@@ -37,6 +38,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --uninstall) mode=uninstall ;;
     --purge) purge=yes ;;
+    --allow-all) allow_all=yes ;;
     --name) [ $# -ge 2 ] || { echo "--name needs a value" >&2; exit 2; }; name=$2; shift ;;
     --zone) [ $# -ge 2 ] || { echo "--zone needs a value" >&2; exit 2; }; zone=$2; shift ;;
     --viewer-origin) [ $# -ge 2 ] || { echo "--viewer-origin needs a value" >&2; exit 2; }; viewer_origin=$2; shift ;;
@@ -312,7 +314,13 @@ if ! run_agent devices >/dev/null 2>&1; then
   mkdir -p "$data_dir"
   chmod 700 "$data_dir"
   say "[2/4] Segundo factor: escanea este QR con una app de autenticación (2FAS, Aegis, Google Authenticator o Contraseñas de Apple)." "[2/4] Second factor: scan this QR with an authenticator app (2FAS, Aegis, Google Authenticator or Apple Passwords)."
-  run_agent init --allow-all
+  if [ "$allow_all" = yes ]; then
+    run_agent init --allow-all
+  else
+    run_agent init
+    echo
+    say "Terminal, archivos, portapapeles y audio quedan apagados. Para encenderlos (cuando quieras, con los seis dígitos de la app): wirehaus-agent allow-all --code SEIS_DÍGITOS" "Terminal, files, clipboard and audio are left off. To turn them on (whenever you like, with the six digits from the app): wirehaus-agent allow-all --code SIX_DIGITS"
+  fi
   echo
 else
   say "[2/4] Este equipo ya estaba configurado (segundo factor incluido). Para activar archivos, terminal, portapapeles y audio de golpe: wirehaus-agent allow-all --code SEIS_DÍGITOS" "[2/4] This computer was already set up (second factor included). To turn on files, terminal, clipboard and audio at once: wirehaus-agent allow-all --code SIX_DIGITS"
