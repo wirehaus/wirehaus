@@ -6,6 +6,9 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Cambiado
 
+- El visor ofrece instalar la aplicación con una ventana guiada desde abajo (instalación nativa en Chrome y Android; pasos con iconos en iPhone, con aviso de que la app guarda su propia sesión), con «Ahora no» (3 días) y «No volver a mostrar». Sustituye al aviso flotante, que tapaba la barra y el menú.
+- En la aplicación instalada en iPhone o iPad, que no comparte almacenamiento con Safari, la primera pantalla lo explica y la vinculación pasa a llamarse «Traer mi sesión del navegador» (sin QR, con enlace y código para aprobar desde el navegador del mismo móvil). La app pide almacenamiento persistente.
+- Barra de pestañas del móvil centrada y con ancho máximo por pestaña.
 - El visor reintenta la conexión sin rendirse mientras haya un billete de reanudación (antes paraba a los 30 segundos), vigila los apretones de manos que se quedan colgados con poca cobertura y los repite solo; el agente da 15 segundos (antes 5) para completar el apretón de manos.
 - Cerrar la sesión por inactividad ya no revoca el billete: al volver, el equipo recupera la sesión sin pedir el segundo factor.
 - El menú «Vincular otro equipo» pasa a llamarse «Conectar dispositivo» y ya no pide el segundo factor al aprobar. Los límites del código corto se relajan (16 pendientes, 8 por dirección) porque ya no hace falta para el QR.

@@ -14,7 +14,8 @@ import { KeyBar } from './keybar.js';
 import { deviceLabel } from './devicename.js';
 import { agentBase } from './linkaddr.js';
 import { initLinkUi } from './linkui.js';
-import { initPwa, launchedAsApp } from './pwa.js';
+import { initInstallSheet } from './install.js';
+import { initPwa, launchedAsApp, platform } from './pwa.js';
 import { pairCodeFromHash, withoutPairCode } from './pairlink.js';
 import type { Layout } from './softkeys.js';
 import { TouchLayer } from './touchlayer.js';
@@ -335,6 +336,9 @@ function show(state: ViewerState): void {
     everConnected &&
     (state.kind === 'reconnecting' || ((state.kind === 'loading' || state.kind === 'connecting') && softReconnect));
   linkUi.kind(state.kind);
+  if (state.kind !== 'connected') {
+    installSheet.close();
+  }
   document.body.dataset['state'] = state.kind;
   if (state.kind !== 'connected' && !softReconnect) {
     phoneStarted = false;
@@ -418,6 +422,7 @@ function show(state: ViewerState): void {
       break;
     case 'connected':
       status.textContent = phone ? messages.connectedBasic : messages.connected(state.width, state.height);
+      installSheet.offer();
       if (phone) {
         if (!phoneStarted) {
           phoneStarted = true;
@@ -565,15 +570,20 @@ const linkUi = initLinkUi({
   pair: (code) => void viewer.pair(code, pairName.value.trim() || messages.pairNameDefault),
   rerender: () => show(lastState),
   closeMenu: () => closeMenu(),
+  sameDevice: launchedAsApp() && platform() === 'ios',
 });
 viewer.linkListener = (reply) => linkUi.receive(reply);
 viewer.forcePairing = linkedPairCode !== undefined;
 let autoPaired = false;
-initPwa(
-  element<HTMLButtonElement>('install-app'),
-  { install: messages.installApp, ios: messages.installIos },
-  (text) => showHint(text),
-);
+const installSheet = initInstallSheet(messages, phone || navigator.maxTouchPoints > 1);
+initPwa(element<HTMLButtonElement>('install-app'), {
+  label: messages.installApp,
+  open: () => {
+    closeMenu();
+    installSheet.open();
+  },
+  ready: () => installSheet.refresh(),
+});
 
 type Panel = 'desktop' | 'files' | 'clipboard';
 
@@ -984,6 +994,9 @@ function showHome(error: string): void {
     homeContinue.textContent = messages.homeContinue(last);
     homeContinue.onclick = () => location.assign(`/${last}`);
   }
+  const appNote = element('home-app-note');
+  appNote.textContent = messages.appFirstNote;
+  appNote.hidden = !(launchedAsApp() && platform() === 'ios' && last === undefined);
   const recent = recentNames().filter((item) => item !== last);
   const recentBox = element('home-recent');
   recentBox.hidden = recent.length === 0;
@@ -1132,41 +1145,3 @@ document.addEventListener('keydown', (event) => {
     closeMonitorMenu();
   }
 });
-
-const installBanner = element<HTMLElement>('install-banner');
-const installSeen = 'wh.installHint';
-function installHintAllowed(): boolean {
-  try {
-    return localStorage.getItem(installSeen) !== '1';
-  } catch {
-    return false;
-  }
-}
-element('install-text').textContent = messages.installBanner;
-element<HTMLButtonElement>('install-how').textContent = messages.installHow;
-element<HTMLButtonElement>('install-never').textContent = messages.installNever;
-element<HTMLButtonElement>('install-how').addEventListener('click', () => {
-  installBanner.hidden = true;
-  const button = element<HTMLButtonElement>('install-app');
-  if (button.hidden) {
-    showHint(messages.installIos);
-  } else {
-    button.click();
-  }
-});
-element<HTMLButtonElement>('install-never').addEventListener('click', () => {
-  installBanner.hidden = true;
-  try {
-    localStorage.setItem(installSeen, '1');
-  } catch {
-    return;
-  }
-});
-window.setTimeout(() => {
-  if (!launchedAsApp() && (phone || navigator.maxTouchPoints > 1) && installHintAllowed()) {
-    installBanner.hidden = false;
-    window.setTimeout(() => {
-      installBanner.hidden = true;
-    }, 25000);
-  }
-}, 4000);

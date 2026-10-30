@@ -53,10 +53,19 @@ export type Messages = {
   monitorAll: string;
   linkScanning: string;
   installApp: string;
-  installIos: string;
-  installBanner: string;
-  installHow: string;
+  installTitle: string;
+  installLead: string;
+  installGo: string;
+  installStepsIos: string[];
+  installStepsOther: string[];
+  installSession: string;
+  installLater: string;
   installNever: string;
+  installClose: string;
+  appFirstNote: string;
+  linkSameStart: string;
+  linkSameTitle: string;
+  linkSameIntro: string;
 
   homeNoAccess: string;
   homeCreate: string;
@@ -293,10 +302,27 @@ const catalog: Record<string, Messages> = {
     codeRemember: 'Mantener la sesión iniciada en este equipo (30 días)',
     linkNeedsUpdate: 'Este ordenador todavía no admite este tipo de código. Se actualizará solo en unas horas; mientras tanto usa el código corto.',
     installApp: 'Instalar la aplicación',
-    installIos: 'Instalar: pulsa Compartir y «Añadir a pantalla de inicio»',
-    installBanner: 'Instala Wirehaus como aplicación: se abre más rápido y se actualiza sola.',
-    installHow: 'Cómo',
-    installNever: 'No mostrar más',
+    installTitle: 'Instala Wirehaus',
+    installLead: 'Se abre desde tu pantalla de inicio como cualquier app, sin barra del navegador, más rápido y se actualiza sola.',
+    installGo: 'Instalar ahora',
+    installStepsIos: [
+      'Toca el botón Compartir del navegador.',
+      'Desliza y elige «Añadir a pantalla de inicio».',
+      'Abre Wirehaus desde el icono nuevo.',
+    ],
+    installStepsOther: [
+      'Abre el menú de tu navegador.',
+      'Elige «Instalar aplicación» o «Añadir a pantalla de inicio».',
+      'Abre Wirehaus desde el icono nuevo.',
+    ],
+    installSession: 'La app guarda su propia sesión, aparte de la del navegador. La primera vez que la abras tendrás que entrar una vez más; después se queda iniciada.',
+    installLater: 'Ahora no',
+    installNever: 'No volver a mostrar',
+    installClose: 'Cerrar',
+    appFirstNote: 'Esta app guarda su propia sesión. Escribe tu dirección y entra una vez: después se queda iniciada.',
+    linkSameStart: 'Traer mi sesión del navegador',
+    linkSameTitle: 'Trae tu sesión',
+    linkSameIntro: 'Abre Wirehaus en el navegador de este móvil, donde ya entraste. Pega este enlace en la barra de direcciones o, en su menú, elige «Conectar dispositivo» y escribe el código. Pulsa Aprobar y la app entrará sola.',
     homeNoAccess: '¿Todavía no tienes acceso?',
     homeCreate: 'Crear el mío',
     homeInvalid: (name) => `«${name}» no es una dirección válida. Usa de 3 a 32 letras minúsculas, cifras o guiones.`,
@@ -560,10 +586,27 @@ const catalog: Record<string, Messages> = {
     codeRemember: 'Keep me signed in on this device (30 days)',
     linkNeedsUpdate: 'This computer does not support this kind of code yet. It will update itself within a few hours; meanwhile use the short code.',
     installApp: 'Install the app',
-    installIos: 'Install: tap Share and "Add to Home Screen"',
-    installBanner: 'Install Wirehaus as an app: it opens faster and updates itself.',
-    installHow: 'How',
+    installTitle: 'Install Wirehaus',
+    installLead: 'It opens from your home screen like any app, without the browser bar, faster, and it updates itself.',
+    installGo: 'Install now',
+    installStepsIos: [
+      'Tap the Share button of the browser.',
+      'Scroll and choose "Add to Home Screen".',
+      'Open Wirehaus from the new icon.',
+    ],
+    installStepsOther: [
+      'Open your browser menu.',
+      'Choose "Install app" or "Add to Home screen".',
+      'Open Wirehaus from the new icon.',
+    ],
+    installSession: 'The app keeps its own session, separate from the browser. The first time you open it you will sign in once more; after that it stays signed in.',
+    installLater: 'Not now',
     installNever: 'Do not show again',
+    installClose: 'Close',
+    appFirstNote: 'This app keeps its own session. Enter your address and sign in once: after that it stays signed in.',
+    linkSameStart: 'Bring my session from the browser',
+    linkSameTitle: 'Bring your session',
+    linkSameIntro: 'Open Wirehaus in the browser of this phone, where you already signed in. Paste this link in the address bar or, in its menu, choose "Connect device" and type the code. Tap Approve and the app will sign in by itself.',
     homeNoAccess: "Don't have an access yet?",
     homeCreate: 'Create mine',
     homeInvalid: (name) => `"${name}" is not a valid address. Use 3 to 32 lowercase letters, digits or hyphens.`,

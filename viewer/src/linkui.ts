@@ -28,6 +28,7 @@ export type LinkUiDeps = {
   pair: (code: string) => void;
   rerender: () => void;
   closeMenu: () => void;
+  sameDevice: boolean;
 };
 
 export type LinkUi = {
@@ -41,9 +42,9 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
   const m = deps.messages;
   const labels: [string, string][] = [
     ['link-or', m.linkOr],
-    ['link-start', m.linkStart],
-    ['linkpc-title', m.linkPcTitle],
-    ['linkpc-intro', m.linkPcIntro],
+    ['link-start', deps.sameDevice ? m.linkSameStart : m.linkStart],
+    ['linkpc-title', deps.sameDevice ? m.linkSameTitle : m.linkPcTitle],
+    ['linkpc-intro', deps.sameDevice ? m.linkSameIntro : m.linkPcIntro],
     ['linkpc-manual-label', m.linkPcManual],
     ['linkpc-verify-label', m.linkPcVerify],
     ['linkpc-retry', m.linkPcRetry],
@@ -152,7 +153,7 @@ export function initLinkUi(deps: LinkUiDeps): LinkUi {
       {
         started: (info) => {
           const shown = info.link !== undefined && drawQr(pcQr, info.link);
-          pcQr.hidden = !shown;
+          pcQr.hidden = deps.sameDevice || !shown;
           pcLink.value = info.link ?? '';
           byId('linkpc-copybox').hidden = info.link === undefined;
           byId('linkpc-manual').textContent = info.manual ?? '…';
