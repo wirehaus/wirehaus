@@ -306,8 +306,8 @@ fn serve(
                     layout,
                     &|| server.is_busy(),
                     stop,
-                    Duration::from_secs(6 * 3600),
-                    Duration::from_secs(60),
+                    Duration::from_secs(3600),
+                    Duration::from_secs(30),
                 );
             });
         }

@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256, Sha512};
@@ -707,15 +707,22 @@ pub fn run_background(
     first_delay: Duration,
 ) {
     let sleep = |total: Duration| {
+        let deadline = SystemTime::now() + total;
         let mut left = total;
         while left > Duration::ZERO && !stop.load(AtomicOrdering::Relaxed) {
             let slice = left.min(Duration::from_secs(1));
             std::thread::sleep(slice);
             left -= slice;
+            if SystemTime::now() >= deadline {
+                break;
+            }
         }
     };
     sleep(first_delay);
+    let mut failures = 0u32;
+    let mut refused: Option<Version> = None;
     while !stop.load(AtomicOrdering::Relaxed) {
+        let mut wait = interval;
         if enabled(&layout.state_dir) {
             let fetch = fetcher();
             let base = base_url();
@@ -726,13 +733,16 @@ pub fn run_background(
                 skipped(&layout.state_dir),
                 &trusted_keys(),
             ) {
+                Ok(Some(release)) if refused == Some(release.version) => failures = 0,
                 Ok(Some(release)) => {
+                    failures = 0;
                     eprintln!("update: version {} is available", release.version);
                     match stage(&fetch, &base, &release, &layout.staging()) {
                         Ok(root) => {
                             if let Err(error) = smoke_test(&root, &layout.exe_name, release.version)
                             {
                                 eprintln!("update: {} was refused: {error}", release.version);
+                                refused = Some(release.version);
                                 sleep(interval);
                                 continue;
                             }
@@ -752,7 +762,9 @@ pub fn run_background(
                                     stop.store(true, AtomicOrdering::SeqCst);
                                     return;
                                 }
-                                Err(error) => eprintln!("update: could not install: {error}"),
+                                Err(error) => {
+                                    eprintln!("update: could not install: {error}");
+                                }
                             }
                         }
                         Err(error) => {
@@ -760,12 +772,24 @@ pub fn run_background(
                         }
                     }
                 }
-                Ok(None) => {}
-                Err(error) => eprintln!("update: check failed: {error}"),
+                Ok(None) => failures = 0,
+                Err(error) => {
+                    eprintln!("update: check failed: {error}");
+                    failures += 1;
+                    wait = retry_delay(failures, interval);
+                }
             }
         }
-        sleep(interval);
+        sleep(wait);
     }
+}
+
+#[must_use]
+pub fn retry_delay(failures: u32, interval: Duration) -> Duration {
+    let exponent = failures.saturating_sub(1).min(6);
+    Duration::from_secs(30u64 << exponent)
+        .min(Duration::from_secs(30 * 60))
+        .min(interval)
 }
 
 fn wait_until_idle(
@@ -1081,6 +1105,19 @@ mod tests {
         fs::write(dir.join("agent"), b"not a program").unwrap();
         assert!(smoke_test(&dir, "agent", Version(0, 3, 1)).is_err());
         let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_failed_check_is_retried_soon_and_backs_off_up_to_half_an_hour() {
+        let interval = Duration::from_secs(3600);
+        assert_eq!(retry_delay(1, interval), Duration::from_secs(30));
+        assert_eq!(retry_delay(2, interval), Duration::from_secs(60));
+        assert_eq!(retry_delay(4, interval), Duration::from_secs(240));
+        assert_eq!(retry_delay(50, interval), Duration::from_secs(1800));
+        assert_eq!(
+            retry_delay(50, Duration::from_secs(600)),
+            Duration::from_secs(600)
+        );
     }
 
     #[test]
