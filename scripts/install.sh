@@ -166,6 +166,7 @@ remove_tunnel() {
 install_tunnel() {
   download_cloudflared
   remove_tunnel
+  rm -f "$cloudflared"
   cp "$cf_binary" "$cloudflared"
   chmod 755 "$cloudflared"
   mkdir -p "$data_dir"
@@ -325,6 +326,7 @@ if [ -x "$agent" ]; then
 fi
 mkdir -p "$install_dir"
 rm -rf "$install_dir/viewer"
+rm -f "$agent"
 cp "$source_dir/wirehaus-agent" "$agent"
 chmod 755 "$agent"
 cp -R "$source_dir/viewer" "$install_dir/viewer"

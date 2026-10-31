@@ -2173,7 +2173,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-agent"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "clap",
  "ed25519-dalek",
@@ -2197,7 +2197,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-audio"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "cpal",
  "opus-pure",
@@ -2206,7 +2206,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-capture"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "core-graphics",
  "dxgi-capture-rs",
@@ -2216,7 +2216,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-clipboard"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "arboard",
  "thiserror 2.0.21",
@@ -2225,7 +2225,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-crypto"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "blake2 0.11.0",
  "getrandom 0.4.3",
@@ -2239,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-crypto-wasm"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "getrandom 0.3.4",
  "getrandom 0.4.3",
@@ -2253,7 +2253,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-encode"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "jpeg-encoder",
  "openh264",
@@ -2264,7 +2264,7 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-input"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "core-graphics",
  "enigo",
@@ -2276,14 +2276,14 @@ dependencies = [
 
 [[package]]
 name = "wirehaus-protocol"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "wirehaus-vault"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
