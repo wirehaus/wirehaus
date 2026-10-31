@@ -719,17 +719,14 @@ function restoreUi(): void {
   }
 }
 
-function selectPanel(wanted: Panel): void {
+function selectPanel(requested: Panel): void {
+  const wanted: Panel = phone && requested === 'desktop' ? 'files' : requested;
   panel = wanted;
   terminals.activate(null);
   persistUi();
   if (wanted === 'files') {
     files.show();
   }
-}
-
-function selectDesktop(): void {
-  selectPanel('desktop');
 }
 
 function selectTerminal(stream: number): void {
@@ -778,7 +775,7 @@ function renderTabs(): void {
       event.stopPropagation();
       terminals.close(stream);
       if (terminals.activeStream() === null) {
-        selectDesktop();
+        selectPanel(phone ? 'files' : 'desktop');
       }
     });
     wrapper.append(close);

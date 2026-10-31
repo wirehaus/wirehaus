@@ -27,6 +27,11 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- En el móvil, la sesión ya no se cortaba a los pocos segundos con «proceso terminado, código -1»: el visor del teléfono no acusaba recibo de los fotogramas del escritorio que no muestra, y el agente cerraba la conexión por considerar que el visor se había parado. Además la terminal tardaba en mostrar el prompt porque compartía la conexión con ese vídeo sin consumir.
+- Cerrar la última terminal en el móvil volvía a un escritorio negro en el que tocar movía el ratón del ordenador remoto. Ahora vuelve a Archivos y el visor del móvil no envía entrada al escritorio.
+- Archivos mostraba «No hay carpetas compartidas» hasta que llegaba la lista; ahora muestra «Cargando carpetas...». El aviso de carpetas sin compartir ya no se repite en la barra inferior.
+- El botón del selector de pantalla del escritorio dibujaba un cuadrado de color sólido; ahora lleva su icono y su flecha, y el menú no parte «(principal)» en dos líneas.
+- El color de la barra del navegador y de la app instalada sigue el tema claro u oscuro.
 - El túnel de Cloudflare de los instaladores de Linux, macOS y Windows usa HTTP/2 (TCP) en vez de QUIC. Con una VPN activa (por ejemplo Mullvad, con MTU 1280) QUIC dejaba pasar el saludo cifrado pero perdía la primera imagen, y el visor se quedaba en «Connecting» indefinidamente. Los equipos ya instalados lo corrigen reinstalando con un código nuevo.
 
 - El QR de «Conectar con mi móvil» podía no salir (sonda de 4 segundos sin reintento, o límites por dirección en redes compartidas como la de un instituto). Ahora se dibuja en el navegador sin depender del agente y la oferta no desaparece si una comprobación falla.

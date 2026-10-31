@@ -173,6 +173,7 @@ export class FilesPanel {
   private dragging: { names: string[] } | null = null;
   private next = 1;
   private loaded = false;
+  private loadError: string | null = null;
   private loadToken = 0;
   private notice = '';
   private noticeTimer: number | undefined;
@@ -338,6 +339,7 @@ export class FilesPanel {
   show(): void {
     if (!this.loaded) {
       this.loaded = true;
+      this.loadError = null;
       void this.loadRoots();
     }
   }
@@ -382,6 +384,7 @@ export class FilesPanel {
     this.closeMenu();
     this.closeModal(false);
     this.roots = null;
+    this.loadError = null;
     this.features = 0;
     this.loaded = false;
     this.path = [];
@@ -447,11 +450,11 @@ export class FilesPanel {
     }
     if (reply.kind !== 'roots') {
       this.loaded = false;
-      if (reply.kind === 'failed') {
-        this.say(this.texts.filesFailure[reply.reason]);
-      }
+      this.loadError = reply.kind === 'failed' ? this.texts.filesFailure[reply.reason] : this.texts.filesFailure.io;
+      this.render();
       return;
     }
+    this.loadError = null;
     this.roots = reply.names;
     this.features = reply.features;
     const wanted = this.initial;
@@ -459,10 +462,7 @@ export class FilesPanel {
     const usable = wanted !== null && wanted.root >= 0 && wanted.root < reply.names.length;
     this.root = usable ? wanted.root : 0;
     this.path = usable ? wanted.path : [];
-    this.say(
-      reply.names.length === 0 ? this.texts.filesNoRoots : this.canRename ? '' : this.texts.filesAgentOld,
-      reply.names.length === 0 || !this.canRename,
-    );
+    this.say(reply.names.length === 0 || this.canRename ? '' : this.texts.filesAgentOld, !this.canRename);
     this.render();
     if (reply.names.length > 0 && !(await this.refresh()) && this.path.length > 0) {
       this.path = [];
@@ -754,6 +754,27 @@ export class FilesPanel {
     const roots = this.roots ?? [];
     this.list.classList.toggle('grid', this.preferences.view === 'grid');
     this.list.classList.toggle('details', this.preferences.view === 'list');
+    if (this.roots === null && this.loadError !== null) {
+      const retry = node('button', 'tool', this.texts.filesRefresh);
+      retry.type = 'button';
+      retry.addEventListener('click', () => {
+        this.show();
+        this.render();
+      });
+      const failed = node('div', 'fm-loading failed');
+      failed.append(node('span', '', this.loadError), retry);
+      this.list.replaceChildren(failed);
+      return;
+    }
+    if (this.roots === null) {
+      const waiting = node('div', 'fm-loading');
+      waiting.setAttribute('role', 'status');
+      const spinner = node('span', 'spinner');
+      spinner.setAttribute('aria-hidden', 'true');
+      waiting.append(spinner, node('span', '', this.texts.filesLoading));
+      this.list.replaceChildren(waiting);
+      return;
+    }
     if (roots.length === 0) {
       this.list.replaceChildren(node('p', 'fm-empty', this.texts.filesNoRoots));
       return;

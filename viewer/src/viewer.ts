@@ -647,6 +647,11 @@ export class Viewer {
       }
       return;
     }
+    if (message.kind === 'frameEnd') {
+      const sequence = message.sequence;
+      this.drawing = this.drawing.then(() => this.acknowledge(sequence)).catch(() => undefined);
+      return;
+    }
     if (!this.desktopEnabled) {
       return;
     }
@@ -655,11 +660,6 @@ export class Viewer {
       this.drawing = this.drawing
         .then(() => this.player.play(width, height, keyframe, data))
         .catch(() => undefined);
-      return;
-    }
-    if (message.kind === 'frameEnd') {
-      const sequence = message.sequence;
-      this.drawing = this.drawing.then(() => this.acknowledge(sequence)).catch(() => undefined);
       return;
     }
     if (message.codec !== CODEC_JPEG) {
@@ -808,7 +808,7 @@ export class Viewer {
   }
 
   private sendInput(event: InputEvent): void {
-    if (this.phase === 'streaming') {
+    if (this.phase === 'streaming' && this.desktopEnabled) {
       this.send(DESKTOP_CHANNEL, encodeInput(event));
     }
   }

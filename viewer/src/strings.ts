@@ -154,6 +154,7 @@ export type Messages = {
   terminalSpawnFailed: string;
   tabFiles: string;
   filesNoRoots: string;
+  filesLoading: string;
   filesEmpty: string;
   filesNoMatches: string;
   filesTruncated: string;
@@ -418,6 +419,7 @@ const catalog: Record<string, Messages> = {
     terminalTooMany: 'Hay demasiadas terminales abiertas.',
     terminalSpawnFailed: 'No se pudo iniciar la terminal.',
     tabFiles: 'Archivos',
+    filesLoading: 'Cargando carpetas...',
     filesNoRoots:
       'No hay carpetas compartidas. Actívalo en ese ordenador con "wirehaus-agent allow-all --code 123456" (los seis dígitos de tu app de autenticación).',
     filesEmpty: 'Esta carpeta está vacía.',
@@ -706,6 +708,7 @@ const catalog: Record<string, Messages> = {
     terminalTooMany: 'Too many terminals are open.',
     terminalSpawnFailed: 'The terminal could not be started.',
     tabFiles: 'Files',
+    filesLoading: 'Loading folders...',
     filesNoRoots:
       'No folders are shared. Turn everything on from that computer with "wirehaus-agent allow-all --code 123456" (the six digits from your authenticator app).',
     filesEmpty: 'This folder is empty.',
