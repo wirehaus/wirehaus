@@ -299,7 +299,10 @@ impl Remote for CurlRemote {
         if !valid_name(name) || !valid_token(token) {
             return Err(ConnectorError::Malformed);
         }
-        let body = format!(r#"{{"name":"{name}","token":"{token}","sleep":{sleep}}}"#);
+        let version = env!("CARGO_PKG_VERSION");
+        let body = format!(
+            r#"{{"name":"{name}","token":"{token}","sleep":{sleep},"version":"{version}"}}"#
+        );
         let protocols = if self.base.starts_with("http://") {
             "=http,https"
         } else {

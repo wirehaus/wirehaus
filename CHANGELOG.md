@@ -6,6 +6,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Cambiado
 
+- El agente comunica su versión al servicio de registro en cada sincronización (cada 2 minutos). El servicio guarda la última versión de cada dirección y puede exigir una versión mínima: un agente por debajo, o que no comunica versión, se deja dormido (se borra su túnel y no se vuelve a despertar) y el visor avisa de que hay que actualizarlo. El agente sigue actualizándose por su cuenta sin pasar por el registro, así que al actualizarse vuelve a admitirse solo. Sin versión mínima configurada no cambia nada.
 - La pantalla de emparejamiento tiene un botón de cámara junto al código: abre la cámara dentro de la app y entra al leer el QR de la terminal (acepta el enlace completo o solo el código), sin escribir nada.
 - La aplicación instalada ya no hace zoom (pellizco, doble toque ni al enfocar campos de texto), no rebota ni se desplaza fuera de sus listas y no selecciona texto fuera de los campos y la terminal.
 - En iPhone y iPad, abrir en Safari el QR del instalador ya no gasta el código de emparejamiento en el navegador: el visor muestra una hoja para instalar la app (sin cerrarse con Esc ni fuera, con «Entrar solo en el navegador» como salida), conserva el código en la URL y la app instalada arranca con él y entra sola, sin escribir nada. En iOS se quita el manifiesto para que «Añadir a pantalla de inicio» use la URL actual y el icono opaco `apple-touch-icon`.

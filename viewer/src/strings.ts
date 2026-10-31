@@ -141,6 +141,7 @@ export type Messages = {
   busy: string;
   unavailable: string;
   refused: string;
+  outdatedAgent: string;
   failed: string;
   agentMissing: string;
   agentInvalid: string;
@@ -404,6 +405,8 @@ const catalog: Record<string, Messages> = {
     suspended: 'Este equipo está suspendido. Reactívalo desde el ordenador de casa.',
     busy: 'Ya hay otro visor conectado.',
     unavailable: 'El agente no puede capturar la pantalla ni controlar el equipo. Revisa los permisos en el equipo remoto.',
+    outdatedAgent:
+      'El agente de ese ordenador está desactualizado y el servicio ya no lo admite. Se actualiza solo al encenderse con internet; si no lo hace, vuelve a instalarlo con el comando de wirehaus.dev. Después reintenta.',
     refused:
       'El agente no ha aceptado la conexión. Puede estar apagado, bloqueado, o no reconocer este equipo. Si lo revocaste o cambió el agente, olvida este equipo y empareja de nuevo.',
     failed: 'La conexión segura ha fallado.',
@@ -693,6 +696,8 @@ const catalog: Record<string, Messages> = {
     suspended: 'This device is suspended. Reactivate it from the home computer.',
     busy: 'Another viewer is already connected.',
     unavailable: 'The agent cannot capture the screen or control the computer. Check its permissions on the remote computer.',
+    outdatedAgent:
+      'The agent on that computer is out of date and the service no longer accepts it. It updates itself when the computer is on and online; if it does not, reinstall it with the command from wirehaus.dev. Then try again.',
     refused:
       'The agent did not accept the connection. It may be off, locked, or not recognise this device. If you revoked it or the agent changed, forget this device and pair again.',
     failed: 'The secure connection failed.',

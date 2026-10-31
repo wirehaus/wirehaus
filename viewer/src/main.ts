@@ -241,6 +241,8 @@ function refusal(state: Extract<ViewerState, { kind: 'refused' }>, texts: Messag
       return texts.failed;
     case 'unknown':
       return texts.refused;
+    case 'outdated':
+      return texts.outdatedAgent;
   }
 }
 

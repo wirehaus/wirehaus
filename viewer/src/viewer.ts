@@ -47,7 +47,7 @@ export type FilesListener = (stream: number, message: FilesMessage) => void;
 
 export type TerminalListener = (stream: number, message: TerminalMessage) => void;
 
-export type RefusalReason = Exclude<AuthFailure, 'wrongCode'> | 'unknown' | 'failed';
+export type RefusalReason = Exclude<AuthFailure, 'wrongCode'> | 'unknown' | 'failed' | 'outdated';
 
 export type ViewerState =
   | { kind: 'loading' }
@@ -210,8 +210,8 @@ export class Viewer {
     if (!forced && this.identity !== undefined && pinned !== undefined) {
       const key = this.identity.deviceKey;
       this.restoreTicket();
-      await this.wake();
-      if (epoch !== this.epoch) {
+      const blocked = await this.wake();
+      if (blocked || epoch !== this.epoch) {
         return;
       }
       this.open(() => Handshake.reconnect(key, pinned), false);
@@ -241,22 +241,28 @@ export class Viewer {
     }
   }
 
-  private async wake(force = false): Promise<void> {
+  private async wake(force = false): Promise<boolean> {
     const target = this.target;
     if (typeof target === 'string' || !target.foreign) {
-      return;
+      return false;
     }
     if (!force && this.recentlyConnected(target.authority)) {
       this.skippedCheck = true;
-      return;
+      return false;
     }
     this.skippedCheck = false;
     const waited = await ensureAwake(this.api, target.authority, () =>
       this.report({ kind: 'connecting', waking: true }),
     );
+    if (waited === 'outdated') {
+      this.stopRetrying();
+      this.report({ kind: 'refused', reason: 'outdated', retryAfter: 0 });
+      return true;
+    }
     if (waited) {
       this.wakeUntil = Date.now() + WAKE_RETRY_WINDOW_MS;
     }
+    return false;
   }
 
   async pair(code: string, name: string): Promise<void> {
@@ -269,8 +275,8 @@ export class Viewer {
       this.identity = { deviceKey, agents: {} };
       await saveIdentity(this.identity).catch(() => undefined);
     }
-    await this.wake();
-    if (epoch !== this.epoch) {
+    const blocked = await this.wake();
+    if (blocked || epoch !== this.epoch) {
       return;
     }
     this.open(() => Handshake.pairing(deviceKey, code, name), true);
@@ -409,8 +415,8 @@ export class Viewer {
       const { make, pairing } = this.lastOpen;
       this.report({ kind: 'connecting', waking: true });
       const epoch = this.epoch;
-      void this.wake(true).then(() => {
-        if (epoch === this.epoch) {
+      void this.wake(true).then((blocked) => {
+        if (!blocked && epoch === this.epoch) {
           this.open(make, pairing);
         }
       });

@@ -62,12 +62,15 @@ export async function ensureAwake(
   authority: string,
   waking: () => void,
   deps: WakeDeps = realDeps,
-): Promise<boolean> {
+): Promise<boolean | 'outdated'> {
   const name = agentName(authority);
   if (api === '' || name === undefined) {
     return false;
   }
   let state = await askState(api, name, deps);
+  if (state === 'outdated') {
+    return 'outdated';
+  }
   if (state !== 'waking') {
     return false;
   }

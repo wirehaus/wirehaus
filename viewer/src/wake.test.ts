@@ -47,6 +47,13 @@ test('a sleeping computer is woken, the wait is shown and the tunnel is probed b
   assert.equal(calls.filter((c) => c.endsWith('/link/ping')).length, 4);
 });
 
+test('an agent the registry calls outdated is reported without waiting or probing', async () => {
+  const { deps, calls } = rig({ states: ['outdated'], reachableAfter: 0 });
+  const waited = await ensureAwake('https://api.example', 'ana.wirehaus.dev', () => undefined, deps);
+  assert.equal(waited, 'outdated');
+  assert.deepEqual(calls, ['https://api.example/v1/wake']);
+});
+
 test('an unknown name, a missing api or a host without a name does nothing', async () => {
   const { deps, calls } = rig({ states: ['unknown'], reachableAfter: 0 });
   await ensureAwake('https://api.example', 'ana.wirehaus.dev', () => undefined, deps);
