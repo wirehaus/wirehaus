@@ -379,7 +379,7 @@ const catalog: Record<string, Messages> = {
     connected: (width, height) => `Conectado, ${width}x${height}`,
     closed: 'Desconectado.',
     reconnecting: (attempt) =>
-      `Conexión perdida. Reconectando, intento ${attempt}.${attempt >= 3 ? ' Parece que hay poca cobertura; seguimos intentándolo sin que tengas que hacer nada.' : ''}`,
+      `Conexión perdida. Reconectando, intento ${attempt}.${attempt >= 3 ? ' Puede que haya poca cobertura o que tu ordenador esté apagado, dormido o sin conexión; seguimos intentándolo sin que tengas que hacer nada.' : ''}`,
     reconnectingSoft: 'Reconectando…',
     endedIdle: 'Sesión cerrada por inactividad. Vuelve a entrar con tu código.',
     endedRevoked: 'Este equipo ya no tiene acceso al ordenador remoto.',
@@ -667,7 +667,7 @@ const catalog: Record<string, Messages> = {
     connected: (width, height) => `Connected, ${width}x${height}`,
     closed: 'Disconnected.',
     reconnecting: (attempt) =>
-      `Connection lost. Reconnecting, attempt ${attempt}.${attempt >= 3 ? ' Coverage looks poor; we keep trying, you do not need to do anything.' : ''}`,
+      `Connection lost. Reconnecting, attempt ${attempt}.${attempt >= 3 ? ' Coverage may be poor, or your computer may be off, asleep or offline; we keep trying, you do not need to do anything.' : ''}`,
     reconnectingSoft: 'Reconnecting…',
     endedIdle: 'Session closed after inactivity. Sign in again with your code.',
     endedRevoked: 'This device no longer has access to the remote computer.',
