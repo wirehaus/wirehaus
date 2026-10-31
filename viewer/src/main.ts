@@ -15,6 +15,7 @@ import { deviceLabel } from './devicename.js';
 import { agentBase } from './linkaddr.js';
 import { initLinkUi } from './linkui.js';
 import { initInstallSheet } from './install.js';
+import { startScanner } from './linkflow.js';
 import { initPwa, isStandalone, launchedAsApp, platform } from './pwa.js';
 import { pairCodeFromHash, withoutPairCode } from './pairlink.js';
 import type { Layout } from './softkeys.js';
@@ -103,6 +104,9 @@ const pairForm = element<HTMLFormElement>('pair-form');
 const pairCode = element<HTMLInputElement>('pair-code');
 const pairName = element<HTMLInputElement>('pair-name');
 const pairError = element<HTMLElement>('pair-error');
+const pairScan = element<HTMLButtonElement>('pair-scan');
+const pairScanBox = element<HTMLElement>('pair-scanbox');
+const pairVideo = element<HTMLVideoElement>('pair-video');
 const codeForm = element<HTMLFormElement>('code-form');
 const codeRemember = element<HTMLInputElement>('code-remember');
 const monitorWrap = element<HTMLElement>('monitor-wrap');
@@ -156,6 +160,51 @@ reconnect.textContent = messages.reconnect;
 pairName.value = deviceLabel(navigator.userAgent, navigator.maxTouchPoints) || messages.pairNameDefault;
 homeName.placeholder = messages.homePlaceholder;
 pairCode.placeholder = 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX';
+pairScan.setAttribute('aria-label', messages.pairScan);
+pairScan.title = messages.pairScan;
+let pairScanner: { stop: () => void } | undefined;
+let pairScanStarting = false;
+function stopPairScan(): void {
+  pairScanner?.stop();
+  pairScan.setAttribute('aria-expanded', 'false');
+  pairScanner = undefined;
+  pairScanBox.hidden = true;
+}
+pairScan.addEventListener('click', () => {
+  if (!pairScanBox.hidden) {
+    stopPairScan();
+    return;
+  }
+  if (pairScanStarting) {
+    return;
+  }
+  pairScanStarting = true;
+  setError(pairError, '');
+  pairScanBox.hidden = false;
+  pairScan.setAttribute('aria-expanded', 'true');
+  void startScanner(pairVideo, (text) => {
+    const code = pairCodeFromHash(text.includes('#') ? text.slice(text.indexOf('#')) : `#pair=${text.trim()}`);
+    if (code === undefined) {
+      return;
+    }
+    stopPairScan();
+    pairCode.value = code;
+    pairForm.requestSubmit();
+  }).then((started) => {
+    pairScanStarting = false;
+    if (typeof started === 'string') {
+      pairScanBox.hidden = true;
+      pairScan.setAttribute('aria-expanded', 'false');
+      setError(pairError, messages.linkScanDenied);
+      return;
+    }
+    if (pairScanBox.hidden) {
+      started.stop();
+      return;
+    }
+    pairScanner = started;
+  });
+});
 const USED_PAIR_KEY = 'wh.pairUsed';
 function usedPairCode(): string | null {
   try {
@@ -361,6 +410,9 @@ function show(state: ViewerState): void {
     phoneStarted = false;
   }
   pairPanel.hidden = state.kind !== 'needsPairing' || linkUi.active();
+  if (pairPanel.hidden) {
+    stopPairScan();
+  }
   linkPanel.hidden = !(state.kind === 'needsPairing' && linkUi.active());
   codePanel.hidden = state.kind !== 'needsCode';
   if (state.kind !== 'connected') {

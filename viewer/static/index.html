@@ -169,8 +169,12 @@
           <p id="pair-intro" class="lead"></p>
           <label class="field">
             <span id="pair-code-label"></span>
-            <input id="pair-code" name="code" class="mono" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="next" />
+            <span class="affix">
+              <input id="pair-code" name="code" aria-labelledby="pair-code-label" class="mono" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="next" />
+              <button id="pair-scan" type="button" class="scan-button" aria-expanded="false"><svg aria-hidden="true"><use href="#i-camera" /></svg></button>
+            </span>
           </label>
+          <div id="pair-scanbox" class="scanbox" hidden><video id="pair-video" muted playsinline></video></div>
           <p id="pair-hint" class="hint"></p>
           <label class="field">
             <span id="pair-name-label"></span>

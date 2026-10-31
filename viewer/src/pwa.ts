@@ -48,12 +48,32 @@ export async function promptInstall(): Promise<InstallOutcome> {
   }
 }
 
+function lockApp(): void {
+  document.documentElement.classList.add('app');
+  document
+    .querySelector('meta[name="viewport"]')
+    ?.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+  for (const name of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(name, (event) => event.preventDefault(), { passive: false });
+  }
+  document.addEventListener(
+    'touchmove',
+    (event) => {
+      if (event.touches.length > 1) {
+        event.preventDefault();
+      }
+    },
+    { passive: false },
+  );
+}
+
 export function initPwa(button: HTMLButtonElement, hooks: PwaHooks): void {
   dropManifestOnIos();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => undefined);
   }
   if (isStandalone()) {
+    lockApp();
     navigator.storage?.persist?.().catch(() => undefined);
     return;
   }

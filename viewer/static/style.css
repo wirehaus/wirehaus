@@ -2037,7 +2037,7 @@ a.primary {
   box-shadow: none;
   text-align: left;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .field .affix input:focus {
@@ -2939,4 +2939,73 @@ button.linkish:hover {
   color: var(--text);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.affix .scan-button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 46px;
+  height: 46px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.affix .scan-button:hover,
+.affix .scan-button:focus-visible {
+  color: var(--accent);
+}
+
+.affix .scan-button svg {
+  width: 22px;
+  height: 22px;
+}
+
+#pair-scanbox {
+  margin-bottom: 4px;
+}
+
+html.app,
+html.app body {
+  touch-action: manipulation;
+}
+
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  .field input,
+  .field input.mono,
+  .field .affix input,
+  #pair-code {
+    font-size: 16px;
+  }
+}
+
+html.app,
+html.app body {
+  overscroll-behavior: none;
+}
+
+html.app body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+html.app input,
+html.app textarea,
+html.app [contenteditable],
+html.app .xterm,
+html.app .error,
+html.app .mono,
+html.app code,
+html.app a,
+html.app .verification {
+  -webkit-user-select: text;
+  user-select: text;
 }
