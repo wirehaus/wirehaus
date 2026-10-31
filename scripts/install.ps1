@@ -109,7 +109,7 @@ function Install-Tunnel {
     if (-not $ConnectorFile) { Remove-Item -Force $download -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Force $dataDir | Out-Null
     (Get-Content -Raw $TunnelTokenFile).Trim() | Set-Content -NoNewline -Encoding ascii $tunnelToken
-    $arguments = "--headless `"$cloudflared`" tunnel run --token-file `"$tunnelToken`""
+    $arguments = "--headless `"$cloudflared`" tunnel run --protocol http2 --token-file `"$tunnelToken`""
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $arguments
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)

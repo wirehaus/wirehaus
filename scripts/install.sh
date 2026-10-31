@@ -186,6 +186,8 @@ install_tunnel() {
         <string>$cloudflared</string>
         <string>tunnel</string>
         <string>run</string>
+        <string>--protocol</string>
+        <string>http2</string>
         <string>--token-file</string>
         <string>$tunnel_token</string>
     </array>
@@ -210,7 +212,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart="$cloudflared" tunnel run --token-file "$tunnel_token"
+ExecStart="$cloudflared" tunnel run --protocol http2 --token-file "$tunnel_token"
 Restart=always
 RestartSec=5
 NoNewPrivileges=yes

@@ -27,6 +27,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- El túnel de Cloudflare de los instaladores de Linux, macOS y Windows usa HTTP/2 (TCP) en vez de QUIC. Con una VPN activa (por ejemplo Mullvad, con MTU 1280) QUIC dejaba pasar el saludo cifrado pero perdía la primera imagen, y el visor se quedaba en «Connecting» indefinidamente. Los equipos ya instalados lo corrigen reinstalando con un código nuevo.
+
 - El QR de «Conectar con mi móvil» podía no salir (sonda de 4 segundos sin reintento, o límites por dirección en redes compartidas como la de un instituto). Ahora se dibuja en el navegador sin depender del agente y la oferta no desaparece si una comprobación falla.
 - El billete de reanudación se quemaba al usarlo: si la respuesta se perdía por mala cobertura, el equipo caía al segundo factor. Ahora sigue valiendo diez minutos tras usarse.
 - La actualización automática reintenta enseguida (30 s, 1, 2, 4... hasta 30 min) si la comprobación falla por falta de red al arrancar, no se queda dormida cuando el equipo se suspende y no vuelve a bajar un paquete que el agente ya rechazó.
