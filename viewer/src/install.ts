@@ -6,7 +6,13 @@ const SNOOZE_KEY = 'wh.installSnooze';
 const SNOOZE_MS = 3 * 24 * 60 * 60 * 1000;
 const DELAY_MS = 2500;
 
-export type InstallSheet = { offer: () => void; open: () => void; close: () => void; refresh: () => void };
+export type InstallSheet = {
+  offer: () => void;
+  open: () => void;
+  openForPairing: (inBrowser: () => void) => void;
+  close: () => void;
+  refresh: () => void;
+};
 
 function byId<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -60,15 +66,27 @@ export function initInstallSheet(messages: Messages, touch: boolean): InstallShe
   go.textContent = messages.installGo;
   byId('install-later').textContent = messages.installLater;
   byId('install-never').textContent = messages.installNever;
+  const browser = byId<HTMLButtonElement>('install-browser');
+  const later = byId('install-later');
+  const never = byId('install-never');
+  browser.textContent = messages.installPairBrowser;
   let offered = false;
+  let pairing: (() => void) | undefined;
+  let quiet = false;
 
   function render(): void {
     const ios = platform() === 'ios';
     const native = installReady();
     go.hidden = !native;
     steps.hidden = native;
-    session.hidden = !ios;
-    session.textContent = ios ? messages.installSession : '';
+    const waiting = pairing !== undefined;
+    byId('install-title').textContent = waiting ? messages.installPairTitle : messages.installTitle;
+    byId('install-lead').textContent = waiting ? messages.installPairLead : messages.installLead;
+    browser.hidden = !waiting;
+    later.hidden = waiting;
+    never.hidden = waiting;
+    session.hidden = !ios || waiting;
+    session.textContent = ios && !waiting ? messages.installSession : '';
     steps.replaceChildren();
     if (native) {
       return;
@@ -100,6 +118,11 @@ export function initInstallSheet(messages: Messages, touch: boolean): InstallShe
     byId('install-title').focus();
   }
 
+  function openForPairing(inBrowser: () => void): void {
+    pairing = inBrowser;
+    open();
+  }
+
   function close(): void {
     if (dialog.open) {
       dialog.close();
@@ -116,21 +139,38 @@ export function initInstallSheet(messages: Messages, touch: boolean): InstallShe
       }
     });
   });
-  byId('install-later').addEventListener('click', () => {
+  browser.addEventListener('click', () => {
+    const proceed = pairing;
+    pairing = undefined;
+    quiet = true;
+    close();
+    quiet = false;
+    proceed?.();
+  });
+  later.addEventListener('click', () => {
     store(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
     close();
   });
-  byId('install-never').addEventListener('click', () => {
+  never.addEventListener('click', () => {
     store(NEVER_KEY, '1');
     close();
   });
+  dialog.addEventListener('cancel', (event) => {
+    if (pairing !== undefined) {
+      event.preventDefault();
+    }
+  });
   dialog.addEventListener('close', () => {
-    if (stored(NEVER_KEY) !== '1') {
+    if (pairing !== undefined) {
+      window.setTimeout(() => dialog.open || pairing === undefined || dialog.showModal(), 0);
+      return;
+    }
+    if (!quiet && stored(NEVER_KEY) !== '1') {
       store(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
     }
   });
   dialog.addEventListener('click', (event) => {
-    if (event.target === dialog) {
+    if (event.target === dialog && pairing === undefined) {
       close();
     }
   });
@@ -153,5 +193,5 @@ export function initInstallSheet(messages: Messages, touch: boolean): InstallShe
     }
   }
 
-  return { offer, open, close, refresh };
+  return { offer, open, openForPairing, close, refresh };
 }

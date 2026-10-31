@@ -23,6 +23,12 @@ export function platform(): Platform {
 
 let deferred: InstallEvent | undefined;
 
+function dropManifestOnIos(): void {
+  if (platform() === 'ios' && !isStandalone()) {
+    document.querySelectorAll('link[rel="manifest"]').forEach((node) => node.remove());
+  }
+}
+
 export function installReady(): boolean {
   return deferred !== undefined;
 }
@@ -43,6 +49,7 @@ export async function promptInstall(): Promise<InstallOutcome> {
 }
 
 export function initPwa(button: HTMLButtonElement, hooks: PwaHooks): void {
+  dropManifestOnIos();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => undefined);
   }

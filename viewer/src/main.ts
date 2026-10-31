@@ -15,7 +15,7 @@ import { deviceLabel } from './devicename.js';
 import { agentBase } from './linkaddr.js';
 import { initLinkUi } from './linkui.js';
 import { initInstallSheet } from './install.js';
-import { initPwa, launchedAsApp, platform } from './pwa.js';
+import { initPwa, isStandalone, launchedAsApp, platform } from './pwa.js';
 import { pairCodeFromHash, withoutPairCode } from './pairlink.js';
 import type { Layout } from './softkeys.js';
 import { TouchLayer } from './touchlayer.js';
@@ -156,8 +156,25 @@ reconnect.textContent = messages.reconnect;
 pairName.value = deviceLabel(navigator.userAgent, navigator.maxTouchPoints) || messages.pairNameDefault;
 homeName.placeholder = messages.homePlaceholder;
 pairCode.placeholder = 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX';
-const linkedPairCode = pairCodeFromHash(window.location.hash);
-if (linkedPairCode !== undefined) {
+const USED_PAIR_KEY = 'wh.pairUsed';
+function usedPairCode(): string | null {
+  try {
+    return localStorage.getItem(USED_PAIR_KEY);
+  } catch {
+    return null;
+  }
+}
+function markPairCodeUsed(code: string): void {
+  try {
+    localStorage.setItem(USED_PAIR_KEY, code);
+  } catch {
+    return;
+  }
+}
+const hashedPairCode = pairCodeFromHash(window.location.hash);
+const linkedPairCode = hashedPairCode !== undefined && hashedPairCode === usedPairCode() ? undefined : hashedPairCode;
+let installFirst = linkedPairCode !== undefined && platform() === 'ios' && !isStandalone();
+if (hashedPairCode !== undefined && !installFirst) {
   history.replaceState(null, '', window.location.pathname + window.location.search + withoutPairCode(window.location.hash));
 }
 
@@ -336,7 +353,7 @@ function show(state: ViewerState): void {
     everConnected &&
     (state.kind === 'reconnecting' || ((state.kind === 'loading' || state.kind === 'connecting') && softReconnect));
   linkUi.kind(state.kind);
-  if (state.kind !== 'connected') {
+  if (state.kind !== 'connected' && !installFirst) {
     installSheet.close();
   }
   document.body.dataset['state'] = state.kind;
@@ -401,11 +418,14 @@ function show(state: ViewerState): void {
       break;
     case 'needsPairing':
       status.textContent = '';
-      if (linkedPairCode !== undefined && pairCode.value === '') {
+      if (installFirst) {
+        installSheet.openForPairing(enterInBrowser);
+      } else if (linkedPairCode !== undefined && pairCode.value === '') {
         pairCode.value = linkedPairCode;
         pairName.focus();
         if (!autoPaired && state.error === undefined) {
           autoPaired = true;
+          markPairCodeUsed(linkedPairCode);
           void viewer.pair(linkedPairCode, pairName.value.trim() || messages.pairNameDefault);
         }
       } else {
@@ -576,6 +596,11 @@ viewer.linkListener = (reply) => linkUi.receive(reply);
 viewer.forcePairing = linkedPairCode !== undefined;
 let autoPaired = false;
 const installSheet = initInstallSheet(messages, phone || navigator.maxTouchPoints > 1);
+function enterInBrowser(): void {
+  installFirst = false;
+  history.replaceState(null, '', window.location.pathname + window.location.search + withoutPairCode(window.location.hash));
+  show(lastState);
+}
 initPwa(element<HTMLButtonElement>('install-app'), {
   label: messages.installApp,
   open: () => {

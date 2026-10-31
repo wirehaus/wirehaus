@@ -62,6 +62,9 @@ export type Messages = {
   installLater: string;
   installNever: string;
   installClose: string;
+  installPairTitle: string;
+  installPairLead: string;
+  installPairBrowser: string;
   appFirstNote: string;
   linkSameStart: string;
   linkSameTitle: string;
@@ -319,6 +322,9 @@ const catalog: Record<string, Messages> = {
     installLater: 'Ahora no',
     installNever: 'No volver a mostrar',
     installClose: 'Cerrar',
+    installPairTitle: 'Instala la app para entrar',
+    installPairLead: 'Instálala ahora, en menos de un minuto, y se abrirá ya con tu sesión, sin escribir ningún código. Hazlo antes de que pasen 30 minutos.',
+    installPairBrowser: 'Entrar solo en el navegador',
     appFirstNote: 'Esta app guarda su propia sesión. Escribe tu dirección y entra una vez: después se queda iniciada.',
     linkSameStart: 'Traer mi sesión del navegador',
     linkSameTitle: 'Trae tu sesión',
@@ -603,6 +609,9 @@ const catalog: Record<string, Messages> = {
     installLater: 'Not now',
     installNever: 'Do not show again',
     installClose: 'Close',
+    installPairTitle: 'Install the app to sign in',
+    installPairLead: 'Install it now, in under a minute, and it will open already signed in, without typing any code. Do it within 30 minutes.',
+    installPairBrowser: 'Sign in in the browser only',
     appFirstNote: 'This app keeps its own session. Enter your address and sign in once: after that it stays signed in.',
     linkSameStart: 'Bring my session from the browser',
     linkSameTitle: 'Bring your session',
