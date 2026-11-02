@@ -4,6 +4,10 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ## [Sin publicar]
 
+### Corregido
+
+- El agente de Windows no arrancaba en equipos con la pantalla escalada (por ejemplo al 125 %): salía con «no output matches the primary monitor» porque la captura veía las pantallas con tamaño lógico y la entrada con tamaño físico. El ejecutable declara ahora en su manifiesto que gestiona la escala por monitor desde el primer instante, y ambos coinciden. Con la escala al 100 % no cambia nada.
+
 ### Cambiado
 
 - El ejecutable de Windows de las versiones publicadas se compila con MSVC en una VM de Windows (antes, con mingw desde Linux) y lleva información de versión y un manifiesto (`asInvoker`): los antivirus desconfían menos de los binarios sin firma que se presentan así, aunque no lo evita del todo. El paquete sigue sin firma de Microsoft; la sección de solución de problemas de la web explica cómo permitirlo.
