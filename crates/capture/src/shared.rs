@@ -85,6 +85,12 @@ impl<D: Duplicator> Lease<'_, D> {
         open: impl FnOnce() -> Result<D, CaptureError>,
     ) -> Result<Polled, CaptureError> {
         let mut state = self.shared.lock();
+        if state.generation != self.seen
+            && let Some(latest) = &state.latest
+        {
+            self.seen = state.generation;
+            return Ok(Polled::Frame(Arc::clone(latest)));
+        }
         if state.source.is_none() {
             match open() {
                 Ok(source) => state.source = Some(source),
@@ -240,5 +246,32 @@ mod tests {
         let mut lease = shared.lease();
         assert!(lease.ensure(unavailable).is_err());
         assert!(lease.ensure(script(vec![])).is_ok());
+    }
+
+    #[test]
+    fn another_session_reopens_after_a_loss_without_seeing_it() {
+        let shared = Shared::<Script>::new();
+        let mut first = shared.lease();
+        let mut second = shared.lease();
+        first
+            .poll(script(vec![Grab::Frame(bitmap(1)), Grab::Lost]))
+            .unwrap();
+        second.poll(unavailable).unwrap();
+        assert!(matches!(first.poll(unavailable).unwrap(), Polled::Lost));
+        assert_eq!(
+            *frame(second.poll(script(vec![Grab::Frame(bitmap(2))])).unwrap()),
+            bitmap(2)
+        );
+    }
+
+    #[test]
+    fn the_last_frame_is_forgotten_when_the_last_session_leaves() {
+        let shared = Shared::<Script>::new();
+        {
+            let mut lease = shared.lease();
+            lease.poll(script(vec![Grab::Frame(bitmap(9))])).unwrap();
+        }
+        let mut again = shared.lease();
+        assert!(matches!(again.poll(script(vec![])).unwrap(), Polled::Idle));
     }
 }
