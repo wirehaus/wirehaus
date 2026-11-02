@@ -28,6 +28,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- En Windows 11 24H2 y Windows Server 2025 el agente no llegaba nunca a sincronizar con el servicio de registro: el `curl.exe` 8.8.0 que traen falla con el error 43 al usar `-w` con HTTPS, y el agente lo usaba para leer el código de respuesta. Ahora lee el código de las cabeceras (`-i`). Sin esto esos equipos no comunicaban su versión ni dormían el túnel por inactividad.
 - En el móvil, la sesión ya no se cortaba a los pocos segundos con «proceso terminado, código -1»: el visor del teléfono no acusaba recibo de los fotogramas del escritorio que no muestra, y el agente cerraba la conexión por considerar que el visor se había parado. Además la terminal tardaba en mostrar el prompt porque compartía la conexión con ese vídeo sin consumir.
 - Cerrar la última terminal en el móvil volvía a un escritorio negro en el que tocar movía el ratón del ordenador remoto. Ahora vuelve a Archivos y el visor del móvil no envía entrada al escritorio.
 - Archivos mostraba «No hay carpetas compartidas» hasta que llegaba la lista; ahora muestra «Cargando carpetas...». El aviso de carpetas sin compartir ya no se repite en la barra inferior.

@@ -278,6 +278,34 @@ fn poll_of(body: &str) -> Duration {
     Duration::from_secs(seconds.clamp(MIN_POLL, MAX_POLL))
 }
 
+fn split_response(text: &str) -> Option<(u16, &str)> {
+    let mut rest = text;
+    loop {
+        let line_end = rest.find('\n')?;
+        let status_line = rest[..line_end].trim();
+        let mut parts = status_line.split_whitespace();
+        if !parts.next()?.starts_with("HTTP/") {
+            return None;
+        }
+        let status: u16 = parts.next()?.parse().ok()?;
+        let split = rest
+            .find("\r\n\r\n")
+            .map(|at| (at, 4))
+            .or_else(|| rest.find("\n\n").map(|at| (at, 2)))?;
+        let after = &rest[split.0 + split.1..];
+        if (100..200).contains(&status)
+            || (status == 200
+                && status_line
+                    .to_ascii_lowercase()
+                    .contains("connection established"))
+        {
+            rest = after;
+            continue;
+        }
+        return Some((status, after));
+    }
+}
+
 pub fn parse_reply(status: u16, body: &str) -> Result<Reply, ConnectorError> {
     match status {
         200 => match field(body, "state") {
@@ -312,7 +340,7 @@ impl Remote for CurlRemote {
             .args(["-sS", "--max-time", "25", "--proto", protocols])
             .args(["--proto-redir", "=https", "-X", "POST"])
             .args(["-H", "Content-Type: application/json"])
-            .args(["--data-binary", "@-", "-w", "\n%{http_code}"])
+            .args(["--data-binary", "@-", "-i"])
             .arg(format!("{}/v1/connector/sync", self.base))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -334,13 +362,8 @@ impl Remote for CurlRemote {
             )));
         }
         let text = String::from_utf8_lossy(&output.stdout);
-        let (body, status) = text
-            .rsplit_once('\n')
+        let (status, body) = split_response(&text)
             .ok_or_else(|| ConnectorError::Unreachable("empty answer".to_owned()))?;
-        let status = status
-            .trim()
-            .parse()
-            .map_err(|_| ConnectorError::Malformed)?;
         parse_reply(status, body)
     }
 }
@@ -746,6 +769,26 @@ mod tests {
         assert_eq!(fake.0.borrow().syncs.len(), count + 1);
         assert_eq!(k.phase(), Phase::Awake);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_status_and_body_are_read_from_included_headers() {
+        let plain =
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"state\":\"active\"}";
+        assert_eq!(split_response(plain), Some((200, "{\"state\":\"active\"}")));
+        let h2 = "HTTP/2 401 \r\nserver: x\r\n\r\n{\"error\":\"unauthorized\"}";
+        assert_eq!(
+            split_response(h2),
+            Some((401, "{\"error\":\"unauthorized\"}"))
+        );
+        let interim = "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nx: y\r\n\r\n{}";
+        assert_eq!(split_response(interim), Some((200, "{}")));
+        let proxy = "HTTP/1.1 200 Connection established\r\n\r\nHTTP/2 200\r\n\r\n{\"a\":1}";
+        assert_eq!(split_response(proxy), Some((200, "{\"a\":1}")));
+        let empty = "HTTP/2 204\r\nx: y\r\n\r\n";
+        assert_eq!(split_response(empty), Some((204, "")));
+        assert_eq!(split_response(""), None);
+        assert_eq!(split_response("garbage\r\n\r\nbody"), None);
     }
 
     #[test]
