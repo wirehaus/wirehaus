@@ -29,6 +29,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- En Windows, ver el escritorio desde el ordenador mientras el móvil tenía sesión abierta fallaba con «El agente no puede capturar la pantalla ni controlar el equipo»: cada sesión abría su propia copia de pantalla de DXGI y Windows solo admite una por proceso (la segunda devuelve «parámetro incorrecto»). Ahora todas las sesiones comparten una sola copia, que se abre con la primera y se libera al cerrar la última.
 - El instalador de Windows ya no falla con «El proceso no puede obtener acceso al archivo cloudflared.exe» al reinstalar con el túnel en marcha: localiza el conector por su ruta y su línea de órdenes, espera a que termine y reintenta la copia.
 - El audio de Windows ya no mete tramas de silencio de más cuando el sistema entrega los bloques con un poco de retraso (cortes y avance de la latencia); el silencio solo se emite tras 100 ms sin datos.
 - En Windows 11 24H2 y Windows Server 2025 el agente no llegaba nunca a sincronizar con el servicio de registro: el `curl.exe` 8.8.0 que traen falla con el error 43 al usar `-w` con HTTPS, y el agente lo usaba para leer el código de respuesta. Ahora lee el código de las cabeceras (`-i`). Sin esto esos equipos no comunicaban su versión ni dormían el túnel por inactividad.

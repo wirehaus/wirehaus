@@ -8,6 +8,9 @@ mod polling;
 #[cfg(any(windows, test))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod retry;
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod shared;
 #[cfg(windows)]
 mod windows;
 #[cfg(target_os = "linux")]

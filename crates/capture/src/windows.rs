@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dxgi_capture_rs::{CaptureError as DxgiError, DXGIManager};
@@ -6,6 +7,7 @@ use crate::bitmap::{Bitmap, Rect};
 use crate::error::CaptureError;
 use crate::polling::{Backoff, changed_regions, is_busy};
 use crate::retry::Retry;
+use crate::shared::{Duplicator, Grab, Lease, Polled, Shared};
 use crate::{Region, ScreenSource, Update};
 
 const FRAME_TIMEOUT_MS: u32 = 10;
@@ -17,21 +19,39 @@ pub type PrimarySize = Box<dyn Fn() -> Result<(u16, u16), CaptureError> + Send>;
 
 enum Acquired {
     Idle,
-    Frame { bitmap: Bitmap, reset: bool },
+    Frame { bitmap: Arc<Bitmap>, reset: bool },
 }
+
+struct Dxgi(DXGIManager);
+
+impl Duplicator for Dxgi {
+    fn grab(&mut self) -> Result<Grab, CaptureError> {
+        match self.0.capture_frame_components() {
+            Ok((pixels, (width, height))) => Ok(Grab::Frame(to_bitmap(pixels, width, height)?)),
+            Err(DxgiError::Timeout) => Ok(Grab::Idle),
+            Err(DxgiError::AccessLost | DxgiError::RefreshFailure | DxgiError::AccessDenied) => {
+                Ok(Grab::Lost)
+            }
+            Err(DxgiError::Fail(error)) => Err(CaptureError::Request(error.to_string())),
+        }
+    }
+}
+
+static DISPLAY: Shared<Dxgi> = Shared::new();
 
 struct Display {
     primary: PrimarySize,
-    manager: Option<DXGIManager>,
+    lease: Lease<'static, Dxgi>,
     retry: Retry,
 }
 
 impl Display {
     fn connect(primary: PrimarySize) -> Result<Self, CaptureError> {
-        let manager = open(&primary)?;
+        let mut lease = DISPLAY.lease();
+        lease.ensure(|| open(&primary).map(Dxgi))?;
         Ok(Self {
             primary,
-            manager: Some(manager),
+            lease,
             retry: Retry::default(),
         })
     }
@@ -42,29 +62,14 @@ impl Display {
             return Ok(Acquired::Idle);
         }
         let reset = self.retry.pending();
-        if self.manager.is_none() {
-            match open(&self.primary) {
-                Ok(manager) => self.manager = Some(manager),
-                Err(_) => return Ok(self.blocked(now)),
-            }
-        }
-        let Some(manager) = self.manager.as_mut() else {
-            return Ok(self.blocked(now));
-        };
-        match manager.capture_frame_components() {
-            Ok((pixels, (width, height))) => {
+        let primary = &self.primary;
+        match self.lease.poll(|| open(primary).map(Dxgi))? {
+            Polled::Frame(bitmap) => {
                 self.retry.recovered();
-                Ok(Acquired::Frame {
-                    bitmap: to_bitmap(pixels, width, height)?,
-                    reset,
-                })
+                Ok(Acquired::Frame { bitmap, reset })
             }
-            Err(DxgiError::Timeout) => Ok(Acquired::Idle),
-            Err(DxgiError::AccessLost | DxgiError::RefreshFailure | DxgiError::AccessDenied) => {
-                self.manager = None;
-                Ok(self.blocked(now))
-            }
-            Err(DxgiError::Fail(error)) => Err(CaptureError::Request(error.to_string())),
+            Polled::Idle => Ok(Acquired::Idle),
+            Polled::Lost | Polled::Unavailable => Ok(self.blocked(now)),
         }
     }
 
@@ -76,7 +81,7 @@ impl Display {
 
 pub struct WindowsScreen {
     display: Display,
-    previous: Option<Bitmap>,
+    previous: Option<Arc<Bitmap>>,
     backoff: Backoff,
 }
 
@@ -113,7 +118,12 @@ impl WindowsScreen {
         })
     }
 
-    fn frame(&mut self, now: Instant, bitmap: Bitmap, reset: bool) -> Result<Update, CaptureError> {
+    fn frame(
+        &mut self,
+        now: Instant,
+        bitmap: Arc<Bitmap>,
+        reset: bool,
+    ) -> Result<Update, CaptureError> {
         let (width, height) = (bitmap.width(), bitmap.height());
         let same_size = self
             .previous
@@ -129,7 +139,7 @@ impl WindowsScreen {
                     width,
                     height,
                 },
-                bitmap: bitmap.clone(),
+                bitmap: Bitmap::clone(&bitmap),
             }],
         };
         self.backoff
