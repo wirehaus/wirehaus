@@ -3,12 +3,13 @@ use std::time::{Duration, Instant};
 
 use dxgi_capture_rs::{CaptureError as DxgiError, DXGIManager};
 
+use crate::arrange::{self, OutputRect, View};
 use crate::bitmap::{Bitmap, Rect};
 use crate::error::CaptureError;
 use crate::polling::{Backoff, changed_regions, is_busy};
 use crate::retry::Retry;
 use crate::shared::{Duplicator, Grab, Lease, Polled, Shared};
-use crate::{Region, ScreenSource, Update};
+use crate::{Monitors, Region, ScreenSource, Update};
 
 const FRAME_TIMEOUT_MS: u32 = 10;
 const FIRST_FRAME_DEADLINE: Duration = Duration::from_secs(5);
@@ -37,23 +38,83 @@ impl Duplicator for Dxgi {
     }
 }
 
-static DISPLAY: Shared<Dxgi> = Shared::new();
+static DISPLAYS: [Shared<Dxgi>; MAX_OUTPUTS] = [const { Shared::new() }; MAX_OUTPUTS];
+
+struct Source {
+    output: usize,
+    lease: Lease<'static, Dxgi>,
+    last: Option<Arc<Bitmap>>,
+}
 
 struct Display {
-    primary: PrimarySize,
-    lease: Lease<'static, Dxgi>,
+    primary_size: PrimarySize,
+    primary: usize,
+    rects: Vec<OutputRect>,
+    view: View,
+    sources: Vec<Source>,
+    dirty: bool,
     retry: Retry,
 }
 
 impl Display {
-    fn connect(primary: PrimarySize) -> Result<Self, CaptureError> {
-        let mut lease = DISPLAY.lease();
-        lease.ensure(|| open(&primary).map(Dxgi))?;
-        Ok(Self {
+    fn connect(primary_size: PrimarySize) -> Result<Self, CaptureError> {
+        let rects = outputs();
+        let primary = find_primary(&rects, &primary_size)?;
+        let mut display = Self {
+            primary_size,
             primary,
-            lease,
+            rects,
+            view: View::Output(primary),
+            sources: Vec::new(),
+            dirty: false,
             retry: Retry::default(),
-        })
+        };
+        display.open_view(View::Output(primary))?;
+        Ok(display)
+    }
+
+    fn open_view(&mut self, view: View) -> Result<(), CaptureError> {
+        let outputs: Vec<usize> = match view {
+            View::Output(output) => vec![output],
+            View::All => (0..self.rects.len()).collect(),
+        };
+        let mut sources = Vec::with_capacity(outputs.len());
+        for output in outputs {
+            let mut lease = DISPLAYS
+                .get(output)
+                .ok_or_else(|| CaptureError::Connect(format!("output {output} is not reachable")))?
+                .lease();
+            lease.ensure(|| open_output(output))?;
+            sources.push(Source {
+                output,
+                lease,
+                last: None,
+            });
+        }
+        self.sources = sources;
+        self.view = view;
+        self.dirty = false;
+        self.retry = Retry::default();
+        Ok(())
+    }
+
+    fn refresh_layout(&mut self) -> bool {
+        let rects = outputs();
+        if rects.is_empty() || rects == self.rects {
+            return false;
+        }
+        self.rects = rects;
+        if let Ok(primary) = find_primary(&self.rects, &self.primary_size) {
+            self.primary = primary;
+        }
+        let valid = match self.view {
+            View::Output(output) => output < self.rects.len(),
+            View::All => self.rects.len() > 1,
+        };
+        if valid {
+            return false;
+        }
+        self.open_view(View::Output(self.primary)).is_ok()
     }
 
     fn acquire(&mut self) -> Result<Acquired, CaptureError> {
@@ -62,14 +123,49 @@ impl Display {
             return Ok(Acquired::Idle);
         }
         let reset = self.retry.pending();
-        let primary = &self.primary;
-        match self.lease.poll(|| open(primary).map(Dxgi))? {
-            Polled::Frame(bitmap) => {
-                self.retry.recovered();
-                Ok(Acquired::Frame { bitmap, reset })
+        let mut blocked = false;
+        for source in &mut self.sources {
+            let output = source.output;
+            match source.lease.poll(|| open_output(output))? {
+                Polled::Frame(bitmap) => {
+                    source.last = Some(bitmap);
+                    self.dirty = true;
+                }
+                Polled::Idle => {}
+                Polled::Lost | Polled::Unavailable => blocked = true,
             }
-            Polled::Idle => Ok(Acquired::Idle),
-            Polled::Lost | Polled::Unavailable => Ok(self.blocked(now)),
+        }
+        if blocked {
+            return Ok(self.blocked(now));
+        }
+        if !self.dirty {
+            return Ok(Acquired::Idle);
+        }
+        let bitmap = self.picture()?;
+        self.dirty = false;
+        self.retry.recovered();
+        Ok(Acquired::Frame { bitmap, reset })
+    }
+
+    fn picture(&self) -> Result<Arc<Bitmap>, CaptureError> {
+        match self.view {
+            View::Output(_) => self
+                .sources
+                .first()
+                .and_then(|source| source.last.clone())
+                .ok_or_else(|| CaptureError::Request("the display produced no frame".to_owned())),
+            View::All => {
+                let area = arrange::bounds(&self.rects)
+                    .ok_or_else(|| CaptureError::Request("there are no outputs".to_owned()))?;
+                let parts: Vec<(OutputRect, Option<&Bitmap>)> = self
+                    .sources
+                    .iter()
+                    .filter_map(|source| {
+                        Some((*self.rects.get(source.output)?, source.last.as_deref()))
+                    })
+                    .collect();
+                arrange::compose(area, &parts).map(Arc::new)
+            }
         }
     }
 
@@ -77,6 +173,26 @@ impl Display {
         self.retry.failed(now);
         Acquired::Idle
     }
+}
+
+fn outputs() -> Vec<OutputRect> {
+    DXGIManager::output_rects()
+}
+
+fn find_primary(rects: &[OutputRect], primary_size: &PrimarySize) -> Result<usize, CaptureError> {
+    let wanted = primary_size()?;
+    arrange::primary_output(rects, wanted).ok_or_else(|| {
+        CaptureError::Connect(format!(
+            "no output matches the primary monitor of {}x{}; outputs found: {rects:?}",
+            wanted.0, wanted.1
+        ))
+    })
+}
+
+fn open_output(output: usize) -> Result<Dxgi, CaptureError> {
+    DXGIManager::new_for_output(FRAME_TIMEOUT_MS, output)
+        .map(Dxgi)
+        .map_err(|error| CaptureError::Connect(format!("{error:?}")))
 }
 
 pub struct WindowsScreen {
@@ -184,37 +300,26 @@ impl ScreenSource for WindowsScreen {
     fn wake(&mut self) {
         self.backoff.wake();
     }
-}
 
-fn open(primary: &PrimarySize) -> Result<DXGIManager, CaptureError> {
-    let wanted = primary()?;
-    let mut manager = DXGIManager::new(FRAME_TIMEOUT_MS)
-        .map_err(|error| CaptureError::Connect(format!("{error:?}")))?;
-    let mut sizes = Vec::new();
-    for index in 0..MAX_OUTPUTS {
-        manager.set_capture_source_index(index);
-        let (width, height) = manager.geometry();
-        if width == 0 || height == 0 {
-            break;
+    fn monitors(&mut self) -> Monitors {
+        if self.display.refresh_layout() {
+            self.previous = None;
         }
-        sizes.push((width, height));
+        arrange::monitors(&self.display.rects, self.display.primary, self.display.view)
     }
-    let index = select_output(&sizes, wanted).ok_or_else(|| {
-        CaptureError::Connect(format!(
-            "no output matches the primary monitor of {}x{}; outputs found: {sizes:?}",
-            wanted.0, wanted.1
-        ))
-    })?;
-    manager.set_capture_source_index(index);
-    Ok(manager)
-}
 
-fn select_output(sizes: &[(usize, usize)], primary: (u16, u16)) -> Option<usize> {
-    let (width, height) = (usize::from(primary.0), usize::from(primary.1));
-    sizes
-        .iter()
-        .position(|&size| size == (width, height))
-        .or_else(|| sizes.iter().position(|&size| size == (height, width)))
+    fn select_monitor(&mut self, index: u8) -> bool {
+        self.display.refresh_layout();
+        let Some(view) = arrange::view_for(&self.display.rects, self.display.primary, index) else {
+            return false;
+        };
+        if view == self.display.view || self.display.open_view(view).is_err() {
+            return false;
+        }
+        self.previous = None;
+        self.backoff.wake();
+        true
+    }
 }
 
 fn to_bitmap(mut pixels: Vec<u8>, width: usize, height: usize) -> Result<Bitmap, CaptureError> {
@@ -242,24 +347,6 @@ fn to_bitmap(mut pixels: Vec<u8>, width: usize, height: usize) -> Result<Bitmap,
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn picks_the_output_with_the_size_of_the_primary_monitor() {
-        let sizes = [(1280, 1024), (1920, 1080), (1920, 1080)];
-        assert_eq!(select_output(&sizes, (1920, 1080)), Some(1));
-        assert_eq!(select_output(&sizes, (1280, 1024)), Some(0));
-    }
-
-    #[test]
-    fn a_rotated_primary_matches_its_unrotated_output() {
-        assert_eq!(select_output(&[(1920, 1080)], (1080, 1920)), Some(0));
-    }
-
-    #[test]
-    fn no_matching_output_is_not_guessed() {
-        assert_eq!(select_output(&[(1920, 1080)], (2560, 1440)), None);
-        assert_eq!(select_output(&[], (1920, 1080)), None);
-    }
 
     #[test]
     fn forces_opaque_pixels() {

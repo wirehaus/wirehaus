@@ -323,6 +323,7 @@ impl MonitorWatch {
             && backend.screen.select_monitor(index)
         {
             backend.input.select_monitor(index);
+            place_input(backend);
             self.checked = None;
         }
         if self
@@ -337,11 +338,21 @@ impl MonitorWatch {
         self.checked = Some(Instant::now());
         let current = backend.screen.monitors();
         if current != self.announced {
+            place_input(backend);
             send_message(link, &monitors_message(&current))?;
             link.flush()?;
             self.announced = current;
         }
         Ok(())
+    }
+}
+
+fn place_input(backend: &mut Backend) {
+    let current = backend.screen.monitors();
+    if let Some(active) = current.items.get(usize::from(current.active)) {
+        backend
+            .input
+            .place(active.x, active.y, active.width, active.height);
     }
 }
 

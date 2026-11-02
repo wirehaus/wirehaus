@@ -1,0 +1,3 @@
+Copia de dxgi-capture-rs 1.2.2 (MIT, RobbyV2) con dos funciones añadidas en `src/lib.rs`: `DXGIManager::new_for_output` (abre la duplicación de una salida concreta sin pasar por la salida 0) y `DXGIManager::output_rects` (rectángulos de escritorio de las salidas conectadas, en el mismo orden de índices que `set_capture_source_index`). Sin ellas no se pueden listar los monitores con su posición ni abrir una segunda salida mientras la primera ya está duplicada.
+
+Copy of dxgi-capture-rs 1.2.2 (MIT, RobbyV2) with two functions added in `src/lib.rs`: `DXGIManager::new_for_output` and `DXGIManager::output_rects`.

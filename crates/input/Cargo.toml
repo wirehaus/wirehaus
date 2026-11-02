@@ -26,6 +26,7 @@ macos-accessibility-client.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 enigo.workspace = true
+winput.workspace = true
 
 [lints]
 workspace = true

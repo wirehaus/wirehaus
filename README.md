@@ -80,7 +80,7 @@ El diseño y el código todavía no los ha auditado nadie ajeno al proyecto: ús
 |---|---|
 | Linux (X11) | Funciona |
 | macOS (Apple Silicon e Intel) | Funciona. Necesita los permisos Grabación de pantalla y Accesibilidad. Varias pantallas: se elige cuál ver |
-| Varias pantallas | Linux (X11) y macOS: botón de pantallas en el visor (cada pantalla o todas a la vez en Linux). Windows: solo la principal por ahora |
+| Varias pantallas | Botón de pantallas en el visor: cada pantalla por separado y, en Linux (X11) y Windows, también todas a la vez |
 | Windows 10 y 11 | Funciona. Debe ejecutarse dentro de la sesión de escritorio del usuario |
 | Linux con Wayland | Previsto |
 

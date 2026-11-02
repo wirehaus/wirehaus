@@ -3,6 +3,7 @@ use wirehaus_protocol::{Button, InputEvent};
 
 use crate::InputSink;
 use crate::error::InputError;
+use crate::placement::Area;
 use crate::pressed::Pressed;
 use crate::winmap::{PAUSE, scancode, wheel_notches};
 
@@ -21,6 +22,7 @@ pub fn primary_display_size() -> Result<(u16, u16), InputError> {
 pub struct WindowsInput {
     enigo: Enigo,
     pressed: Pressed,
+    area: Option<Area>,
 }
 
 impl std::fmt::Debug for WindowsInput {
@@ -38,10 +40,17 @@ impl WindowsInput {
         Ok(Self {
             enigo,
             pressed: Pressed::default(),
+            area: None,
         })
     }
 
     fn move_pointer(&mut self, x: u16, y: u16) -> Result<(), InputError> {
+        if let Some(area) = self.area {
+            let (x_abs, y_abs) = area
+                .locate(x, y)
+                .ok_or(InputError::PointerOutOfRange { x, y })?;
+            return winput::Mouse::set_position(x_abs, y_abs).map_err(request_error);
+        }
         let (wide, high) = self.enigo.main_display().map_err(request_error)?;
         if i32::from(x) >= wide || i32::from(y) >= high {
             return Err(InputError::PointerOutOfRange { x, y });
@@ -87,6 +96,21 @@ impl WindowsInput {
 }
 
 impl InputSink for WindowsInput {
+    fn place(&mut self, x: i32, y: i32, width: u16, height: u16) {
+        let area = Area {
+            x,
+            y,
+            width,
+            height,
+        };
+        let primary = self.enigo.main_display().unwrap_or((0, 0));
+        self.area = if area.is_primary(primary) {
+            None
+        } else {
+            Some(area)
+        };
+    }
+
     fn send(&mut self, event: InputEvent) -> Result<(), InputError> {
         match event {
             InputEvent::PointerMove { x, y } => self.move_pointer(x, y),

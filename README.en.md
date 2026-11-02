@@ -80,7 +80,7 @@ Nobody outside the project has audited the design or the code yet: use it knowin
 |---|---|
 | Linux (X11) | Works |
 | macOS (Apple Silicon and Intel) | Works. Needs the Screen Recording and Accessibility permissions. Several screens: you choose which to watch |
-| Several screens | Linux (X11) and macOS: screen button in the viewer (each screen, or all at once on Linux). Windows: primary only for now |
+| Several screens | Screen button in the viewer: each screen on its own and, on Linux (X11) and Windows, all of them at once |
 | Windows 10 and 11 | Works. Must run inside the user's desktop session |
 | Linux with Wayland | Planned |
 

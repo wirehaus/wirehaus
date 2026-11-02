@@ -3,6 +3,9 @@ mod error;
 mod macmap;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod placement;
 #[cfg(any(unix, windows, test))]
 mod pressed;
 #[cfg(windows)]
@@ -30,4 +33,6 @@ pub trait InputSink {
     }
 
     fn select_monitor(&mut self, _index: u8) {}
+
+    fn place(&mut self, _x: i32, _y: i32, _width: u16, _height: u16) {}
 }

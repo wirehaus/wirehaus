@@ -1,9 +1,10 @@
 [workspace]
 resolver = "3"
+exclude = ["vendor"]
 members = ["crates/protocol", "crates/capture", "crates/crypto", "crates/crypto-wasm", "crates/encode", "crates/input", "crates/clipboard", "crates/audio", "crates/vault", "crates/agent"]
 
 [workspace.package]
-version = "0.8.6"
+version = "0.8.7"
 edition = "2024"
 rust-version = "1.90"
 license-file = "LICENSE"
@@ -19,6 +20,7 @@ core-graphics = { version = "0.25", features = ["highsierra"] }
 macos-accessibility-client = "0.0.1"
 x11rb = "0.14"
 enigo = { version = "0.6", default-features = false }
+winput = { version = "0.2", default-features = false }
 arboard = { version = "3", default-features = false }
 dxgi-capture-rs = "1.2"
 
@@ -41,3 +43,6 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+[patch.crates-io]
+dxgi-capture-rs = { path = "vendor/dxgi-capture-rs" }

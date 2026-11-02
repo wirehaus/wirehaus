@@ -1,3 +1,6 @@
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod arrange;
 mod bitmap;
 mod damage;
 mod error;
