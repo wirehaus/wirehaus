@@ -288,10 +288,19 @@ fn split_response(text: &str) -> Option<(u16, &str)> {
             return None;
         }
         let status: u16 = parts.next()?.parse().ok()?;
-        let split = rest
-            .find("\r\n\r\n")
-            .map(|at| (at, 4))
-            .or_else(|| rest.find("\n\n").map(|at| (at, 2)))?;
+        let crlf = rest.find("\r\n\r\n").map(|at| (at, 4));
+        let lf = rest.find("\n\n").map(|at| (at, 2));
+        let split = match (crlf, lf) {
+            (Some(a), Some(b)) => {
+                if a.0 <= b.0 {
+                    a
+                } else {
+                    b
+                }
+            }
+            (Some(a), None) | (None, Some(a)) => a,
+            (None, None) => return None,
+        };
         let after = &rest[split.0 + split.1..];
         if (100..200).contains(&status)
             || (status == 200
@@ -552,7 +561,14 @@ mod tests {
         fake.0.borrow_mut().replies = replies;
         let dir = dir(name);
         let start = Instant::now();
-        let keeper = Keeper::new(fake.clone(), fake.clone(), &dir, "ana", HALF_HOUR, start);
+        let keeper = Keeper::new(
+            fake.clone(),
+            fake.clone(),
+            &dir,
+            "cristobal",
+            HALF_HOUR,
+            start,
+        );
         (keeper, fake, dir, start)
     }
 
@@ -732,7 +748,14 @@ mod tests {
         tunnel.0.borrow_mut().1 = true;
         let dir = dir("restartfails");
         let start = Instant::now();
-        let mut k = Keeper::new(fake.clone(), tunnel.clone(), &dir, "ana", HALF_HOUR, start);
+        let mut k = Keeper::new(
+            fake.clone(),
+            tunnel.clone(),
+            &dir,
+            "cristobal",
+            HALF_HOUR,
+            start,
+        );
         k.step(start, Duration::ZERO, false);
         let woke = start + POLL_EVERY;
         k.step(woke, Duration::ZERO, false);
@@ -785,6 +808,8 @@ mod tests {
         assert_eq!(split_response(interim), Some((200, "{}")));
         let proxy = "HTTP/1.1 200 Connection established\r\n\r\nHTTP/2 200\r\n\r\n{\"a\":1}";
         assert_eq!(split_response(proxy), Some((200, "{\"a\":1}")));
+        let mixed = "HTTP/1.1 200 OK\nx: y\n\nbody\r\n\r\nmore";
+        assert_eq!(split_response(mixed), Some((200, "body\r\n\r\nmore")));
         let empty = "HTTP/2 204\r\nx: y\r\n\r\n";
         assert_eq!(split_response(empty), Some((204, "")));
         assert_eq!(split_response(""), None);
@@ -838,7 +863,7 @@ mod tests {
     fn the_registry_address_comes_from_the_environment_a_file_or_the_public_host() {
         let dir = dir("url");
         assert_eq!(
-            registry_url(&dir, "ana.wirehaus.dev").as_deref(),
+            registry_url(&dir, "cristobal.wirehaus.dev").as_deref(),
             Some("https://api.wirehaus.dev")
         );
         fs::write(
@@ -847,12 +872,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            registry_url(&dir, "ana.pruebas.wirehaus.dev").as_deref(),
+            registry_url(&dir, "cristobal.pruebas.wirehaus.dev").as_deref(),
             Some("https://api-pruebas.wirehaus.dev")
         );
         fs::write(dir.join(REGISTRY_FILE), "http://evil.example\n").unwrap();
         assert_eq!(
-            registry_url(&dir, "ana.wirehaus.dev").as_deref(),
+            registry_url(&dir, "cristobal.wirehaus.dev").as_deref(),
             Some("https://api.wirehaus.dev")
         );
         assert_eq!(registry_url(&dir, "localhost"), None);
@@ -861,8 +886,8 @@ mod tests {
 
     #[test]
     fn names_and_tokens_that_could_break_the_request_are_refused_before_sending() {
-        assert!(valid_name("ana-2"));
-        assert!(!valid_name("Ana"));
+        assert!(valid_name("cristobal-2"));
+        assert!(!valid_name("Cristobal"));
         assert!(!valid_name("a\"b"));
         assert!(!valid_name(""));
         assert!(valid_token("eyJhIjoi+/=_-"));
@@ -870,7 +895,7 @@ mod tests {
         assert!(!valid_token(&"a".repeat(MAX_TOKEN + 1)));
         let remote = CurlRemote::new("https://api.example");
         assert_eq!(
-            remote.sync("ana", "a\"b", false),
+            remote.sync("cristobal", "a\"b", false),
             Err(ConnectorError::Malformed)
         );
     }

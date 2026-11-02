@@ -134,10 +134,10 @@ test('access names follow the same rules as the registry', async () => {
   assert.equal(validAccessName('x'.repeat(33)), false);
   assert.equal(cleanName('  Maria.wirehaus.dev/ '), 'maria');
   assert.equal(cleanName('https://app.wirehaus.dev/cristobal'), 'cristobal');
-  assert.equal(nameFromPath('/Ana/'), 'ana');
+  assert.equal(nameFromPath('/Cristobal/'), 'cristobal');
   assert.equal(nameFromPath('/'), undefined);
-  const page = { protocol: 'https:', host: 'app.wirehaus.dev', pathname: '/ana', hash: '' };
-  assert.equal(namedByPath(page), 'ana');
-  assert.equal(namedByPath({ ...page, hash: '#agent=ana.wirehaus.dev' }), undefined);
+  const page = { protocol: 'https:', host: 'app.wirehaus.dev', pathname: '/cristobal', hash: '' };
+  assert.equal(namedByPath(page), 'cristobal');
+  assert.equal(namedByPath({ ...page, hash: '#agent=cristobal.wirehaus.dev' }), undefined);
   assert.equal(namedByPath({ ...page, pathname: '/' }), undefined);
 });

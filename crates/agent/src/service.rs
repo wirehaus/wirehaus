@@ -679,12 +679,12 @@ mod tests {
     fn config() -> ServiceConfig {
         ServiceConfig {
             executable: PathBuf::from("/Applications/Wirehaus/wirehaus-agent"),
-            state_dir: PathBuf::from("/Users/ana/.config/wirehaus"),
+            state_dir: PathBuf::from("/Users/cristobal/.config/wirehaus"),
             viewer_dir: PathBuf::from("/Applications/Wirehaus/viewer"),
             listen: "127.0.0.1:7878".parse().unwrap(),
             public_hosts: Vec::new(),
             viewer_origins: Vec::new(),
-            log_dir: PathBuf::from("/Users/ana/Library/Logs/Wirehaus"),
+            log_dir: PathBuf::from("/Users/cristobal/Library/Logs/Wirehaus"),
         }
     }
 
@@ -695,7 +695,7 @@ mod tests {
             [
                 "/Applications/Wirehaus/wirehaus-agent",
                 "--state-dir",
-                "/Users/ana/.config/wirehaus",
+                "/Users/cristobal/.config/wirehaus",
                 "serve",
                 "--viewer-dir",
                 "/Applications/Wirehaus/viewer",
@@ -708,14 +708,14 @@ mod tests {
     #[test]
     fn the_public_host_and_viewer_origin_reach_the_service_command_line() {
         let mut settings = config();
-        settings.public_hosts = vec!["ana.wirehaus.dev".to_owned()];
+        settings.public_hosts = vec!["cristobal.wirehaus.dev".to_owned()];
         settings.viewer_origins = vec!["https://app.wirehaus.dev".to_owned()];
         let items = arguments(&settings);
         assert_eq!(
             items[items.len() - 4..],
             [
                 "--public-host",
-                "ana.wirehaus.dev",
+                "cristobal.wirehaus.dev",
                 "--viewer-origin",
                 "https://app.wirehaus.dev"
             ]
@@ -735,7 +735,7 @@ mod tests {
         assert!(text.contains("<key>RunAtLoad</key>\n    <true/>"));
         assert!(text.contains("<key>KeepAlive</key>\n    <true/>"));
         assert!(text.contains("<key>LimitLoadToSessionType</key>\n    <string>Aqua</string>"));
-        assert!(text.contains("<string>/Users/ana/Library/Logs/Wirehaus/agent.log</string>"));
+        assert!(text.contains("<string>/Users/cristobal/Library/Logs/Wirehaus/agent.log</string>"));
         assert!(text.contains("        <string>serve</string>\n"));
         assert!(text.ends_with("</plist>\n"));
     }
@@ -755,17 +755,17 @@ mod tests {
 
     #[test]
     fn launchctl_arguments_target_the_users_graphical_domain() {
-        let path = plist_path(Path::new("/Users/ana"));
+        let path = plist_path(Path::new("/Users/cristobal"));
         assert_eq!(
             path,
-            PathBuf::from("/Users/ana/Library/LaunchAgents/wirehaus.agent.plist")
+            PathBuf::from("/Users/cristobal/Library/LaunchAgents/wirehaus.agent.plist")
         );
         assert_eq!(
             bootstrap_arguments("501", &path),
             [
                 "bootstrap",
                 "gui/501",
-                "/Users/ana/Library/LaunchAgents/wirehaus.agent.plist"
+                "/Users/cristobal/Library/LaunchAgents/wirehaus.agent.plist"
             ]
         );
         assert_eq!(
@@ -774,8 +774,8 @@ mod tests {
         );
         assert_eq!(print_arguments("501"), ["print", "gui/501/wirehaus.agent"]);
         assert_eq!(
-            log_dir(Path::new("/Users/ana")),
-            PathBuf::from("/Users/ana/Library/Logs/Wirehaus")
+            log_dir(Path::new("/Users/cristobal")),
+            PathBuf::from("/Users/cristobal/Library/Logs/Wirehaus")
         );
     }
 
@@ -797,10 +797,12 @@ mod tests {
         assert!(text.contains("Restart=on-failure\n"));
         assert!(text.contains("NoNewPrivileges=yes\n"));
         assert!(text.contains(
-            "ExecStart=\"/Applications/Wirehaus/wirehaus-agent\" \"--state-dir\" \"/Users/ana/.config/wirehaus\" \"serve\""
+            "ExecStart=\"/Applications/Wirehaus/wirehaus-agent\" \"--state-dir\" \"/Users/cristobal/.config/wirehaus\" \"serve\""
         ));
         assert!(
-            text.contains("StandardOutput=append:/Users/ana/Library/Logs/Wirehaus/agent.log\n")
+            text.contains(
+                "StandardOutput=append:/Users/cristobal/Library/Logs/Wirehaus/agent.log\n"
+            )
         );
     }
 
@@ -813,8 +815,8 @@ mod tests {
         ));
         assert!(text.contains("NoDisplay=true\n"));
         assert_eq!(
-            autostart_path(Path::new("/home/ana")),
-            PathBuf::from("/home/ana/.config/autostart/wirehaus-agent.desktop")
+            autostart_path(Path::new("/home/cristobal")),
+            PathBuf::from("/home/cristobal/.config/autostart/wirehaus-agent.desktop")
         );
     }
 
@@ -838,12 +840,12 @@ mod tests {
             ["--user", "stop", "wirehaus-agent.service"]
         );
         assert_eq!(
-            unit_path(Path::new("/home/ana")),
-            PathBuf::from("/home/ana/.config/systemd/user/wirehaus-agent.service")
+            unit_path(Path::new("/home/cristobal")),
+            PathBuf::from("/home/cristobal/.config/systemd/user/wirehaus-agent.service")
         );
         assert_eq!(
-            systemd_log_dir(Path::new("/home/ana")),
-            PathBuf::from("/home/ana/.local/state/wirehaus")
+            systemd_log_dir(Path::new("/home/cristobal")),
+            PathBuf::from("/home/cristobal/.local/state/wirehaus")
         );
     }
 

@@ -198,7 +198,7 @@ mod tests {
     fn config() -> TaskConfig {
         TaskConfig {
             launcher: PathBuf::from(r"C:\Program Files\Wirehaus\wirehaus-agentd.exe"),
-            state_dir: PathBuf::from(r"C:\Users\Ana Pérez\AppData\Roaming\Wirehaus"),
+            state_dir: PathBuf::from(r"C:\Users\Cristobal Pérez\AppData\Roaming\Wirehaus"),
             viewer_dir: PathBuf::from(r"C:\Program Files\Wirehaus\viewer"),
             listen: "127.0.0.1:7878".parse().unwrap(),
             public_hosts: Vec::new(),
@@ -233,10 +233,10 @@ mod tests {
     #[test]
     fn the_public_host_and_viewer_origin_are_quoted_arguments() {
         let mut settings = config();
-        settings.public_hosts = vec!["ana.wirehaus.dev".to_owned()];
+        settings.public_hosts = vec!["cristobal.wirehaus.dev".to_owned()];
         settings.viewer_origins = vec!["https://app.wirehaus.dev".to_owned()];
         assert!(arguments(&settings).ends_with(
-            " --public-host \"ana.wirehaus.dev\" --viewer-origin \"https://app.wirehaus.dev\""
+            " --public-host \"cristobal.wirehaus.dev\" --viewer-origin \"https://app.wirehaus.dev\""
         ));
     }
 
@@ -244,7 +244,7 @@ mod tests {
     fn paths_with_spaces_are_quoted_and_the_listener_stays_on_loopback() {
         assert_eq!(
             arguments(&config()),
-            "--state-dir \"C:\\Users\\Ana Pérez\\AppData\\Roaming\\Wirehaus\" serve --viewer-dir \"C:\\Program Files\\Wirehaus\\viewer\" --listen 127.0.0.1:7878"
+            "--state-dir \"C:\\Users\\Cristobal Pérez\\AppData\\Roaming\\Wirehaus\" serve --viewer-dir \"C:\\Program Files\\Wirehaus\\viewer\" --listen 127.0.0.1:7878"
         );
     }
 

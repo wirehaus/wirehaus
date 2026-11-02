@@ -1346,14 +1346,17 @@ mod tests {
     #[test]
     fn the_verbatim_prefix_that_windows_adds_is_not_shown_to_people() {
         assert_eq!(
-            plain(Path::new(r"\\?\C:\Users\Ana\Docs")),
-            r"C:\Users\Ana\Docs"
+            plain(Path::new(r"\\?\C:\Users\Cristobal\Docs")),
+            r"C:\Users\Cristobal\Docs"
         );
         assert_eq!(
             plain(Path::new(r"\\?\UNC\server\share\x")),
             r"\\server\share\x"
         );
-        assert_eq!(plain(Path::new("/home/ana/docs")), "/home/ana/docs");
+        assert_eq!(
+            plain(Path::new("/home/cristobal/docs")),
+            "/home/cristobal/docs"
+        );
         assert_eq!(plain(Path::new(r"C:\plain")), r"C:\plain");
     }
 }
