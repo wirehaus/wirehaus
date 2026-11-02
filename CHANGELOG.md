@@ -6,6 +6,7 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Cambiado
 
+- El audio se codifica a 128 kbit/s (antes 64) y el visor reserva más colchón contra la variación de la red: 150 ms de latencia objetivo y hasta 500 ms en cola.
 - El agente comunica su versión al servicio de registro en cada sincronización (cada 2 minutos). El servicio guarda la última versión de cada dirección y puede exigir una versión mínima: un agente por debajo, o que no comunica versión, se deja dormido (se borra su túnel y no se vuelve a despertar) y el visor avisa de que hay que actualizarlo. El agente sigue actualizándose por su cuenta sin pasar por el registro, así que al actualizarse vuelve a admitirse solo. Sin versión mínima configurada no cambia nada.
 - La pantalla de emparejamiento tiene un botón de cámara junto al código: abre la cámara dentro de la app y entra al leer el QR de la terminal (acepta el enlace completo o solo el código), sin escribir nada.
 - La aplicación instalada ya no hace zoom (pellizco, doble toque ni al enfocar campos de texto), no rebota ni se desplaza fuera de sus listas y no selecciona texto fuera de los campos y la terminal.
@@ -28,6 +29,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- El instalador de Windows ya no falla con «El proceso no puede obtener acceso al archivo cloudflared.exe» al reinstalar con el túnel en marcha: localiza el conector por su ruta y su línea de órdenes, espera a que termine y reintenta la copia.
+- El audio de Windows ya no mete tramas de silencio de más cuando el sistema entrega los bloques con un poco de retraso (cortes y avance de la latencia); el silencio solo se emite tras 100 ms sin datos.
 - En Windows 11 24H2 y Windows Server 2025 el agente no llegaba nunca a sincronizar con el servicio de registro: el `curl.exe` 8.8.0 que traen falla con el error 43 al usar `-w` con HTTPS, y el agente lo usaba para leer el código de respuesta. Ahora lee el código de las cabeceras (`-i`). Sin esto esos equipos no comunicaban su versión ni dormían el túnel por inactividad.
 - En el móvil, la sesión ya no se cortaba a los pocos segundos con «proceso terminado, código -1»: el visor del teléfono no acusaba recibo de los fotogramas del escritorio que no muestra, y el agente cerraba la conexión por considerar que el visor se había parado. Además la terminal tardaba en mostrar el prompt porque compartía la conexión con ese vídeo sin consumir.
 - Cerrar la última terminal en el móvil volvía a un escritorio negro en el que tocar movía el ratón del ordenador remoto. Ahora vuelve a Archivos y el visor del móvil no envía entrada al escritorio.

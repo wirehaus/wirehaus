@@ -4,8 +4,8 @@ import { encodeAudioStart, encodeAudioStop } from './audioprotocol.js';
 const SAMPLE_RATE = 48_000;
 const CHANNELS = 2;
 const PACKET_MICROSECONDS = 20_000;
-const TARGET_LATENCY = 0.08;
-const MAX_AHEAD = 0.35;
+const TARGET_LATENCY = 0.15;
+const MAX_AHEAD = 0.5;
 
 export type Playback = { startAt: number; next: number };
 

@@ -13,7 +13,7 @@ use crate::source::resample::Converter;
 use crate::source::{AudioSource, Interrupter};
 
 const QUEUE_FRAMES: usize = 25;
-const IDLE: Duration = Duration::from_millis(20);
+const IDLE: Duration = Duration::from_millis(100);
 
 pub struct Loopback {
     frames: Receiver<Vec<f32>>,

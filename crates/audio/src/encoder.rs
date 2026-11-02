@@ -3,7 +3,7 @@ use opus_pure::{Application, MAX_PACKET_BYTES, OpusEncoder};
 use crate::error::AudioError;
 use crate::{CHANNELS, FRAME_SAMPLES, FRAME_VALUES, SAMPLE_RATE};
 
-const BITRATE: i32 = 64_000;
+const BITRATE: i32 = 128_000;
 
 pub struct Encoder {
     inner: OpusEncoder,
@@ -67,7 +67,7 @@ mod tests {
         let mut frame_out = vec![0f32; FRAME_VALUES];
         for frame in pcm.as_chunks::<FRAME_VALUES>().0 {
             let packet = encoder.encode(frame).unwrap();
-            assert!(!packet.is_empty() && packet.len() < 400, "{}", packet.len());
+            assert!(!packet.is_empty() && packet.len() < 700, "{}", packet.len());
             decoder
                 .decode(&packet, FRAME_SAMPLES, &mut frame_out)
                 .unwrap();

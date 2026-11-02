@@ -25,6 +25,6 @@ test('after an underrun it resynchronises instead of playing in the past', () =>
 });
 
 test('when too much is queued ahead the new buffer is dropped to keep latency low', () => {
-  assert.equal(planPlayback(10, 10.5, 0.02), null);
-  assert.notEqual(planPlayback(10, 10.2, 0.02), null);
+  assert.equal(planPlayback(10, 10.7, 0.02), null);
+  assert.notEqual(planPlayback(10, 10.3, 0.02), null);
 });

@@ -42,8 +42,35 @@ function Remove-Tunnel {
         Stop-ScheduledTask -TaskName $tunnelTask -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $tunnelTask -Confirm:$false
     }
-    Get-Process cloudflared -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $cloudflared } | Stop-Process -Force
+    Stop-Connector
     Remove-Item -Force $cloudflared, $tunnelToken -ErrorAction SilentlyContinue
+}
+
+function Stop-Connector {
+    $running = @(Get-CimInstance Win32_Process -Filter "Name = 'cloudflared.exe'" -ErrorAction SilentlyContinue | Where-Object {
+        ($_.ExecutablePath -and $_.ExecutablePath -ieq $cloudflared) -or ($_.CommandLine -and $_.CommandLine.IndexOf($cloudflared, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    })
+    foreach ($process in $running) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    $ids = @($running | ForEach-Object { $_.ProcessId })
+    $deadline = (Get-Date).AddSeconds(15)
+    while ($ids.Count -gt 0 -and (Get-Date) -lt $deadline -and (Get-Process -Id $ids -ErrorAction SilentlyContinue)) {
+        Start-Sleep -Milliseconds 300
+    }
+}
+
+function Copy-Connector([string]$from) {
+    for ($try = 1; $try -le 20; $try++) {
+        try {
+            Copy-Item -Force $from $cloudflared
+            return
+        } catch {
+            if ($try -eq 20) { throw }
+            Stop-Connector
+            Start-Sleep -Milliseconds 750
+        }
+    }
 }
 
 function Get-File([string]$url, [string]$path) {
@@ -105,7 +132,7 @@ function Install-Tunnel {
         Get-Connector $download
     }
     Remove-Tunnel
-    Copy-Item -Force $download $cloudflared
+    Copy-Connector $download
     if (-not $ConnectorFile) { Remove-Item -Force $download -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Force $dataDir | Out-Null
     (Get-Content -Raw $TunnelTokenFile).Trim() | Set-Content -NoNewline -Encoding ascii $tunnelToken
@@ -147,7 +174,7 @@ function Confirm-Tunnel {
         & $mullvad split-tunnel app add $cloudflared 2>$null | Out-Null
         & $mullvad split-tunnel set on 2>$null | Out-Null
         Stop-ScheduledTask -TaskName $tunnelTask -ErrorAction SilentlyContinue
-        Get-Process cloudflared -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $cloudflared } | Stop-Process -Force
+        Stop-Connector
         Start-ScheduledTask -TaskName $tunnelTask
         if (Wait-Tunnel 40) {
             Say 'Túnel conectado.' 'Tunnel connected.'
