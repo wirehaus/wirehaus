@@ -418,7 +418,9 @@ pub fn stage(
         || !root.join("viewer").is_dir()
         || !root.join("viewer").join("manifest.sha256").is_file()
     {
-        return Err(UpdateError::Package("agent or viewer missing"));
+        return Err(UpdateError::Package(
+            "agent or viewer missing; an antivirus may have removed it (see https://wirehaus.dev/docs/#antivirus)",
+        ));
     }
     Ok(root)
 }
@@ -498,7 +500,9 @@ pub fn smoke_test(root: &Path, exe_name: &str, expected: Version) -> Result<(), 
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
-        .map_err(|_| UpdateError::Package("the new agent does not run"))?;
+        .map_err(|_| UpdateError::Package(
+                "the new agent does not run; an antivirus may have blocked it (see https://wirehaus.dev/docs/#antivirus)",
+            ))?;
     let text = String::from_utf8_lossy(&output.stdout);
     let reported = text
         .strip_prefix("wirehaus-agent ")

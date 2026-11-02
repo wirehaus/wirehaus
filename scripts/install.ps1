@@ -228,6 +228,25 @@ if ($Uninstall) {
     exit 0
 }
 
+function Assert-Agent {
+    $present = $true
+    foreach ($file in $files) {
+        if (-not (Test-Path (Join-Path $InstallDir $file))) { $present = $false }
+    }
+    $runs = $false
+    if ($present) {
+        try {
+            & $agent --version *> $null
+            $runs = ($LASTEXITCODE -eq 0)
+        } catch { }
+    }
+    if (-not ($present -and $runs)) {
+        $es = "Windows Defender u otro antivirus ha bloqueado o borrado el agente (es un falso positivo: Wirehaus controla teclado, ratón y pantalla, y los antivirus desconfían de los programas nuevos sin firma de pago). Excluye estas carpetas y vuelve a ejecutar el comando de instalación. En PowerShell como administrador: Add-MpPreference -ExclusionPath `"`$env:LOCALAPPDATA\Programs\Wirehaus`",`"`$env:LOCALAPPDATA\Wirehaus`". Más detalles: https://wirehaus.dev/docs/#antivirus"
+        $en = "Windows Defender or another antivirus blocked or deleted the agent (this is a false positive: Wirehaus controls keyboard, mouse and screen, and antivirus programs distrust new programs without a paid signature). Exclude these folders and run the install command again. In PowerShell as administrator: Add-MpPreference -ExclusionPath `"`$env:LOCALAPPDATA\Programs\Wirehaus`",`"`$env:LOCALAPPDATA\Wirehaus`". More details: https://wirehaus.dev/docs/#antivirus"
+        if ($spanish) { throw $es } else { throw $en }
+    }
+}
+
 function Step([string]$tag, [string]$es, [string]$en) {
     Write-Host ''
     Write-Host $tag -ForegroundColor Cyan -NoNewline
@@ -250,6 +269,7 @@ New-Item -ItemType Directory -Force $InstallDir | Out-Null
 foreach ($file in $files) {
     Copy-Item -Force (Join-Path $source $file) $InstallDir
 }
+Assert-Agent
 $viewer = Join-Path $InstallDir 'viewer'
 Remove-Item -Recurse -Force $viewer -ErrorAction SilentlyContinue
 Copy-Item -Recurse -Force (Join-Path $source 'viewer') $viewer

@@ -9,7 +9,9 @@ release="target/$target/release"
 name="wirehaus-$version-windows-x64"
 out="target/dist/$name"
 
-if [ "$target" = x86_64-pc-windows-gnu ]; then
+if [ "${WIREHAUS_PREBUILT:-}" = 1 ]; then
+  :
+elif [ "$target" = x86_64-pc-windows-gnu ]; then
   scripts/build-windows.sh >/dev/null
 else
   cargo build --release --locked --target "$target" -p wirehaus-agent

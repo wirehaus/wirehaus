@@ -1,0 +1,74 @@
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+
+const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>
+"#;
+
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_owned());
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u16>().unwrap_or(0));
+    let numbers: Vec<u16> = (0..3).map(|_| parts.next().unwrap_or(0)).collect();
+    let (major, minor, patch) = (numbers[0], numbers[1], numbers[2]);
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap_or_default());
+    let manifest = out.join("wirehaus.manifest");
+    fs::write(&manifest, MANIFEST).expect("cannot write the manifest");
+    let manifest_path = manifest.to_string_lossy().replace('\\', "/");
+    let resource = format!(
+        r#"#include <winver.h>
+
+1 24 "{manifest_path}"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION {major},{minor},{patch},0
+PRODUCTVERSION {major},{minor},{patch},0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Wirehaus"
+      VALUE "FileDescription", "Wirehaus agent"
+      VALUE "FileVersion", "{version}"
+      VALUE "InternalName", "wirehaus-agent"
+      VALUE "LegalCopyright", "Copyright 2026 Cristobal Tormo"
+      VALUE "OriginalFilename", "wirehaus-agent.exe"
+      VALUE "ProductName", "Wirehaus"
+      VALUE "ProductVersion", "{version}"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1200
+  END
+END
+"#
+    );
+    let script = out.join("wirehaus.rc");
+    fs::write(&script, resource).expect("cannot write the resource script");
+    embed_resource::compile(&script, embed_resource::NONE)
+        .manifest_required()
+        .expect("cannot embed the Windows resources");
+}
