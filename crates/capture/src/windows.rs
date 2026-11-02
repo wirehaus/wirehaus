@@ -7,7 +7,7 @@ use crate::arrange::{self, OutputRect, View};
 use crate::bitmap::{Bitmap, Rect};
 use crate::error::CaptureError;
 use crate::polling::{Backoff, changed_regions, is_busy};
-use crate::retry::Retry;
+use crate::retry::{RETRY_INTERVAL, Retry};
 use crate::shared::{Duplicator, Grab, Lease, Polled, Shared};
 use crate::{Monitors, Region, ScreenSource, Update};
 
@@ -44,6 +44,7 @@ struct Source {
     output: usize,
     lease: Lease<'static, Dxgi>,
     last: Option<Arc<Bitmap>>,
+    next_try: Option<Instant>,
 }
 
 struct Display {
@@ -84,11 +85,13 @@ impl Display {
                 .get(output)
                 .ok_or_else(|| CaptureError::Connect(format!("output {output} is not reachable")))?
                 .lease();
-            lease.ensure(|| open_output(output))?;
+            let expected = self.rects.get(output).copied();
+            lease.ensure(|| open_output(output, expected))?;
             sources.push(Source {
                 output,
                 lease,
                 last: None,
+                next_try: None,
             });
         }
         self.sources = sources;
@@ -107,14 +110,14 @@ impl Display {
         if let Ok(primary) = find_primary(&self.rects, &self.primary_size) {
             self.primary = primary;
         }
-        let valid = match self.view {
-            View::Output(output) => output < self.rects.len(),
-            View::All => self.rects.len() > 1,
+        let count = self.rects.len();
+        let target = match self.view {
+            View::Output(output) if output < count => return false,
+            View::All if count > 1 && self.sources.len() == count => return false,
+            View::All if count > 1 => View::All,
+            View::Output(_) | View::All => View::Output(self.primary),
         };
-        if valid {
-            return false;
-        }
-        self.open_view(View::Output(self.primary)).is_ok()
+        self.open_view(target).is_ok() || self.open_view(View::Output(self.primary)).is_ok()
     }
 
     fn acquire(&mut self) -> Result<Acquired, CaptureError> {
@@ -123,16 +126,26 @@ impl Display {
             return Ok(Acquired::Idle);
         }
         let reset = self.retry.pending();
+        let single = self.sources.len() == 1;
         let mut blocked = false;
         for source in &mut self.sources {
+            if source.next_try.is_some_and(|at| now < at) {
+                continue;
+            }
             let output = source.output;
-            match source.lease.poll(|| open_output(output))? {
+            let expected = self.rects.get(output).copied();
+            match source.lease.poll(|| open_output(output, expected))? {
                 Polled::Frame(bitmap) => {
                     source.last = Some(bitmap);
+                    source.next_try = None;
                     self.dirty = true;
                 }
-                Polled::Idle => {}
-                Polled::Lost | Polled::Unavailable => blocked = true,
+                Polled::Idle => source.next_try = None,
+                Polled::Lost | Polled::Unavailable if single => blocked = true,
+                Polled::Lost | Polled::Unavailable => {
+                    source.next_try = Some(now + RETRY_INTERVAL);
+                    self.dirty = true;
+                }
             }
         }
         if blocked {
@@ -189,10 +202,21 @@ fn find_primary(rects: &[OutputRect], primary_size: &PrimarySize) -> Result<usiz
     })
 }
 
-fn open_output(output: usize) -> Result<Dxgi, CaptureError> {
-    DXGIManager::new_for_output(FRAME_TIMEOUT_MS, output)
-        .map(Dxgi)
-        .map_err(|error| CaptureError::Connect(format!("{error:?}")))
+fn open_output(output: usize, expected: Option<OutputRect>) -> Result<Dxgi, CaptureError> {
+    let manager = DXGIManager::new_for_output(FRAME_TIMEOUT_MS, output)
+        .map_err(|error| CaptureError::Connect(format!("{error:?}")))?;
+    if let Some(rect) = expected {
+        let wanted = (
+            usize::try_from(rect.2 - rect.0).unwrap_or(0),
+            usize::try_from(rect.3 - rect.1).unwrap_or(0),
+        );
+        if manager.geometry() != wanted {
+            return Err(CaptureError::Connect(format!(
+                "output {output} is not the monitor that was listed"
+            )));
+        }
+    }
+    Ok(Dxgi(manager))
 }
 
 pub struct WindowsScreen {
@@ -309,7 +333,6 @@ impl ScreenSource for WindowsScreen {
     }
 
     fn select_monitor(&mut self, index: u8) -> bool {
-        self.display.refresh_layout();
         let Some(view) = arrange::view_for(&self.display.rects, self.display.primary, index) else {
             return false;
         };

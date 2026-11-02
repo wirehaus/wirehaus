@@ -104,11 +104,7 @@ impl InputSink for WindowsInput {
             height,
         };
         let primary = self.enigo.main_display().unwrap_or((0, 0));
-        self.area = if area.is_primary(primary) {
-            None
-        } else {
-            Some(area)
-        };
+        self.area = area.resolve(primary);
     }
 
     fn send(&mut self, event: InputEvent) -> Result<(), InputError> {

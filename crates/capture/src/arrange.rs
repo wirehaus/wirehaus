@@ -53,6 +53,12 @@ fn clamp(value: i32) -> u16 {
     u16::try_from(value.max(0)).unwrap_or(u16::MAX)
 }
 
+fn whole_desktop(rects: &[OutputRect]) -> Option<OutputRect> {
+    let all = bounds(rects)?;
+    let (width, height) = size(all);
+    (u16::try_from(width).is_ok() && u16::try_from(height).is_ok()).then_some(all)
+}
+
 pub fn monitors(rects: &[OutputRect], primary: usize, view: View) -> Monitors {
     let order = order(rects, primary);
     if order.len() < 2 {
@@ -73,11 +79,12 @@ pub fn monitors(rects: &[OutputRect], primary: usize, view: View) -> Monitors {
             }
         })
         .collect();
+    let all = whole_desktop(rects);
     let active = match view {
         View::Output(output) => order.iter().position(|&index| index == output).unwrap_or(0),
         View::All => items.len(),
     };
-    if let Some(all) = bounds(rects) {
+    if let Some(all) = all {
         let (width, height) = size(all);
         items.push(Monitor {
             x: all.0,
@@ -102,7 +109,7 @@ pub fn view_for(rects: &[OutputRect], primary: usize, index: u8) -> Option<View>
     let index = usize::from(index);
     match index.cmp(&order.len()) {
         std::cmp::Ordering::Less => Some(View::Output(order[index])),
-        std::cmp::Ordering::Equal => Some(View::All),
+        std::cmp::Ordering::Equal => whole_desktop(rects).map(|_| View::All),
         std::cmp::Ordering::Greater => None,
     }
 }
@@ -228,6 +235,13 @@ mod tests {
     fn an_output_without_a_frame_yet_stays_black() {
         let canvas = compose(MAIN, &[(MAIN, None)]).unwrap();
         assert_eq!(canvas.row(0)[0], 0);
+    }
+
+    #[test]
+    fn a_desktop_wider_than_the_protocol_allows_is_not_offered() {
+        let rects = [(0, 0, 40_000, 100), (40_000, 0, 80_000, 100)];
+        assert_eq!(monitors(&rects, 0, View::Output(0)).items.len(), 2);
+        assert_eq!(view_for(&rects, 0, 2), None);
     }
 
     #[test]

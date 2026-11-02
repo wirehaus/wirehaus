@@ -349,10 +349,11 @@ impl MonitorWatch {
 
 fn place_input(backend: &mut Backend) {
     let current = backend.screen.monitors();
-    if let Some(active) = current.items.get(usize::from(current.active)) {
-        backend
+    match current.items.get(usize::from(current.active)) {
+        Some(active) => backend
             .input
-            .place(active.x, active.y, active.width, active.height);
+            .place(active.x, active.y, active.width, active.height),
+        None => backend.input.place(0, 0, 0, 0),
     }
 }
 
