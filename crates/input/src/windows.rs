@@ -36,7 +36,11 @@ impl std::fmt::Debug for WindowsInput {
 impl WindowsInput {
     pub fn connect() -> Result<Self, InputError> {
         let _ = enigo::set_dpi_awareness();
-        let enigo = Enigo::new(&Settings::default()).map_err(request_error)?;
+        let settings = Settings {
+            windows_subject_to_mouse_speed_and_acceleration_level: true,
+            ..Settings::default()
+        };
+        let enigo = Enigo::new(&settings).map_err(request_error)?;
         Ok(Self {
             enigo,
             pressed: Pressed::default(),

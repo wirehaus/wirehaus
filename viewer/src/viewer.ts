@@ -1000,7 +1000,11 @@ export class Viewer {
         this.lockPointer();
       }
       this.canvas.focus();
-      this.canvas.setPointerCapture(event.pointerId);
+      try {
+        this.canvas.setPointerCapture(event.pointerId);
+      } catch {
+        void 0;
+      }
       this.pressedButtons.add(button);
     } else {
       this.pressedButtons.delete(button);

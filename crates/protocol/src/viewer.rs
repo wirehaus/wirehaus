@@ -82,6 +82,7 @@ mod tests {
     fn round_trips_input_and_acknowledgements() {
         for message in [
             ViewerMessage::Input(InputEvent::PointerMove { x: 5, y: 9 }),
+            ViewerMessage::Input(InputEvent::PointerRelative { dx: -7, dy: 300 }),
             ViewerMessage::Input(InputEvent::Button {
                 button: Button::Middle,
                 pressed: true,

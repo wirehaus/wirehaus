@@ -11,6 +11,8 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ### Corregido
 
+- El movimiento relativo del modo juego usaba una etiqueta de mensaje que ya tenía el acuse de fotogramas, y el agente lo tomaba por un acuse: la cámara no se movía. Ahora tiene la suya. En Windows el movimiento relativo se enviaba como posición absoluta (enigo lo convierte por defecto) y los juegos, que leen entrada directa, no veían desplazamiento; ahora se envía como movimiento relativo real. Un agente 0.9.0 o anterior corta la sesión si recibe el evento nuevo, así que se actualiza solo antes de usar el modo juego.
+- Capturar el puntero en el modo juego fallaba con una excepción al pedir la captura del puntero.
 - El agente de Windows no arrancaba en equipos con la pantalla escalada (por ejemplo al 125 %): salía con «no output matches the primary monitor» porque la captura veía las pantallas con tamaño lógico y la entrada con tamaño físico. El ejecutable declara ahora en su manifiesto que gestiona la escala por monitor desde el primer instante, y ambos coinciden. Con la escala al 100 % no cambia nada.
 
 ### Cambiado

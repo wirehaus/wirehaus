@@ -188,7 +188,7 @@ export function encodeInput(event: InputEvent): Uint8Array {
     case 'relative': {
       const out = new Uint8Array(5);
       const view = new DataView(out.buffer);
-      view.setUint8(0, 4);
+      view.setUint8(0, 8);
       view.setInt16(1, event.dx);
       view.setInt16(3, event.dy);
       return out;

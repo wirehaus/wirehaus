@@ -45,7 +45,7 @@ const POINTER_MOVE: u8 = 0;
 const BUTTON: u8 = 1;
 const WHEEL: u8 = 2;
 const KEY: u8 = 3;
-const POINTER_RELATIVE: u8 = 4;
+const POINTER_RELATIVE: u8 = 8;
 
 impl InputEvent {
     #[must_use]
