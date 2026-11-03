@@ -1088,7 +1088,7 @@ fn a_tampered_record_ends_the_session() {
     );
 }
 
-const BATCH_LIMIT: u32 = 8;
+const BATCH_LIMIT: u32 = 12;
 
 fn next_frame_end(client: &mut Client) -> u32 {
     loop {
@@ -1130,12 +1130,12 @@ fn stops_sending_until_the_viewer_acknowledges_batches() {
     assert_eq!(next_frame_end(&mut client), 0);
     for expected in 1..BATCH_LIMIT {
         painter.fill_rectangle(
-            i16::try_from(expected * 30).unwrap(),
+            i16::try_from(expected * 20).unwrap(),
             0x00ff_0000 + expected,
         );
         assert_eq!(next_frame_end(&mut client), expected);
     }
-    painter.fill_rectangle(130, 0x0000_ff00);
+    painter.fill_rectangle(i16::try_from(BATCH_LIMIT * 20).unwrap(), 0x0000_ff00);
     assert!(
         nothing_arrives_within(&mut client, Duration::from_millis(800)),
         "the agent kept sending although the batch limit was reached"

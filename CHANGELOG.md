@@ -4,6 +4,11 @@ Sigue el formato de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) 
 
 ## [Sin publicar]
 
+### Añadido
+
+- Modo juego en el visor (opción del menú, solo con ratón): captura el puntero y envía movimiento relativo, para que los juegos que recentran el cursor muevan la cámara. Los botones laterales del ratón (atrás y adelante) llegan al equipo remoto en ese modo y el navegador deja de usarlos para navegar. Un agente anterior a esta versión corta la sesión si recibe esos eventos, por eso solo se envían con el modo juego activado.
+- El agente captura y codifica a 60 fotogramas por segundo (antes 30); si el equipo no da abasto, el ritmo baja solo.
+
 ### Corregido
 
 - El agente de Windows no arrancaba en equipos con la pantalla escalada (por ejemplo al 125 %): salía con «no output matches the primary monitor» porque la captura veía las pantallas con tamaño lógico y la entrada con tamaño físico. El ejecutable declara ahora en su manifiesto que gestiona la escala por monitor desde el primer instante, y ambos coinciden. Con la escala al 100 % no cambia nada.

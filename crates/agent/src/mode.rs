@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
 pub const ENTER_FRACTION: f32 = 0.30;
-pub const ENTER_WINDOW: usize = 6;
-pub const ENTER_HITS: usize = 4;
+pub const ENTER_WINDOW: usize = 12;
+pub const ENTER_HITS: usize = 8;
 pub const LEAVE_FRACTION: f32 = 0.05;
-pub const LEAVE_TICKS: u32 = 24;
+pub const LEAVE_TICKS: u32 = 48;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {

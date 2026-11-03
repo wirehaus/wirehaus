@@ -6,7 +6,7 @@ use crate::error::ServerError;
 use crate::link::FrameSink;
 use crate::mode::{Mode, ModePolicy, Transition};
 
-const VIDEO_FRAME_RATE: f32 = 30.0;
+const VIDEO_FRAME_RATE: f32 = 60.0;
 const KBPS_PER_QUALITY_POINT: u32 = 100;
 
 #[derive(Debug)]

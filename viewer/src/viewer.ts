@@ -63,7 +63,14 @@ export type ViewerState =
 
 type Phase = 'handshake' | 'authenticating' | 'streaming';
 
-const BUTTONS: Record<number, MouseButton> = { 0: 'left', 1: 'middle', 2: 'right' };
+const BUTTONS: Record<number, MouseButton> = {
+  0: 'left',
+  1: 'middle',
+  2: 'right',
+  3: 'back',
+  4: 'forward',
+};
+const RELATIVE_MAX = 32767;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 const HANDSHAKE_WATCHDOG_MS = 20_000;
 const HANDSHAKE_RETRIES = 4;
@@ -94,6 +101,10 @@ export class Viewer {
   hostKeyEnabled = false;
   onHostKey: (() => void) | null = null;
   private readonly pressedButtons = new Set<MouseButton>();
+  private gameMode = false;
+  private relativeX = 0;
+  private relativeY = 0;
+  private relativeQueued = false;
   private pendingMove: { x: number; y: number } | null = null;
   private zoom = 1;
   private panX = 0;
@@ -836,6 +847,13 @@ export class Viewer {
     const canvas = this.canvas;
     canvas.addEventListener('contextmenu', (event) => event.preventDefault());
     canvas.addEventListener('pointermove', (event) => this.queueMove(event));
+    for (const name of ['mousedown', 'mouseup', 'auxclick']) {
+      canvas.addEventListener(name, (event) => {
+        if ((event as MouseEvent).button > 2) {
+          event.preventDefault();
+        }
+      });
+    }
     canvas.addEventListener('pointerdown', (event) => this.pointerButton(event, true));
     canvas.addEventListener('pointerup', (event) => this.pointerButton(event, false));
     canvas.addEventListener('pointercancel', (event) => {
@@ -847,10 +865,100 @@ export class Viewer {
     canvas.addEventListener('keydown', (event) => this.key(event, true));
     canvas.addEventListener('keyup', (event) => this.key(event, false));
     canvas.addEventListener('blur', () => this.releaseAll());
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement !== canvas) {
+        this.relativeX = 0;
+        this.relativeY = 0;
+      }
+    });
+  }
+
+  setGameMode(on: boolean): void {
+    this.gameMode = on;
+    if (!on) {
+      this.unlockPointer();
+    }
+  }
+
+  isGameMode(): boolean {
+    return this.gameMode;
+  }
+
+  unlockPointer(): void {
+    if (document.pointerLockElement === this.canvas) {
+      document.exitPointerLock();
+    }
+    this.relativeX = 0;
+    this.relativeY = 0;
+  }
+
+  private lockPointer(): void {
+    if (document.pointerLockElement === this.canvas) {
+      return;
+    }
+    const canvas = this.canvas as HTMLCanvasElement & {
+      requestPointerLock(options?: { unadjustedMovement?: boolean }): Promise<void> | undefined;
+    };
+    try {
+      const raw = canvas.requestPointerLock({ unadjustedMovement: true });
+      if (raw !== undefined) {
+        raw.catch(() => {
+          try {
+            canvas.requestPointerLock();
+          } catch {
+            return;
+          }
+        });
+      }
+    } catch {
+      return;
+    }
+  }
+
+  private relativeMove(event: PointerEvent): void {
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return;
+    }
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    const parts = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [];
+    for (const part of parts.length > 0 ? parts : [event]) {
+      this.relativeX += part.movementX * scaleX;
+      this.relativeY += part.movementY * scaleY;
+    }
+    if (!this.relativeQueued) {
+      this.relativeQueued = true;
+      requestAnimationFrame(() => this.flushRelative());
+    }
+  }
+
+  private flushRelative(): void {
+    this.relativeQueued = false;
+    if (document.pointerLockElement !== this.canvas) {
+      this.relativeX = 0;
+      this.relativeY = 0;
+      return;
+    }
+    let dx = Math.round(this.relativeX);
+    let dy = Math.round(this.relativeY);
+    this.relativeX -= dx;
+    this.relativeY -= dy;
+    while (dx !== 0 || dy !== 0) {
+      const stepX = Math.max(-RELATIVE_MAX, Math.min(RELATIVE_MAX, dx));
+      const stepY = Math.max(-RELATIVE_MAX, Math.min(RELATIVE_MAX, dy));
+      this.sendInput({ kind: 'relative', dx: stepX, dy: stepY });
+      dx -= stepX;
+      dy -= stepY;
+    }
   }
 
   private queueMove(event: PointerEvent): void {
     if (event.pointerType === 'touch') {
+      return;
+    }
+    if (document.pointerLockElement === this.canvas) {
+      this.relativeMove(event);
       return;
     }
     const position = this.position(event);
@@ -875,15 +983,22 @@ export class Viewer {
     }
     const button = BUTTONS[event.button];
     event.preventDefault();
-    if (button === undefined) {
+    if (
+      button === undefined ||
+      ((button === 'back' || button === 'forward') && !this.gameMode && !this.pressedButtons.has(button))
+    ) {
       return;
     }
-    const position = this.position(event);
+    const locked = document.pointerLockElement === this.canvas;
+    const position = locked ? null : this.position(event);
     if (position !== null) {
       this.pendingMove = null;
       this.sendInput({ kind: 'pointer', ...position });
     }
     if (pressed) {
+      if (this.gameMode && !locked) {
+        this.lockPointer();
+      }
       this.canvas.focus();
       this.canvas.setPointerCapture(event.pointerId);
       this.pressedButtons.add(button);
@@ -915,6 +1030,7 @@ export class Viewer {
         return;
       }
       if (verdict === 'exit') {
+        this.unlockPointer();
         this.releaseAll();
         this.onHostKey?.();
         return;

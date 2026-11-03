@@ -43,10 +43,11 @@ const MONITORS = 4;
 const MONITOR_LEN = 13;
 const MAX_MONITORS = 16;
 
-export type MouseButton = 'left' | 'middle' | 'right';
+export type MouseButton = 'left' | 'middle' | 'right' | 'back' | 'forward';
 
 export type InputEvent =
   | { kind: 'pointer'; x: number; y: number }
+  | { kind: 'relative'; dx: number; dy: number }
   | { kind: 'button'; button: MouseButton; pressed: boolean }
   | { kind: 'wheel'; horizontal: number; vertical: number }
   | { kind: 'key'; code: number; pressed: boolean };
@@ -184,6 +185,14 @@ export function encodeInput(event: InputEvent): Uint8Array {
       view.setUint16(3, event.y);
       return out;
     }
+    case 'relative': {
+      const out = new Uint8Array(5);
+      const view = new DataView(out.buffer);
+      view.setUint8(0, 4);
+      view.setInt16(1, event.dx);
+      view.setInt16(3, event.dy);
+      return out;
+    }
     case 'button':
       return Uint8Array.of(1, buttonTag(event.button), event.pressed ? 1 : 0);
     case 'wheel': {
@@ -233,6 +242,10 @@ function buttonTag(button: MouseButton): number {
       return 1;
     case 'right':
       return 2;
+    case 'back':
+      return 3;
+    case 'forward':
+      return 4;
   }
 }
 

@@ -5,6 +5,8 @@ pub enum Button {
     Left,
     Middle,
     Right,
+    Back,
+    Forward,
 }
 
 impl Button {
@@ -13,6 +15,8 @@ impl Button {
             Button::Left => 0,
             Button::Middle => 1,
             Button::Right => 2,
+            Button::Back => 3,
+            Button::Forward => 4,
         }
     }
 
@@ -21,6 +25,8 @@ impl Button {
             0 => Ok(Button::Left),
             1 => Ok(Button::Middle),
             2 => Ok(Button::Right),
+            3 => Ok(Button::Back),
+            4 => Ok(Button::Forward),
             other => Err(ProtocolError::InvalidInput(other)),
         }
     }
@@ -29,6 +35,7 @@ impl Button {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputEvent {
     PointerMove { x: u16, y: u16 },
+    PointerRelative { dx: i16, dy: i16 },
     Button { button: Button, pressed: bool },
     Wheel { horizontal: i16, vertical: i16 },
     Key { code: u16, pressed: bool },
@@ -38,6 +45,7 @@ const POINTER_MOVE: u8 = 0;
 const BUTTON: u8 = 1;
 const WHEEL: u8 = 2;
 const KEY: u8 = 3;
+const POINTER_RELATIVE: u8 = 4;
 
 impl InputEvent {
     #[must_use]
@@ -47,6 +55,12 @@ impl InputEvent {
                 let mut out = vec![POINTER_MOVE];
                 out.extend_from_slice(&x.to_be_bytes());
                 out.extend_from_slice(&y.to_be_bytes());
+                out
+            }
+            InputEvent::PointerRelative { dx, dy } => {
+                let mut out = vec![POINTER_RELATIVE];
+                out.extend_from_slice(&dx.to_be_bytes());
+                out.extend_from_slice(&dy.to_be_bytes());
                 out
             }
             InputEvent::Button { button, pressed } => {
@@ -80,6 +94,13 @@ impl InputEvent {
                 Ok(InputEvent::PointerMove {
                     x: u16::from_be_bytes([x0, x1]),
                     y: u16::from_be_bytes([y0, y1]),
+                })
+            }
+            POINTER_RELATIVE => {
+                let [x0, x1, y0, y1] = fixed(tag, body)?;
+                Ok(InputEvent::PointerRelative {
+                    dx: i16::from_be_bytes([x0, x1]),
+                    dy: i16::from_be_bytes([y0, y1]),
                 })
             }
             BUTTON => {
@@ -128,8 +149,17 @@ fn flag(value: u8) -> Result<bool, ProtocolError> {
 mod tests {
     use super::*;
 
-    const SAMPLES: [InputEvent; 6] = [
+    const SAMPLES: [InputEvent; 9] = [
         InputEvent::PointerMove { x: 1919, y: 1079 },
+        InputEvent::PointerRelative { dx: -300, dy: 12 },
+        InputEvent::Button {
+            button: Button::Back,
+            pressed: true,
+        },
+        InputEvent::Button {
+            button: Button::Forward,
+            pressed: false,
+        },
         InputEvent::Button {
             button: Button::Right,
             pressed: true,
@@ -224,8 +254,8 @@ mod tests {
     #[test]
     fn rejects_an_unknown_button() {
         assert_eq!(
-            InputEvent::decode(&[1, 7, 1]),
-            Err(ProtocolError::InvalidInput(7))
+            InputEvent::decode(&[1, 9, 1]),
+            Err(ProtocolError::InvalidInput(9))
         );
     }
 }

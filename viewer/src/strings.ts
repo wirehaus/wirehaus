@@ -99,6 +99,9 @@ export type Messages = {
   connectingDetail: string;
   wakingDetail: string;
   keyboard: string;
+  gameModeOn: string;
+  gameModeOff: string;
+  gameModeHint: string;
   immersiveOn: string;
   immersiveOff: string;
   updateAvailable: string;
@@ -362,6 +365,9 @@ const catalog: Record<string, Messages> = {
     connectingDetail: 'Estableciendo una conexión cifrada con tu ordenador.',
     wakingDetail: 'Preparando el acceso a tu ordenador. Solo tarda unos segundos la primera vez tras un rato sin usarlo.',
     keyboard: 'Teclado',
+    gameModeOn: 'Activar modo juego (ratón relativo)',
+    gameModeOff: 'Desactivar modo juego',
+    gameModeHint: 'Modo juego: haz clic en la pantalla para capturar el ratón; Esc lo suelta',
     immersiveOn: 'Pantalla completa y teclado',
     immersiveOff: 'Salir de pantalla completa',
     updateAvailable: 'Hay una versión nueva de Wirehaus.',
@@ -653,6 +659,9 @@ const catalog: Record<string, Messages> = {
     connectingDetail: 'Setting up an encrypted connection to your computer.',
     wakingDetail: 'Getting access to your computer ready. It only takes a few seconds the first time after a while without use.',
     keyboard: 'Keyboard',
+    gameModeOn: 'Turn on game mode (relative mouse)',
+    gameModeOff: 'Turn off game mode',
+    gameModeHint: 'Game mode: click the screen to capture the mouse; Esc releases it',
     immersiveOn: 'Full screen and keyboard',
     immersiveOff: 'Leave full screen',
     updateAvailable: 'A new version of Wirehaus is available.',

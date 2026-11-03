@@ -60,6 +60,31 @@ impl WindowsInput {
             .map_err(request_error)
     }
 
+    fn move_relative(&mut self, dx: i16, dy: i16) -> Result<(), InputError> {
+        let (left, top, wide, high) = match self.area {
+            Some(area) => (
+                area.x,
+                area.y,
+                i32::from(area.width),
+                i32::from(area.height),
+            ),
+            None => {
+                let (wide, high) = self.enigo.main_display().map_err(request_error)?;
+                (0, 0, wide, high)
+            }
+        };
+        let (x, y) = winput::Mouse::position().map_err(request_error)?;
+        let next_x = (x + i32::from(dx)).clamp(left, left + wide - 1);
+        let next_y = (y + i32::from(dy)).clamp(top, top + high - 1);
+        let (step_x, step_y) = (next_x - x, next_y - y);
+        if step_x == 0 && step_y == 0 {
+            return Ok(());
+        }
+        self.enigo
+            .move_mouse(step_x, step_y, Coordinate::Rel)
+            .map_err(request_error)
+    }
+
     fn button(&mut self, button: Button, pressed: bool) -> Result<(), InputError> {
         self.enigo
             .button(to_button(button), direction(pressed))
@@ -110,6 +135,7 @@ impl InputSink for WindowsInput {
     fn send(&mut self, event: InputEvent) -> Result<(), InputError> {
         match event {
             InputEvent::PointerMove { x, y } => self.move_pointer(x, y),
+            InputEvent::PointerRelative { dx, dy } => self.move_relative(dx, dy),
             InputEvent::Button { button, pressed } => {
                 self.button(button, pressed)?;
                 self.pressed.button(button, pressed);
@@ -158,6 +184,8 @@ fn to_button(button: Button) -> enigo::Button {
         Button::Left => enigo::Button::Left,
         Button::Right => enigo::Button::Right,
         Button::Middle => enigo::Button::Middle,
+        Button::Back => enigo::Button::Back,
+        Button::Forward => enigo::Button::Forward,
     }
 }
 

@@ -103,10 +103,35 @@ impl MacInput {
         let (kind, button) = match self.held.last() {
             Some(Button::Left) => (CGEventType::LeftMouseDragged, CGMouseButton::Left),
             Some(Button::Right) => (CGEventType::RightMouseDragged, CGMouseButton::Right),
-            Some(Button::Middle) => (CGEventType::OtherMouseDragged, CGMouseButton::Center),
+            Some(Button::Middle | Button::Back | Button::Forward) => {
+                (CGEventType::OtherMouseDragged, CGMouseButton::Center)
+            }
             None => (CGEventType::MouseMoved, CGMouseButton::Left),
         };
         let event = self.mouse_event(kind, button)?;
+        event.post(TAP);
+        Ok(())
+    }
+
+    fn move_relative(&mut self, dx: i16, dy: i16) -> Result<(), InputError> {
+        let bounds = self.current_display().bounds();
+        self.position = CGPoint::new(
+            (self.position.x + f64::from(dx))
+                .clamp(bounds.origin.x, bounds.origin.x + bounds.size.width - 1.0),
+            (self.position.y + f64::from(dy))
+                .clamp(bounds.origin.y, bounds.origin.y + bounds.size.height - 1.0),
+        );
+        let (kind, button) = match self.held.last() {
+            Some(Button::Left) => (CGEventType::LeftMouseDragged, CGMouseButton::Left),
+            Some(Button::Right) => (CGEventType::RightMouseDragged, CGMouseButton::Right),
+            Some(Button::Middle | Button::Back | Button::Forward) => {
+                (CGEventType::OtherMouseDragged, CGMouseButton::Center)
+            }
+            None => (CGEventType::MouseMoved, CGMouseButton::Left),
+        };
+        let event = self.mouse_event(kind, button)?;
+        event.set_integer_value_field(EventField::MOUSE_EVENT_DELTA_X, i64::from(dx));
+        event.set_integer_value_field(EventField::MOUSE_EVENT_DELTA_Y, i64::from(dy));
         event.post(TAP);
         Ok(())
     }
@@ -128,6 +153,11 @@ impl MacInput {
                 CGEventType::OtherMouseUp,
                 CGMouseButton::Center,
             ),
+            Button::Back | Button::Forward => (
+                CGEventType::OtherMouseDown,
+                CGEventType::OtherMouseUp,
+                CGMouseButton::Center,
+            ),
         };
         let count = if pressed {
             self.held.retain(|&held| held != button);
@@ -140,6 +170,13 @@ impl MacInput {
         };
         let event = self.mouse_event(if pressed { down } else { up }, mac_button)?;
         event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, count);
+        match button {
+            Button::Back => event.set_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER, 3),
+            Button::Forward => {
+                event.set_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER, 4);
+            }
+            _ => {}
+        }
         event.post(TAP);
         Ok(())
     }
@@ -223,6 +260,7 @@ impl InputSink for MacInput {
     fn send(&mut self, event: InputEvent) -> Result<(), InputError> {
         match event {
             InputEvent::PointerMove { x, y } => self.move_pointer(x, y),
+            InputEvent::PointerRelative { dx, dy } => self.move_relative(dx, dy),
             InputEvent::Button { button, pressed } => {
                 self.press_button(button, pressed)?;
                 self.pressed.button(button, pressed);

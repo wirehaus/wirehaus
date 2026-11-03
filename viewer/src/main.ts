@@ -74,6 +74,7 @@ const menu = element<HTMLElement>('menu');
 const layoutSelect = element<HTMLSelectElement>('layout');
 const langSelect = element<HTMLSelectElement>('lang');
 const immersive = element<HTMLButtonElement>('immersive');
+const gameMode = element<HTMLButtonElement>('game-mode');
 type KeyboardLock = { lock(codes?: string[]): Promise<void>; unlock(): void };
 const keyboardLock = (navigator as Navigator & { keyboard?: KeyboardLock }).keyboard;
 const captureHint = element<HTMLElement>('capture-hint');
@@ -153,6 +154,8 @@ forget.textContent = messages.forget;
 splashForget.textContent = messages.forget;
 splashReconnect.textContent = messages.reconnect;
 immersive.textContent = messages.immersiveOn;
+gameMode.textContent = messages.gameModeOn;
+gameMode.hidden = coarse;
 menuButton.setAttribute('aria-label', messages.menu);
 zoomReset.setAttribute('aria-label', messages.zoomReset);
 zoomReset.title = messages.zoomReset;
@@ -957,6 +960,15 @@ function setImmersive(on: boolean): void {
 immersive.addEventListener('click', () => {
   closeMenu();
   setImmersive(!document.body.classList.contains('immersive'));
+});
+gameMode.addEventListener('click', () => {
+  closeMenu();
+  const on = !viewer.isGameMode();
+  viewer.setGameMode(on);
+  gameMode.textContent = on ? messages.gameModeOff : messages.gameModeOn;
+  if (on) {
+    showHint(messages.gameModeHint);
+  }
 });
 immersiveExit.title = messages.captureExit;
 immersiveExit.setAttribute('aria-label', messages.captureExit);

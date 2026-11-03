@@ -49,6 +49,9 @@ test('rejects short, truncated and oversized frames', () => {
 test('encodes input events with the agent layout', () => {
   assert.deepEqual([...encodeInput({ kind: 'key', code: 0x0102, pressed: true })], [3, 1, 2, 1]);
   assert.deepEqual([...encodeInput({ kind: 'pointer', x: 0x0102, y: 0x0304 })], [0, 1, 2, 3, 4]);
+  assert.deepEqual([...encodeInput({ kind: 'relative', dx: -2, dy: 0x0304 })], [4, 0xff, 0xfe, 3, 4]);
+  assert.deepEqual([...encodeInput({ kind: 'button', button: 'back', pressed: true })], [1, 3, 1]);
+  assert.deepEqual([...encodeInput({ kind: 'button', button: 'forward', pressed: false })], [1, 4, 0]);
   assert.deepEqual([...encodeInput({ kind: 'button', button: 'right', pressed: true })], [1, 2, 1]);
   assert.deepEqual([...encodeInput({ kind: 'button', button: 'left', pressed: false })], [1, 0, 0]);
   assert.deepEqual([...encodeInput({ kind: 'wheel', horizontal: -3, vertical: 120 })], [2, 0xff, 0xfd, 0, 120]);

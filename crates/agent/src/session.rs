@@ -21,10 +21,11 @@ use crate::state::ClipboardMode;
 use crate::stream::{Stream, send_message};
 use crate::terminal::{Event, Terminals, default_shell};
 
-const FRAME_INTERVAL: Duration = Duration::from_millis(33);
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_MESSAGES_PER_TICK: usize = 256;
-const REVOCATION_CHECK_TICKS: u32 = 30;
+const MIN_MESSAGES_PER_TICK: usize = 16;
+const REVOCATION_CHECK_TICKS: u32 = 60;
 const LINK_ATTEMPTS_PER_SESSION: u32 = 12;
 const PING_INTERVAL: Duration = Duration::from_secs(20);
 const MONITOR_CHECK_INTERVAL: Duration = Duration::from_secs(4);
@@ -391,9 +392,12 @@ fn receive(
 ) -> Result<bool, ServerError> {
     let mut handled = 0;
     while handled < MAX_MESSAGES_PER_TICK {
-        let wait = deadline.saturating_duration_since(Instant::now());
+        let mut wait = deadline.saturating_duration_since(Instant::now());
         if wait.is_zero() {
-            break;
+            if handled >= MIN_MESSAGES_PER_TICK {
+                break;
+            }
+            wait = Duration::from_millis(1);
         }
         match link.receive(wait)? {
             Incoming::Frame(frame) if frame.channel == Channel::Terminal => {
@@ -436,7 +440,11 @@ fn receive(
                 }
                 handled += 1;
             }
-            Incoming::Idle => {}
+            Incoming::Idle => {
+                if Instant::now() >= deadline {
+                    break;
+                }
+            }
             Incoming::Closed => return Ok(false),
         }
     }
