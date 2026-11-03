@@ -307,7 +307,7 @@ export class FilesPanel {
     this.menu = node('div', 'fm-menu');
     this.menu.setAttribute('role', 'menu');
     this.menu.hidden = true;
-    this.modal = node('div', 'fm-modal');
+    this.modal = node('div', 'fm-modal fm-modal-top');
     this.modal.hidden = true;
 
     root.append(bar, actions, body, this.progress, statusBar, this.picker);

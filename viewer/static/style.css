@@ -1512,6 +1512,10 @@ canvas:focus-visible {
   background: rgba(1, 4, 9, 0.6);
 }
 
+.fm-modal.fm-modal-top {
+  z-index: 60;
+}
+
 .fm-dialog {
   display: flex;
   flex-direction: column;
