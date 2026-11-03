@@ -187,24 +187,7 @@ impl InputSink for X11Input {
                 )?;
             }
             InputEvent::PointerRelative { dx, dy } => {
-                let pointer = self
-                    .connection
-                    .query_pointer(self.root)
-                    .map_err(request_error)?
-                    .reply()
-                    .map_err(request_error)?;
-                let (width, height) = self.view.unwrap_or((self.width, self.height));
-                let (left, top) = (i32::from(self.origin.0), i32::from(self.origin.1));
-                let x = (i32::from(pointer.root_x) + i32::from(dx))
-                    .clamp(left, left + i32::from(width) - 1);
-                let y = (i32::from(pointer.root_y) + i32::from(dy))
-                    .clamp(top, top + i32::from(height) - 1);
-                self.fake(
-                    MOTION_NOTIFY_EVENT,
-                    0,
-                    i16::try_from(x).unwrap_or(i16::MAX),
-                    i16::try_from(y).unwrap_or(i16::MAX),
-                )?;
+                self.fake(MOTION_NOTIFY_EVENT, 1, dx, dy)?;
             }
             InputEvent::Button { button, pressed } => {
                 let kind = if pressed {

@@ -65,27 +65,8 @@ impl WindowsInput {
     }
 
     fn move_relative(&mut self, dx: i16, dy: i16) -> Result<(), InputError> {
-        let (left, top, wide, high) = match self.area {
-            Some(area) => (
-                area.x,
-                area.y,
-                i32::from(area.width),
-                i32::from(area.height),
-            ),
-            None => {
-                let (wide, high) = self.enigo.main_display().map_err(request_error)?;
-                (0, 0, wide, high)
-            }
-        };
-        let (x, y) = winput::Mouse::position().map_err(request_error)?;
-        let next_x = (x + i32::from(dx)).clamp(left, left + wide - 1);
-        let next_y = (y + i32::from(dy)).clamp(top, top + high - 1);
-        let (step_x, step_y) = (next_x - x, next_y - y);
-        if step_x == 0 && step_y == 0 {
-            return Ok(());
-        }
         self.enigo
-            .move_mouse(step_x, step_y, Coordinate::Rel)
+            .move_mouse(i32::from(dx), i32::from(dy), Coordinate::Rel)
             .map_err(request_error)
     }
 

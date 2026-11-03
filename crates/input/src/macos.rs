@@ -114,12 +114,9 @@ impl MacInput {
     }
 
     fn move_relative(&mut self, dx: i16, dy: i16) -> Result<(), InputError> {
-        let bounds = self.current_display().bounds();
         self.position = CGPoint::new(
-            (self.position.x + f64::from(dx))
-                .clamp(bounds.origin.x, bounds.origin.x + bounds.size.width - 1.0),
-            (self.position.y + f64::from(dy))
-                .clamp(bounds.origin.y, bounds.origin.y + bounds.size.height - 1.0),
+            self.position.x + f64::from(dx),
+            self.position.y + f64::from(dy),
         );
         let (kind, button) = match self.held.last() {
             Some(Button::Left) => (CGEventType::LeftMouseDragged, CGMouseButton::Left),
