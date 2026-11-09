@@ -20,7 +20,7 @@ You leave the home computer on with the Wirehaus agent and connect from anywhere
 
 ## Install
 
-Create your access at [wirehaus.dev](https://wirehaus.dev) and click **Connect** in your dashboard: it gives you a command with a single-use code.
+Create your access at [wirehaus.dev](https://wirehaus.dev) and click **Connect** in your dashboard: it gives you a command with a single-use code. The registration service is free with the email of an accepted school and costs 12 € a year for everyone else (one-off payment in cryptocurrency, no automatic renewal); prices are in the [documentation](https://wirehaus.dev/docs/#pricing). The agent and the viewer are source-available and do not need the service to work.
 
 ```
 curl -fsSL https://wirehaus.dev/install.sh | sh -s -- XXXX-XXXX-XXXX-XXXX-XXXX

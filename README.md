@@ -20,7 +20,7 @@ Dejas el ordenador de casa encendido con el agente de Wirehaus y te conectas des
 
 ## Instalación
 
-Crea tu acceso en [wirehaus.dev](https://wirehaus.dev) y pulsa **Conectar** en tu panel: te da un comando con un código de un solo uso.
+Crea tu acceso en [wirehaus.dev](https://wirehaus.dev) y pulsa **Conectar** en tu panel: te da un comando con un código de un solo uso. El servicio de registro es gratis con el correo de un centro educativo admitido y cuesta 12 € al año para el resto (pago único en criptomonedas, sin renovación automática); los precios están en la [documentación](https://wirehaus.dev/docs/#precios). El agente y el visor son de código abierto y no necesitan el servicio para funcionar.
 
 ```
 curl -fsSL https://wirehaus.dev/install.sh | sh -s -- XXXX-XXXX-XXXX-XXXX-XXXX
