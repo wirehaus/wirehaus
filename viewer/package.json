@@ -12,7 +12,7 @@
     "build:origin": "node scripts/build-origin.mjs"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
   },
   "dependencies": {
