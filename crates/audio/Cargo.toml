@@ -11,7 +11,7 @@ homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
-opus-pure = "=0.2.2"
+opus-pure = "=0.2.3"
 thiserror.workspace = true
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
